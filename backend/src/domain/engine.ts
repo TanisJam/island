@@ -119,8 +119,12 @@ function gatherCandidates(s: GameState, index: CatalogIndex, scope: string[], t:
   const world = s.items.filter((i) => i.location.type === "world");
   if (scope.includes("adjacent_ground"))
     out.push(...world.filter((i) => i.location.type === "world" && chebyshev(s.player.position, { x: i.location.x, y: i.location.y }) <= 1));
-  if (scope.includes("surface"))
-    out.push(...world.filter((i) => i.location.type === "world" && chebyshev(t.pos, { x: i.location.x, y: i.location.y }) <= 1));
+  if (scope.includes("surface")) {
+    const surfaceId = t.kind === "world_object" ? t.obj.id : undefined;
+    const dims = surfaceId ? s.inventories[surfaceId] : undefined;
+    if (dims) out.push(...s.items.filter((i) => i.location.type === "surface" && i.location.surfaceId === surfaceId));
+    else out.push(...world.filter((i) => i.location.type === "world" && chebyshev(t.pos, { x: i.location.x, y: i.location.y }) <= 1));
+  }
   return out;
 }
 
