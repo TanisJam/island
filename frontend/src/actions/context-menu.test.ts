@@ -134,6 +134,23 @@ test("buildContextMenu: adjacent world_object gets catalog actions from computeA
   assert.equal(menu.sections[0]?.items[0]?.command?.type, "ExecuteAction");
 });
 
+test("buildContextMenu: adjacent tile with a loose item offers a 'Recoger' (TakeItem) entry", () => {
+  const s = makeSnapshot({
+    tiles: [makeTile(5, 5, "sand", true), makeTile(6, 5, "sand", true)],
+    items: [{ id: "it1", itemTypeId: "seed", location: { type: "world", zoneId: "z1", x: 6, y: 5 } } as ItemInstance],
+  });
+  const resolution = {
+    preview: { kind: "tile" as const, pos: { x: 6, y: 5 }, tags: ["ground"], terrain: "sand" as const },
+    wireRef: { kind: "tile" as const, x: 6, y: 5 },
+    self: false,
+  };
+  const menu = buildContextMenu(catalog, s, resolution, "visible");
+  const take = menu.sections[0]?.items.find((i) => i.id === "take:it1");
+  assert.ok(take, "adjacent loose item offers a Recoger entry so the menu is never empty");
+  assert.equal(take!.label, "Recoger");
+  assert.deepEqual(take!.command, { type: "TakeItem", target: { kind: "item", id: "it1" } });
+});
+
 test("buildContextMenu: far walkable tile gets a move item labeled 'Ir hasta ahí' (walk there)", () => {
   const s = makeSnapshot({ tiles: [makeTile(5, 5, "sand", true), makeTile(10, 5, "sand", true)] });
   const resolution = {

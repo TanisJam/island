@@ -127,6 +127,26 @@ function targetName(catalog: Catalog, target: ActionTarget): string {
 }
 
 /**
+ * Client-synthesized "Recoger" (→ `TakeItem`) entries for the loose world
+ * items lying on `pos`. The catalog has no `appliesTo.kind === "item"`
+ * actions, so pickup is a UI-level affordance mapped to the existing
+ * `TakeItem` command (same pattern as the move/ui items). Valid from the
+ * player's own tile AND from an adjacent tile — the backend revalidates the
+ * distance, so a best-effort miss just surfaces as a normal rejection thought.
+ */
+function floorPickupItems(catalog: Catalog, snapshot: ClientSnapshot, pos: Position): ContextMenuItem[] {
+  return snapshot.items
+    .filter((it) => it.location.type === "world" && it.location.x === pos.x && it.location.y === pos.y)
+    .map((it) => ({
+      id: `take:${it.id}`,
+      label: "Recoger",
+      hint: catalog.items.find((d) => d.id === it.itemTypeId)?.name,
+      kind: "action" as const,
+      command: { type: "TakeItem", target: { kind: "item", id: it.id } },
+    }));
+}
+
+/**
  * "Yo" menu: UI-only entries (view inventory / view thoughts — always
  * present, they don't depend on the catalog) plus whatever
  * `computeAvailableActions` offers for a synthesized `self` target (none in
@@ -165,18 +185,9 @@ function buildSelfMenu(catalog: Catalog, snapshot: ClientSnapshot): ContextMenu 
     }
   }
 
-  const floorItems = snapshot.items.filter((it) => it.location.type === "world" && it.location.x === pos.x && it.location.y === pos.y);
-  if (floorItems.length > 0) {
-    sections.push({
-      title: "En el suelo",
-      items: floorItems.map((it) => ({
-        id: `take:${it.id}`,
-        label: "Recoger",
-        hint: catalog.items.find((d) => d.id === it.itemTypeId)?.name,
-        kind: "action" as const,
-        command: { type: "TakeItem", target: { kind: "item", id: it.id } },
-      })),
-    });
+  const floor = floorPickupItems(catalog, snapshot, pos);
+  if (floor.length > 0) {
+    sections.push({ title: "En el suelo", items: floor });
   }
 
   return { title: "YO", sections };
@@ -197,6 +208,13 @@ function buildReachableMenu(
   const pos = preview.pos;
   const actions = computeAvailableActions(catalog, preview, snapshot);
   const items: ContextMenuItem[] = actions.map((a) => actionToItem(a, wireRef));
+
+  // Adjacent loose items are pickable: the catalog has no item-kind actions, so
+  // synthesize "Recoger" here too (mirrors the self-tile "En el suelo" section).
+  // Without this, clicking an adjacent item opens an empty menu.
+  if (proximity === "adjacent") {
+    items.push(...floorPickupItems(catalog, snapshot, pos));
+  }
 
   if (preview.kind === "tile" && tileWalkableAt(snapshot, pos)) {
     items.push(
