@@ -1,0 +1,56 @@
+[
+  {
+    "id": "tree",
+    "name": "Árbol bajo",
+    "description": "Un árbol bajo del que se pueden arrancar ramas o, con filo, sacar madera.",
+    "tags": ["tree", "wood_source", "plant", "stick"],
+    "blocksMovement": true,
+    "observation": "Veo ramas secas. Podría arrancar algunas con las manos."
+  },
+  {
+    "id": "tall_grass",
+    "name": "Pasto alto",
+    "description": "Matas altas de pasto que esconden fibra y semillas.",
+    "tags": ["grass", "fiber_source", "seed_source", "plant"],
+    "blocksMovement": false,
+    "observation": "Veo fibras y semillas entre el pasto."
+  },
+  {
+    "id": "small_rock",
+    "name": "Roca pequeña",
+    "description": "Una roca quebradiza de la que se pueden sacar fragmentos.",
+    "tags": ["rock", "stone_source", "hard"],
+    "blocksMovement": true,
+    "observation": "Es una roca quebradiza. Quizás pueda sacar fragmentos."
+  },
+  {
+    "id": "wreckage",
+    "name": "Restos de naufragio",
+    "description": "Restos húmedos del barco. Hay tela y madera para rescatar.",
+    "tags": ["wreckage", "starter_resource", "cloth_source", "wood_source"],
+    "blocksMovement": false,
+    "observation": "Restos húmedos del naufragio. Tal vez pueda rescatar algo."
+  },
+  {
+    "id": "campfire",
+    "name": "Fogata",
+    "description": "Un lugar para mantener fuego. El primer centro del campamento.",
+    "tags": ["station", "fire", "heat_source"],
+    "blocksMovement": false,
+    "states": ["unlit", "lit"],
+    "defaultState": { "lit": false, "fuel": 0 },
+    "observation": "Una fogata improvisada. Todavía no arde.",
+    "observationByState": {
+      "unlit": "Una fogata improvisada. Todavía no arde.",
+      "lit": "El fuego me hace sentir menos perdido."
+    }
+  },
+  {
+    "id": "rustic_table",
+    "name": "Mesa rústica",
+    "description": "Una superficie estable para combinar y ensamblar piezas.",
+    "tags": ["station", "surface", "work_surface"],
+    "blocksMovement": true,
+    "observation": "Con una superficie estable puedo probar mejor las piezas."
+  }
+]

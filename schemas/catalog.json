@@ -1,0 +1,219 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Isla Misteriosa — esquema del catálogo (GET /catalog)",
+  "definitions": {
+    "PropertyBag": {
+      "type": "object",
+      "additionalProperties": { "type": "number" }
+    },
+    "Shape": {
+      "type": "object",
+      "required": ["w", "h"],
+      "additionalProperties": false,
+      "properties": {
+        "w": { "type": "integer", "minimum": 1 },
+        "h": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "TerrainTypeDef": {
+      "type": "object",
+      "required": ["id", "name", "walkable", "tags"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "common.json#/definitions/TerrainType" },
+        "name": { "type": "string" },
+        "walkable": { "type": "boolean" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "observation": { "type": "string" }
+      }
+    },
+    "ItemTypeDef": {
+      "type": "object",
+      "required": ["id", "name", "description", "shape", "rotatable", "properties", "tags"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "shape": { "$ref": "#/definitions/Shape" },
+        "rotatable": { "type": "boolean" },
+        "properties": { "$ref": "#/definitions/PropertyBag" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "durability": { "type": "number" },
+        "observation": { "type": "string" }
+      }
+    },
+    "WorldObjectTypeDef": {
+      "type": "object",
+      "required": ["id", "name", "description", "tags", "blocksMovement"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "blocksMovement": { "type": "boolean" },
+        "states": { "type": "array", "items": { "type": "string" } },
+        "defaultState": { "type": "object" },
+        "observation": { "type": "string" },
+        "observationByState": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "KnowledgeDef": {
+      "type": "object",
+      "required": ["id", "name", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "kind": { "enum": ["idea", "technique", "discovery"] },
+        "unlockOnObserveTags": { "type": "array", "items": { "type": "string" } },
+        "unlockThought": { "type": "string" }
+      }
+    },
+    "ResearchDef": {
+      "type": "object",
+      "required": ["id", "name", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "status": { "enum": ["hidden", "idea", "active", "completed"] },
+        "revealedBy": { "type": "array", "items": { "type": "string" } },
+        "teaserThought": { "type": "string" }
+      }
+    },
+    "TargetSelector": {
+      "oneOf": [
+        { "type": "object", "required": ["kind", "anyTags"], "additionalProperties": false,
+          "properties": { "kind": { "const": "world_object" }, "anyTags": { "type": "array", "items": { "type": "string" } } } },
+        { "type": "object", "required": ["kind"], "additionalProperties": false,
+          "properties": { "kind": { "const": "tile" },
+            "anyTerrain": { "type": "array", "items": { "$ref": "common.json#/definitions/TerrainType" } },
+            "anyTags": { "type": "array", "items": { "type": "string" } } } },
+        { "type": "object", "required": ["kind", "anyTags"], "additionalProperties": false,
+          "properties": { "kind": { "const": "item" }, "anyTags": { "type": "array", "items": { "type": "string" } } } },
+        { "type": "object", "required": ["kind"], "additionalProperties": false,
+          "properties": { "kind": { "const": "self" } } }
+      ]
+    },
+    "Requirement": {
+      "oneOf": [
+        { "type": "object", "required": ["type", "max"], "additionalProperties": false,
+          "properties": { "type": { "const": "distance" }, "max": { "type": "integer", "minimum": 0 } } },
+        { "type": "object", "required": ["type"], "additionalProperties": false,
+          "properties": { "type": { "const": "hand" },
+            "slot": { "enum": ["left", "right", "any"] },
+            "anyTags": { "type": "array", "items": { "type": "string" } },
+            "minProps": { "$ref": "#/definitions/PropertyBag" } } },
+        { "type": "object", "required": ["type", "slot"], "additionalProperties": false,
+          "properties": { "type": { "const": "hand_empty" }, "slot": { "enum": ["left", "right", "any"] } } },
+        { "type": "object", "required": ["type", "knowledgeId"], "additionalProperties": false,
+          "properties": { "type": { "const": "knowledge" }, "knowledgeId": { "type": "string" } } },
+        { "type": "object", "required": ["type", "min"], "additionalProperties": false,
+          "properties": { "type": { "const": "energy" }, "min": { "type": "number" } } },
+        { "type": "object", "required": ["type", "key", "value"], "additionalProperties": false,
+          "properties": { "type": { "const": "target_state" }, "key": { "type": "string" }, "value": {} } },
+        { "type": "object", "required": ["type", "tag"], "additionalProperties": false,
+          "properties": { "type": { "const": "target_tag" }, "tag": { "type": "string" } } }
+      ]
+    },
+    "InputSpec": {
+      "type": "object",
+      "required": ["name", "scope", "match", "count", "consume"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "scope": {
+          "type": "array",
+          "items": { "enum": ["hands", "adjacent_ground", "surface"] },
+          "minItems": 1
+        },
+        "match": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "anyTags": { "type": "array", "items": { "type": "string" } },
+            "minProps": { "$ref": "#/definitions/PropertyBag" }
+          }
+        },
+        "count": { "type": "integer", "minimum": 1 },
+        "consume": { "type": "boolean" }
+      }
+    },
+    "Effect": {
+      "oneOf": [
+        { "type": "object", "required": ["type", "itemTypeId", "to"], "additionalProperties": false,
+          "properties": { "type": { "const": "add_item" }, "itemTypeId": { "type": "string" },
+            "to": { "enum": ["inventory", "ground"] },
+            "amount": { "type": "integer", "minimum": 1 },
+            "chance": { "type": "number", "minimum": 0, "maximum": 1 } } },
+        { "type": "object", "required": ["type", "input"], "additionalProperties": false,
+          "properties": { "type": { "const": "consume_input" }, "input": { "type": "string" } } },
+        { "type": "object", "required": ["type"], "additionalProperties": false,
+          "properties": { "type": { "const": "remove_target" } } },
+        { "type": "object", "required": ["type", "amount"], "additionalProperties": false,
+          "properties": { "type": { "const": "consume_energy" }, "amount": { "type": "number" } } },
+        { "type": "object", "required": ["type", "amount"], "additionalProperties": false,
+          "properties": { "type": { "const": "damage_active_tool" }, "amount": { "type": "number" } } },
+        { "type": "object", "required": ["type", "terrain"], "additionalProperties": false,
+          "properties": { "type": { "const": "change_tile" }, "terrain": { "$ref": "common.json#/definitions/TerrainType" } } },
+        { "type": "object", "required": ["type", "radius"], "additionalProperties": false,
+          "properties": { "type": { "const": "reveal_around_target" }, "radius": { "type": "integer", "minimum": 1 } } },
+        { "type": "object", "required": ["type", "key", "value"], "additionalProperties": false,
+          "properties": { "type": { "const": "set_target_state" }, "key": { "type": "string" }, "value": {} } },
+        { "type": "object", "required": ["type", "objectTypeId", "at"], "additionalProperties": false,
+          "properties": { "type": { "const": "create_world_object" }, "objectTypeId": { "type": "string" },
+            "at": { "enum": ["target_tile", "player_tile"] } } },
+        { "type": "object", "required": ["type", "knowledgeId"], "additionalProperties": false,
+          "properties": { "type": { "const": "unlock_knowledge" }, "knowledgeId": { "type": "string" } } },
+        { "type": "object", "required": ["type", "text", "kind"], "additionalProperties": false,
+          "properties": { "type": { "const": "add_thought" }, "text": { "type": "string" },
+            "kind": { "$ref": "common.json#/definitions/ThoughtKind" } } }
+      ]
+    },
+    "ContextActionDef": {
+      "type": "object",
+      "required": ["id", "label", "priority", "appliesTo", "requirements", "effects"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "priority": { "type": "number" },
+        "appliesTo": { "$ref": "#/definitions/TargetSelector" },
+        "requirements": { "type": "array", "items": { "$ref": "#/definitions/Requirement" } },
+        "inputs": { "type": "array", "items": { "$ref": "#/definitions/InputSpec" } },
+        "effects": { "type": "array", "items": { "$ref": "#/definitions/Effect" }, "minItems": 1 },
+        "successChance": { "type": "number", "minimum": 0, "maximum": 1 },
+        "thoughts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "preview": { "type": "string" },
+            "success": { "type": "string" },
+            "fail": { "type": "string" }
+          }
+        }
+      }
+    },
+    "Catalog": {
+      "type": "object",
+      "required": ["catalogVersion", "terrains", "items", "worldObjects", "knowledge", "actions", "research"],
+      "additionalProperties": false,
+      "properties": {
+        "catalogVersion": { "type": "string" },
+        "terrains": { "type": "array", "items": { "$ref": "#/definitions/TerrainTypeDef" } },
+        "items": { "type": "array", "items": { "$ref": "#/definitions/ItemTypeDef" } },
+        "worldObjects": { "type": "array", "items": { "$ref": "#/definitions/WorldObjectTypeDef" } },
+        "knowledge": { "type": "array", "items": { "$ref": "#/definitions/KnowledgeDef" } },
+        "actions": { "type": "array", "items": { "$ref": "#/definitions/ContextActionDef" } },
+        "research": { "type": "array", "items": { "$ref": "#/definitions/ResearchDef" } }
+      }
+    }
+  },
+  "$ref": "#/definitions/Catalog"
+}

@@ -1,0 +1,18 @@
+{
+  "name": "isla-misteriosa-contract",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.7.0",
+  "description": "JSON Schema del contrato de Isla Misteriosa: catálogo, comandos y eventos.",
+  "type": "commonjs",
+  "scripts": {
+    "validate": "node validate.cjs",
+    "gen": "node codegen.cjs",
+    "gen:ts": "node codegen.cjs"
+  },
+  "devDependencies": {
+    "@apidevtools/json-schema-ref-parser": "^11.9.3",
+    "ajv": "^8.20.0",
+    "json-schema-to-typescript": "^15.0.4"
+  }
+}

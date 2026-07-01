@@ -1,0 +1,430 @@
+[
+  {
+    "id": "pull_branches",
+    "label": "Arrancar ramas",
+    "priority": 20,
+    "appliesTo": { "kind": "world_object", "anyTags": ["tree"] },
+    "requirements": [
+      { "type": "distance", "max": 1 },
+      { "type": "hand_empty", "slot": "any" },
+      { "type": "energy", "min": 1 }
+    ],
+    "effects": [
+      { "type": "consume_energy", "amount": 1 },
+      { "type": "add_item", "itemTypeId": "dry_branch", "to": "inventory" }
+    ],
+    "thoughts": { "preview": "Veo ramas secas. Podría arrancar algunas con las manos." }
+  },
+  {
+    "id": "strike_tree_stone",
+    "label": "Golpear con piedra",
+    "priority": 30,
+    "appliesTo": { "kind": "world_object", "anyTags": ["tree"] },
+    "requirements": [
+      { "type": "distance", "max": 1 },
+      { "type": "hand", "slot": "any", "anyTags": ["stone"] },
+      { "type": "energy", "min": 1 }
+    ],
+    "effects": [
+      { "type": "consume_energy", "amount": 1 },
+      { "type": "add_item", "itemTypeId": "bark", "to": "inventory", "chance": 0.6 },
+      { "type": "add_item", "itemTypeId": "dry_branch", "to": "inventory", "chance": 0.3 }
+    ],
+    "thoughts": { "preview": "Con una piedra podría sacar algo de corteza." }
+  },
+  {
+    "id": "discover_binding",
+    "label": "Probar a atar",
+    "priority": 40,
+    "appliesTo": { "kind": "world_object", "anyTags": ["tree", "stick", "wreckage"] },
+    "requirements": [
+      { "type": "distance", "max": 1 },
+      { "type": "hand", "slot": "any", "minProps": { "binding": 1 } }
+    ],
+    "effects": [
+      { "type": "unlock_knowledge", "knowledgeId": "idea_binding" },
+      { "type": "add_thought", "text": "Puedo unir piezas si las ato bien.", "kind": "idea" }
+    ]
+  },
+  {
+    "id": "cut_tree_crude",
+    "label": "Cortar madera pobre",
+    "priority": 50,
+    "appliesTo": { "kind": "world_object", "anyTags": ["tree"] },
+    "requirements": [
+      { "type": "distance", "max": 1 },
+      { "type": "hand", "slot": "any", "minProps": { "cutting": 1 } },
+      { "type": "energy", "min": 3 }
+    ],
+    "effects": [
+      { "type": "consume_energy", "amount": 3 },
+      { "type": "damage_active_tool", "amount": 2 },
+      { "type": "add_item", "itemTypeId": "poor_wood", "to": "inventory" },
+      { "type": "add_item", "itemTypeId": "bark", "to": "inventory", "chance": 0.5 }
+    ],
+    "thoughts": {
+      "preview": "Con algo con filo podría sacar madera de verdad.",
+      "success": "Saqué algo de madera. No es la mejor, pero sirve."
+    }
+  },
+  {
+    "id": "cut_tree_axe",
+    "label": "Cortar madera",
+    "priority": 60,
+    "appliesTo": { "kind": "world_object", "anyTags": ["tree"] },
+    "requirements": [
+      { "type": "distance", "max": 1 },
+      { "type": "hand", "slot": "any", "minProps": { "chopping": 1 } },
+      { "type": "energy", "min": 3 }
+    ],
+    "effects": [
+      { "type": "consume_energy", "amount": 3 },
+      { "type": "damage_active_tool", "amount": 2 },
+      { "type": "add_item", "itemTypeId": "poor_wood", "to": "inventory", "amount": 2 }
+    ],
+    "thoughts": {
+      "preview": "Ahora puedo cortar algo más que ramas.",
+      "success": "El hacha entra mucho mejor en la madera."
+    }
+  },
+  {
+    "id": "search_grass",
+    "label": "Rebuscar",
+    "priority": 20,
+    "appliesTo": { "kind": "world_object", "anyTags": ["grass"] },
+    "requirements": [
+      { "type": "distance", "max": 1 },
+      { "type": "hand_empty", "slot": "any" },
+      { "type": "energy", "min": 1 }
+    ],
+    "effects": [
+      { "type": "consume_energy", "amount": 1 },
+      { "type": "add_item", "itemTypeId": "plant_fiber", "to": "inventory", "chance": 0.7 },
+      { "type": "add_item", "itemTypeId": "wild_seed", "to": "inventory", "chance": 0.4 }
+    ],
+    "thoughts": { "preview": "Veo fibras y semillas entre el pasto." }
+  },
+  {
+    "id": "pull_fiber",
+    "label": "Arrancar fibra",
+    "priority": 25,
+    "appliesTo": { "kind": "world_object", "anyTags": ["grass"] },
+    "requirements": [
+      { "type": "distance", "max": 1 },
+      { "type": "hand_empty", "slot": "any" },
+      { "type": "energy", "min": 1 }
+    ],
+    "effects": [
+      { "type": "consume_energy", "amount": 1 },
+      { "type": "add_item", "itemTypeId": "plant_fiber", "to": "inventory" }
+    ],
+    "thoughts": { "preview": "Estas fibras parecen resistentes." }
+  },
+  {
+    "id": "cut_grass_crude",
+    "label": "Cortar pasto",
+    "priority": 40,
+    "appliesTo": { "kind": "world_object", "anyTags": ["grass"] },
+    "requirements": [
+      { "type": "distance", "max": 1 },
+      { "type": "hand", "slot": "any", "minProps": { "cutting": 1 } },
+      { "type": "energy", "min": 1 }
+    ],
+    "effects": [
+      { "type": "consume_energy", "amount": 1 },
+      { "type": "damage_active_tool", "amount": 1 },
+      { "type": "add_item", "itemTypeId": "plant_fiber", "to": "inventory", "amount": 2 },
+      { "type": "add_item", "itemTypeId": "wild_seed", "to": "inventory", "chance": 0.5 }
+    ],
+    "thoughts": { "preview": "Con algo con filo saco más fibra de una." }
+  },
+  {
+    "id": "strike_rock_stone",
+    "label": "Golpear con piedra",
+    "priority": 30,
+    "appliesTo": { "kind": "world_object", "anyTags": ["rock"] },
+    "requirements": [
+      { "type": "distance", "max": 1 },
+      { "type": "hand", "slot": "any", "anyTags": ["stone"] },
+      { "type": "energy", "min": 2 }
+    ],
+    "effects": [
+      { "type": "consume_energy", "amount": 2 },
+      { "type": "add_item", "itemTypeId": "small_stone", "to": "inventory", "chance": 0.6 }
+    ],
+    "thoughts": { "preview": "Es una roca quebradiza. Quizás pueda sacar fragmentos." }
+  },
+  {
+    "id": "break_rock_crude",
+    "label": "Romper fragmentos",
+    "priority": 45,
+    "appliesTo": { "kind": "world_object", "anyTags": ["rock"] },
+    "requirements": [
+      { "type": "distance", "max": 1 },
+      { "type": "hand", "slot": "any", "minProps": { "leverage": 1 } },
+      { "type": "energy", "min": 2 }
+    ],
+    "effects": [
+      { "type": "consume_energy", "amount": 2 },
+      { "type": "damage_active_tool", "amount": 2 },
+      { "type": "add_item", "itemTypeId": "small_stone", "to": "inventory" }
+    ],
+    "thoughts": { "preview": "Con la herramienta puedo partir la roca más fácil." }
+  },
+  {
+    "id": "search_wreckage",
+    "label": "Rebuscar",
+    "priority": 20,
+    "appliesTo": { "kind": "world_object", "anyTags": ["wreckage"] },
+    "requirements": [
+      { "type": "distance", "max": 1 },
+      { "type": "hand_empty", "slot": "any" },
+      { "type": "energy", "min": 1 }
+    ],
+    "effects": [
+      { "type": "consume_energy", "amount": 1 },
+      { "type": "add_item", "itemTypeId": "cloth_scrap", "to": "inventory", "chance": 0.6 },
+      { "type": "add_item", "itemTypeId": "dry_branch", "to": "inventory", "chance": 0.4 }
+    ],
+    "thoughts": { "preview": "Restos húmedos del naufragio. Tal vez pueda rescatar algo." }
+  },
+  {
+    "id": "separate_wreckage_crude",
+    "label": "Separar piezas",
+    "priority": 40,
+    "appliesTo": { "kind": "world_object", "anyTags": ["wreckage"] },
+    "requirements": [
+      { "type": "distance", "max": 1 },
+      { "type": "hand", "slot": "any", "minProps": { "cutting": 1 } },
+      { "type": "energy", "min": 2 }
+    ],
+    "effects": [
+      { "type": "consume_energy", "amount": 2 },
+      { "type": "damage_active_tool", "amount": 1 },
+      { "type": "add_item", "itemTypeId": "poor_wood", "to": "inventory" },
+      { "type": "add_item", "itemTypeId": "cloth_scrap", "to": "inventory", "chance": 0.5 }
+    ],
+    "thoughts": { "preview": "Puedo separar las piezas con la herramienta." }
+  },
+  {
+    "id": "cut_jungle_surface_crude",
+    "label": "Cortar ramas superficiales",
+    "priority": 30,
+    "appliesTo": { "kind": "tile", "anyTerrain": ["dense_jungle"] },
+    "requirements": [
+      { "type": "distance", "max": 1 },
+      { "type": "hand", "slot": "any", "minProps": { "cutting": 1 } },
+      { "type": "energy", "min": 3 }
+    ],
+    "effects": [
+      { "type": "consume_energy", "amount": 3 },
+      { "type": "damage_active_tool", "amount": 1 },
+      { "type": "add_item", "itemTypeId": "plant_fiber", "to": "inventory", "chance": 0.5 },
+      { "type": "add_thought", "text": "Puedo cortar algunas ramas, pero esto me llevaría demasiado.", "kind": "warning" }
+    ],
+    "thoughts": { "preview": "Con esto no alcanza para abrir un paso de verdad." }
+  },
+  {
+    "id": "clear_jungle",
+    "label": "Despejar camino",
+    "priority": 70,
+    "appliesTo": { "kind": "tile", "anyTerrain": ["dense_jungle"] },
+    "requirements": [
+      { "type": "distance", "max": 1 },
+      { "type": "hand", "slot": "any", "anyTags": ["jungle_clear"] },
+      { "type": "energy", "min": 10 }
+    ],
+    "effects": [
+      { "type": "consume_energy", "amount": 10 },
+      { "type": "damage_active_tool", "amount": 8 },
+      { "type": "change_tile", "terrain": "dirt" },
+      { "type": "reveal_around_target", "radius": 3 }
+    ],
+    "thoughts": {
+      "preview": "La vegetación es demasiado cerrada. No voy a poder pasar empujando.",
+      "success": "Abrí un pequeño paso. La isla no termina acá."
+    }
+  },
+  {
+    "id": "wet_hands",
+    "label": "Mojar manos",
+    "priority": 15,
+    "appliesTo": { "kind": "tile", "anyTerrain": ["shallow_water"] },
+    "requirements": [
+      { "type": "distance", "max": 1 },
+      { "type": "hand_empty", "slot": "any" }
+    ],
+    "effects": [
+      { "type": "add_thought", "text": "Agua fresca. Me despeja un poco la cabeza.", "kind": "observation" }
+    ],
+    "thoughts": { "preview": "Agua salobre y poco profunda." }
+  },
+  {
+    "id": "search_sand",
+    "label": "Rebuscar",
+    "priority": 15,
+    "appliesTo": { "kind": "tile", "anyTerrain": ["sand"] },
+    "requirements": [
+      { "type": "distance", "max": 0 },
+      { "type": "hand_empty", "slot": "any" },
+      { "type": "energy", "min": 1 }
+    ],
+    "effects": [
+      { "type": "consume_energy", "amount": 1 },
+      { "type": "add_item", "itemTypeId": "small_stone", "to": "inventory", "chance": 0.5 },
+      { "type": "add_item", "itemTypeId": "wild_seed", "to": "inventory", "chance": 0.3 }
+    ],
+    "thoughts": { "preview": "Suelo arenoso. Podría rebuscar algo." }
+  },
+  {
+    "id": "improvise_crude_tool",
+    "label": "Improvisar herramienta",
+    "priority": 55,
+    "appliesTo": { "kind": "tile", "anyTags": ["ground"] },
+    "requirements": [{ "type": "distance", "max": 0 }],
+    "inputs": [
+      { "name": "head",   "scope": ["hands", "adjacent_ground", "surface"], "match": { "anyTags": ["tool_head_candidate"] }, "count": 1, "consume": true },
+      { "name": "handle", "scope": ["hands", "adjacent_ground", "surface"], "match": { "anyTags": ["handle_candidate"] },    "count": 1, "consume": true },
+      { "name": "binder", "scope": ["hands", "adjacent_ground", "surface"], "match": { "minProps": { "binding": 1 } },        "count": 1, "consume": true }
+    ],
+    "effects": [
+      { "type": "consume_input", "input": "head" },
+      { "type": "consume_input", "input": "handle" },
+      { "type": "consume_input", "input": "binder" },
+      { "type": "unlock_knowledge", "knowledgeId": "idea_binding" },
+      { "type": "unlock_knowledge", "knowledgeId": "tech_basic_binding" },
+      { "type": "unlock_knowledge", "knowledgeId": "tech_crude_toolmaking" },
+      { "type": "add_item", "itemTypeId": "crude_tool", "to": "inventory" }
+    ],
+    "thoughts": {
+      "preview": "Creo que podría improvisar una herramienta.",
+      "success": "No es una gran herramienta, pero es mejor que mis manos."
+    }
+  },
+  {
+    "id": "build_campfire",
+    "label": "Armar fogata",
+    "priority": 55,
+    "appliesTo": { "kind": "tile", "anyTags": ["ground"] },
+    "requirements": [
+      { "type": "distance", "max": 0 },
+      { "type": "energy", "min": 5 }
+    ],
+    "inputs": [
+      { "name": "fuel",   "scope": ["hands", "adjacent_ground"], "match": { "minProps": { "fuel_value": 1 } }, "count": 2, "consume": true },
+      { "name": "stones", "scope": ["hands", "adjacent_ground"], "match": { "anyTags": ["stone"] },            "count": 2, "consume": true }
+    ],
+    "effects": [
+      { "type": "consume_energy", "amount": 5 },
+      { "type": "consume_input", "input": "fuel" },
+      { "type": "consume_input", "input": "stones" },
+      { "type": "create_world_object", "objectTypeId": "campfire", "at": "target_tile" },
+      { "type": "unlock_knowledge", "knowledgeId": "idea_fire" }
+    ],
+    "thoughts": {
+      "preview": "Acá podría armar una fogata si junto leña y unas piedras.",
+      "success": "Si logro encenderla, este lugar puede empezar a ser un campamento."
+    }
+  },
+  {
+    "id": "build_table",
+    "label": "Armar mesa rústica",
+    "priority": 50,
+    "appliesTo": { "kind": "tile", "anyTags": ["ground"] },
+    "requirements": [
+      { "type": "distance", "max": 0 },
+      { "type": "energy", "min": 5 }
+    ],
+    "inputs": [
+      { "name": "structure", "scope": ["hands", "adjacent_ground"], "match": { "anyTags": ["structure", "wood"] }, "count": 2, "consume": true },
+      { "name": "binder",    "scope": ["hands", "adjacent_ground"], "match": { "minProps": { "binding": 1 } },     "count": 1, "consume": true }
+    ],
+    "effects": [
+      { "type": "consume_energy", "amount": 5 },
+      { "type": "consume_input", "input": "structure" },
+      { "type": "consume_input", "input": "binder" },
+      { "type": "create_world_object", "objectTypeId": "rustic_table", "at": "target_tile" }
+    ],
+    "thoughts": {
+      "preview": "Necesito una superficie estable para trabajar mejor.",
+      "success": "Con una superficie estable puedo probar mejor las piezas."
+    }
+  },
+  {
+    "id": "craft_simple_axe",
+    "label": "Fabricar hacha simple",
+    "priority": 60,
+    "appliesTo": { "kind": "world_object", "anyTags": ["surface"] },
+    "requirements": [{ "type": "distance", "max": 1 }],
+    "inputs": [
+      { "name": "head",   "scope": ["hands", "surface", "adjacent_ground"], "match": { "anyTags": ["tool_head_candidate", "crude"] }, "count": 1, "consume": true },
+      { "name": "handle", "scope": ["hands", "surface", "adjacent_ground"], "match": { "anyTags": ["structure", "wood"] },                       "count": 1, "consume": true },
+      { "name": "binder", "scope": ["hands", "surface", "adjacent_ground"], "match": { "minProps": { "binding": 1 } },                           "count": 1, "consume": true }
+    ],
+    "effects": [
+      { "type": "consume_input", "input": "head" },
+      { "type": "consume_input", "input": "handle" },
+      { "type": "consume_input", "input": "binder" },
+      { "type": "add_item", "itemTypeId": "simple_axe", "to": "inventory" }
+    ],
+    "thoughts": {
+      "preview": "Con una buena superficie podría armar algo con filo de verdad.",
+      "success": "Esta sí podría abrirme paso entre la vegetación."
+    }
+  },
+  {
+    "id": "add_fuel_campfire",
+    "label": "Añadir combustible",
+    "priority": 40,
+    "appliesTo": { "kind": "world_object", "anyTags": ["fire"] },
+    "requirements": [{ "type": "distance", "max": 1 }],
+    "inputs": [
+      { "name": "fuel", "scope": ["hands", "adjacent_ground"], "match": { "minProps": { "fuel_value": 1 } }, "count": 1, "consume": true }
+    ],
+    "effects": [
+      { "type": "consume_input", "input": "fuel" },
+      { "type": "set_target_state", "key": "fuel", "value": true },
+      { "type": "add_thought", "text": "Esto debería mantener el fuego un rato más.", "kind": "observation" }
+    ]
+  },
+  {
+    "id": "light_campfire",
+    "label": "Intentar encender",
+    "priority": 60,
+    "appliesTo": { "kind": "world_object", "anyTags": ["fire"] },
+    "requirements": [
+      { "type": "distance", "max": 1 },
+      { "type": "target_state", "key": "lit", "value": false },
+      { "type": "hand", "slot": "any", "anyTags": ["tool", "stone"] },
+      { "type": "energy", "min": 2 }
+    ],
+    "inputs": [
+      { "name": "fuel", "scope": ["surface", "adjacent_ground", "hands"], "match": { "minProps": { "fuel_value": 1 } }, "count": 1, "consume": true }
+    ],
+    "successChance": 0.6,
+    "effects": [
+      { "type": "consume_energy", "amount": 2 },
+      { "type": "consume_input", "input": "fuel" },
+      { "type": "set_target_state", "key": "lit", "value": true },
+      { "type": "unlock_knowledge", "knowledgeId": "discovery_fire_lit" }
+    ],
+    "thoughts": {
+      "success": "El fuego prendió. Por primera vez desde que desperté, tengo un punto al que volver.",
+      "fail": "Casi prende, pero todavía no entiendo bien cómo mantenerlo."
+    }
+  },
+  {
+    "id": "test_material_heat",
+    "label": "Probar material con calor",
+    "priority": 35,
+    "appliesTo": { "kind": "world_object", "anyTags": ["fire"] },
+    "requirements": [
+      { "type": "distance", "max": 1 },
+      { "type": "target_state", "key": "lit", "value": true }
+    ],
+    "effects": [
+      { "type": "add_thought", "text": "El fuego se escapa rápido. Quizás pueda contener mejor el calor.", "kind": "idea" }
+    ],
+    "thoughts": { "preview": "Podría acercar algún material al fuego y ver qué pasa." }
+  }
+]

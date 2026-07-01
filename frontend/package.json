@@ -1,0 +1,22 @@
+{
+  "name": "isla-misteriosa-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.7.0",
+  "description": "Cliente web mínimo de referencia de Isla Misteriosa (MVP). Vite vanilla-ts + Canvas 2D.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test src/**/*.test.ts",
+    "sync:contract": "cp ../schemas/generated/*.ts src/contract/"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2",
+    "vite": "^5.4.10"
+  }
+}

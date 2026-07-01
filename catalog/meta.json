@@ -1,0 +1,13 @@
+{
+  "catalogVersion": "0.1.0",
+  "game": "Isla Misteriosa",
+  "slice": "MVP 0.1 — Vertical Slice jugable",
+  "collections": [
+    "terrains",
+    "items",
+    "world-objects",
+    "knowledge",
+    "actions",
+    "research"
+  ]
+}

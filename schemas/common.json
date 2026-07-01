@@ -1,0 +1,190 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Isla Misteriosa — tipos compartidos",
+  "definitions": {
+    "Position": {
+      "type": "object",
+      "required": ["x", "y"],
+      "additionalProperties": false,
+      "properties": { "x": { "type": "integer" }, "y": { "type": "integer" } }
+    },
+    "TerrainType": {
+      "enum": ["sand", "grass", "shallow_water", "dense_jungle", "dirt", "rocky_ground"]
+    },
+    "VisibilityState": { "enum": ["unseen", "explored", "visible"] },
+    "ThoughtKind": {
+      "enum": ["observation", "idea", "discovery", "warning", "failure", "memory", "system"]
+    },
+    "Thought": {
+      "type": "object",
+      "required": ["id", "text", "kind", "timestamp"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "kind": { "$ref": "#/definitions/ThoughtKind" },
+        "timestamp": { "type": "number" },
+        "relatedEntityId": { "type": "string" },
+        "relatedSystem": { "type": "string" }
+      }
+    },
+    "TargetRef": {
+      "oneOf": [
+        { "type": "object", "required": ["kind", "id"], "additionalProperties": false,
+          "properties": { "kind": { "const": "world_object" }, "id": { "type": "string" } } },
+        { "type": "object", "required": ["kind", "x", "y"], "additionalProperties": false,
+          "properties": { "kind": { "const": "tile" }, "x": { "type": "integer" }, "y": { "type": "integer" } } },
+        { "type": "object", "required": ["kind", "id"], "additionalProperties": false,
+          "properties": { "kind": { "const": "item" }, "id": { "type": "string" } } },
+        { "type": "object", "required": ["kind", "id"], "additionalProperties": false,
+          "properties": { "kind": { "const": "pile" }, "id": { "type": "string" } } },
+        { "type": "object", "required": ["kind"], "additionalProperties": false,
+          "properties": { "kind": { "const": "self" } } }
+      ]
+    },
+    "Location": {
+      "oneOf": [
+        { "type": "object", "required": ["type", "ownerId", "x", "y"], "additionalProperties": false,
+          "properties": { "type": { "const": "inventory" }, "ownerId": { "type": "string" },
+            "x": { "type": "integer" }, "y": { "type": "integer" }, "rotation": { "enum": [0, 90] } } },
+        { "type": "object", "required": ["type", "hand"], "additionalProperties": false,
+          "properties": { "type": { "const": "hand" }, "hand": { "enum": ["left", "right"] } } },
+        { "type": "object", "required": ["type", "zoneId", "x", "y"], "additionalProperties": false,
+          "properties": { "type": { "const": "world" }, "zoneId": { "type": "string" },
+            "x": { "type": "integer" }, "y": { "type": "integer" } } },
+        { "type": "object", "required": ["type", "containerId", "x", "y"], "additionalProperties": false,
+          "properties": { "type": { "const": "container" }, "containerId": { "type": "string" },
+            "x": { "type": "integer" }, "y": { "type": "integer" }, "rotation": { "enum": [0, 90] } } }
+      ]
+    },
+    "ItemLocation": {
+      "oneOf": [
+        { "type": "object", "required": ["type", "playerId", "x", "y", "rotation"], "additionalProperties": false,
+          "properties": { "type": { "const": "player_inventory" }, "playerId": { "type": "string" },
+            "x": { "type": "integer" }, "y": { "type": "integer" }, "rotation": { "type": "integer" } } },
+        { "type": "object", "required": ["type", "zoneId", "x", "y"], "additionalProperties": false,
+          "properties": { "type": { "const": "world" }, "zoneId": { "type": "string" },
+            "x": { "type": "integer" }, "y": { "type": "integer" } } },
+        { "type": "object", "required": ["type", "containerId", "x", "y", "rotation"], "additionalProperties": false,
+          "properties": { "type": { "const": "container" }, "containerId": { "type": "string" },
+            "x": { "type": "integer" }, "y": { "type": "integer" }, "rotation": { "type": "integer" } } },
+        { "type": "object", "required": ["type", "machineId", "slotId"], "additionalProperties": false,
+          "properties": { "type": { "const": "machine_slot" }, "machineId": { "type": "string" }, "slotId": { "type": "string" } } },
+        { "type": "object", "required": ["type", "pileId"], "additionalProperties": false,
+          "properties": { "type": { "const": "pile" }, "pileId": { "type": "string" } } }
+      ]
+    },
+    "ItemInstance": {
+      "type": "object",
+      "required": ["id", "itemTypeId", "location"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "itemTypeId": { "type": "string" },
+        "durability": { "type": "number" },
+        "quality": { "type": "number" },
+        "state": { "type": "object" },
+        "location": { "$ref": "#/definitions/ItemLocation" }
+      }
+    },
+    "Tile": {
+      "type": "object",
+      "required": ["x", "y", "terrain", "walkable", "tags", "visibility"],
+      "additionalProperties": false,
+      "properties": {
+        "x": { "type": "integer" },
+        "y": { "type": "integer" },
+        "terrain": { "$ref": "#/definitions/TerrainType" },
+        "walkable": { "type": "boolean" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "visibility": { "$ref": "#/definitions/VisibilityState" }
+      }
+    },
+    "WorldObject": {
+      "type": "object",
+      "required": ["id", "objectTypeId", "position", "state"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "objectTypeId": { "type": "string" },
+        "position": { "$ref": "#/definitions/Position" },
+        "state": { "type": "object" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "visibility": { "enum": ["visible", "hidden", "discovered"] }
+      }
+    },
+    "Pile": {
+      "type": "object",
+      "required": ["id", "itemTypeId", "zoneId", "position", "itemInstanceIds"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "itemTypeId": { "type": "string" },
+        "zoneId": { "type": "string" },
+        "position": { "$ref": "#/definitions/Position" },
+        "itemInstanceIds": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "PlayerStats": {
+      "type": "object",
+      "required": ["health", "maxHealth", "energy", "maxEnergy"],
+      "additionalProperties": false,
+      "properties": {
+        "health": { "type": "number" },
+        "maxHealth": { "type": "number" },
+        "energy": { "type": "number" },
+        "maxEnergy": { "type": "number" }
+      }
+    },
+    "Player": {
+      "type": "object",
+      "required": ["id", "name", "currentZoneId", "position", "stats", "inventoryId"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "currentZoneId": { "type": "string" },
+        "position": { "$ref": "#/definitions/Position" },
+        "stats": { "$ref": "#/definitions/PlayerStats" },
+        "inventoryId": { "type": "string" },
+        "knownTechniques": { "type": "array", "items": { "type": "string" } },
+        "researchState": { "type": "array" },
+        "discoveredFlags": { "type": "array", "items": { "type": "string" } },
+        "thoughtLog": { "type": "array", "items": { "$ref": "#/definitions/Thought" } }
+      }
+    },
+    "InventoryGrid": {
+      "type": "object",
+      "required": ["id", "ownerType", "ownerId", "width", "height"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "ownerType": { "enum": ["player", "container", "machine", "surface"] },
+        "ownerId": { "type": "string" },
+        "width": { "type": "integer" },
+        "height": { "type": "integer" },
+        "handSlots": {
+          "type": "object",
+          "required": ["left", "right"],
+          "additionalProperties": false,
+          "properties": {
+            "left": { "$ref": "#/definitions/Position" },
+            "right": { "$ref": "#/definitions/Position" }
+          }
+        }
+      }
+    },
+    "Zone": {
+      "type": "object",
+      "required": ["id", "type", "width", "height"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "ownerPlayerId": { "type": "string" },
+        "type": { "enum": ["personal", "shared", "wild", "gremio"] },
+        "width": { "type": "integer" },
+        "height": { "type": "integer" }
+      }
+    }
+  }
+}

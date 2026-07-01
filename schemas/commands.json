@@ -1,0 +1,92 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Isla Misteriosa — comandos (POST /commands)",
+  "definitions": {
+    "MovePlayer": {
+      "type": "object",
+      "required": ["type", "to"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "MovePlayer" },
+        "to": { "$ref": "common.json#/definitions/Position" }
+      }
+    },
+    "MoveItem": {
+      "type": "object",
+      "required": ["type", "itemInstanceId", "to"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "MoveItem" },
+        "itemInstanceId": { "type": "string" },
+        "to": { "$ref": "common.json#/definitions/Location" }
+      }
+    },
+    "DropItem": {
+      "type": "object",
+      "required": ["type", "itemInstanceId", "to"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "DropItem" },
+        "itemInstanceId": { "type": "string" },
+        "to": { "$ref": "common.json#/definitions/Position" }
+      }
+    },
+    "TakeItem": {
+      "type": "object",
+      "required": ["type", "target"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "TakeItem" },
+        "target": { "$ref": "common.json#/definitions/TargetRef" }
+      }
+    },
+    "ExecuteAction": {
+      "type": "object",
+      "required": ["type", "actionId", "target"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "ExecuteAction" },
+        "actionId": { "type": "string" },
+        "target": { "$ref": "common.json#/definitions/TargetRef" },
+        "inputHints": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "Rest": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": { "type": { "const": "Rest" } }
+    },
+    "Observe": {
+      "type": "object",
+      "required": ["type", "target"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "Observe" },
+        "target": { "$ref": "common.json#/definitions/TargetRef" }
+      }
+    },
+    "Command": {
+      "oneOf": [
+        { "$ref": "#/definitions/MovePlayer" },
+        { "$ref": "#/definitions/MoveItem" },
+        { "$ref": "#/definitions/DropItem" },
+        { "$ref": "#/definitions/TakeItem" },
+        { "$ref": "#/definitions/ExecuteAction" },
+        { "$ref": "#/definitions/Rest" },
+        { "$ref": "#/definitions/Observe" }
+      ]
+    },
+    "CommandEnvelope": {
+      "type": "object",
+      "required": ["playerId", "clientCommandId", "command"],
+      "additionalProperties": false,
+      "properties": {
+        "playerId": { "type": "string" },
+        "clientCommandId": { "type": "string" },
+        "command": { "$ref": "#/definitions/Command" }
+      }
+    }
+  },
+  "$ref": "#/definitions/CommandEnvelope"
+}

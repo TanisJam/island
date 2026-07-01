@@ -1,0 +1,199 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Isla Misteriosa — eventos y resultado de comando",
+  "definitions": {
+    "PlayerMoved": {
+      "type": "object", "required": ["type", "playerId", "path", "position"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "PlayerMoved" },
+        "playerId": { "type": "string" },
+        "path": { "type": "array", "items": { "$ref": "common.json#/definitions/Position" } },
+        "position": { "$ref": "common.json#/definitions/Position" }
+      }
+    },
+    "ItemMoved": {
+      "type": "object", "required": ["type", "itemInstanceId", "to"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "ItemMoved" },
+        "itemInstanceId": { "type": "string" },
+        "to": { "$ref": "common.json#/definitions/Location" }
+      }
+    },
+    "ActiveHandsChanged": {
+      "type": "object", "required": ["type"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "ActiveHandsChanged" },
+        "left": { "type": "string" },
+        "right": { "type": "string" }
+      }
+    },
+    "ItemAddedToInventory": {
+      "type": "object", "required": ["type", "item"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "ItemAddedToInventory" },
+        "item": { "$ref": "common.json#/definitions/ItemInstance" }
+      }
+    },
+    "ItemRemovedFromInventory": {
+      "type": "object", "required": ["type", "itemInstanceId"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "ItemRemovedFromInventory" },
+        "itemInstanceId": { "type": "string" }
+      }
+    },
+    "ItemPlacedInWorld": {
+      "type": "object", "required": ["type", "item", "position"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "ItemPlacedInWorld" },
+        "item": { "$ref": "common.json#/definitions/ItemInstance" },
+        "position": { "$ref": "common.json#/definitions/Position" }
+      }
+    },
+    "ItemRemovedFromWorld": {
+      "type": "object", "required": ["type", "itemInstanceId"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "ItemRemovedFromWorld" },
+        "itemInstanceId": { "type": "string" }
+      }
+    },
+    "PileChanged": {
+      "type": "object", "required": ["type", "pile"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "PileChanged" },
+        "pile": { "$ref": "common.json#/definitions/Pile" }
+      }
+    },
+    "WorldObjectCreated": {
+      "type": "object", "required": ["type", "object"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "WorldObjectCreated" },
+        "object": { "$ref": "common.json#/definitions/WorldObject" }
+      }
+    },
+    "WorldObjectStateChanged": {
+      "type": "object", "required": ["type", "objectId", "state"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "WorldObjectStateChanged" },
+        "objectId": { "type": "string" },
+        "state": { "type": "object" }
+      }
+    },
+    "WorldObjectRemoved": {
+      "type": "object", "required": ["type", "objectId"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "WorldObjectRemoved" },
+        "objectId": { "type": "string" }
+      }
+    },
+    "TileChanged": {
+      "type": "object", "required": ["type", "position", "terrain", "walkable"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "TileChanged" },
+        "position": { "$ref": "common.json#/definitions/Position" },
+        "terrain": { "$ref": "common.json#/definitions/TerrainType" },
+        "walkable": { "type": "boolean" }
+      }
+    },
+    "TilesRevealed": {
+      "type": "object", "required": ["type", "tiles"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "TilesRevealed" },
+        "tiles": { "type": "array", "items": { "$ref": "common.json#/definitions/Tile" } }
+      }
+    },
+    "EnergyChanged": {
+      "type": "object", "required": ["type", "energy"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "EnergyChanged" },
+        "energy": { "type": "number" }
+      }
+    },
+    "ToolDamaged": {
+      "type": "object", "required": ["type", "itemInstanceId", "durability"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "ToolDamaged" },
+        "itemInstanceId": { "type": "string" },
+        "durability": { "type": "number" }
+      }
+    },
+    "ItemBroke": {
+      "type": "object", "required": ["type", "itemInstanceId"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "ItemBroke" },
+        "itemInstanceId": { "type": "string" }
+      }
+    },
+    "KnowledgeUnlocked": {
+      "type": "object", "required": ["type", "knowledgeId"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "KnowledgeUnlocked" },
+        "knowledgeId": { "type": "string" }
+      }
+    },
+    "ThoughtAdded": {
+      "type": "object", "required": ["type", "thought"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "ThoughtAdded" },
+        "thought": { "$ref": "common.json#/definitions/Thought" }
+      }
+    },
+    "ActionFailed": {
+      "type": "object", "required": ["type", "actionId"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "ActionFailed" },
+        "actionId": { "type": "string" },
+        "thought": { "$ref": "common.json#/definitions/Thought" }
+      }
+    },
+    "Event": {
+      "oneOf": [
+        { "$ref": "#/definitions/PlayerMoved" },
+        { "$ref": "#/definitions/ItemMoved" },
+        { "$ref": "#/definitions/ActiveHandsChanged" },
+        { "$ref": "#/definitions/ItemAddedToInventory" },
+        { "$ref": "#/definitions/ItemRemovedFromInventory" },
+        { "$ref": "#/definitions/ItemPlacedInWorld" },
+        { "$ref": "#/definitions/ItemRemovedFromWorld" },
+        { "$ref": "#/definitions/PileChanged" },
+        { "$ref": "#/definitions/WorldObjectCreated" },
+        { "$ref": "#/definitions/WorldObjectStateChanged" },
+        { "$ref": "#/definitions/WorldObjectRemoved" },
+        { "$ref": "#/definitions/TileChanged" },
+        { "$ref": "#/definitions/TilesRevealed" },
+        { "$ref": "#/definitions/EnergyChanged" },
+        { "$ref": "#/definitions/ToolDamaged" },
+        { "$ref": "#/definitions/ItemBroke" },
+        { "$ref": "#/definitions/KnowledgeUnlocked" },
+        { "$ref": "#/definitions/ThoughtAdded" },
+        { "$ref": "#/definitions/ActionFailed" }
+      ]
+    },
+    "RejectionCode": {
+      "enum": [
+        "out_of_range", "not_walkable", "no_path", "insufficient_energy",
+        "missing_inputs", "missing_knowledge", "no_space", "invalid_target", "not_applicable"
+      ]
+    },
+    "Rejection": {
+      "type": "object",
+      "required": ["code"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "$ref": "#/definitions/RejectionCode" },
+        "thought": { "$ref": "common.json#/definitions/Thought" }
+      }
+    },
+    "CommandResult": {
+      "type": "object",
+      "required": ["clientCommandId", "accepted", "events"],
+      "additionalProperties": false,
+      "properties": {
+        "clientCommandId": { "type": "string" },
+        "accepted": { "type": "boolean" },
+        "events": { "type": "array", "items": { "$ref": "#/definitions/Event" } },
+        "rejection": { "$ref": "#/definitions/Rejection" }
+      }
+    }
+  },
+  "$ref": "#/definitions/CommandResult"
+}

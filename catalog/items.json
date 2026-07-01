@@ -1,0 +1,94 @@
+[
+  {
+    "id": "small_stone",
+    "name": "Piedra pequeña",
+    "description": "Una piedra dura que cabe en la mano. Sirve para golpear o como cabeza de herramienta.",
+    "shape": { "w": 1, "h": 1 },
+    "rotatable": false,
+    "properties": { "hardness": 2, "weight": 1, "mineral": 1 },
+    "tags": ["stone", "hard", "loose_item", "tool_head_candidate"],
+    "observation": "Una piedra pequeña. Es dura y cabe en mi mano."
+  },
+  {
+    "id": "dry_branch",
+    "name": "Rama seca",
+    "description": "Una rama liviana y seca. Mango, combustible o estructura simple.",
+    "shape": { "w": 1, "h": 2 },
+    "rotatable": true,
+    "properties": { "wood": 1, "fuel_value": 1, "rigidity": 1, "length": 2 },
+    "tags": ["wood", "stick", "fuel", "handle_candidate"],
+    "observation": "Una rama seca. Podría servirme para golpear, atar o hacer fuego."
+  },
+  {
+    "id": "plant_fiber",
+    "name": "Fibra vegetal",
+    "description": "Fibras flexibles que se pueden atar o trenzar.",
+    "shape": { "w": 1, "h": 1 },
+    "rotatable": false,
+    "properties": { "flexibility": 2, "binding": 2, "organic": 1 },
+    "tags": ["fiber", "binding", "plant"],
+    "observation": "Estas fibras parecen resistentes."
+  },
+  {
+    "id": "wild_seed",
+    "name": "Semilla silvestre",
+    "description": "Una semilla. Quizás algún día sirva para cultivar.",
+    "shape": { "w": 1, "h": 1 },
+    "rotatable": false,
+    "properties": { "organic": 1, "plantable": 1 },
+    "tags": ["seed", "food_future", "plant"],
+    "observation": "Una semilla silvestre. Tal vez sirva más adelante."
+  },
+  {
+    "id": "cloth_scrap",
+    "name": "Restos de tela",
+    "description": "Tela del naufragio. Atadura alternativa o yesca para el fuego.",
+    "shape": { "w": 1, "h": 1 },
+    "rotatable": false,
+    "properties": { "flexibility": 1, "binding": 1, "absorbent": 1 },
+    "tags": ["cloth", "binding", "wreckage"],
+    "observation": "Restos de tela húmedos. Podrían servir para atar o encender."
+  },
+  {
+    "id": "poor_wood",
+    "name": "Madera pobre",
+    "description": "Madera de baja calidad, pero madera al fin. Combustible y estructura.",
+    "shape": { "w": 1, "h": 2 },
+    "rotatable": true,
+    "properties": { "wood": 2, "structure": 1, "fuel_value": 2 },
+    "tags": ["wood", "fuel", "structure"],
+    "observation": "Madera pobre, pero alcanza para empezar."
+  },
+  {
+    "id": "bark",
+    "name": "Corteza",
+    "description": "Corteza seca. Arde fácil y puede usarse como fibra rústica.",
+    "shape": { "w": 1, "h": 2 },
+    "rotatable": true,
+    "properties": { "organic": 1, "dry": 1, "fuel_value": 1, "fiber_like": 1 },
+    "tags": ["bark", "fuel", "plant"],
+    "observation": "Corteza seca. Esto arde rápido."
+  },
+  {
+    "id": "crude_tool",
+    "name": "Herramienta rudimentaria",
+    "description": "Una piedra atada a una rama. Corta y raspa, mal pero sirve.",
+    "shape": { "w": 1, "h": 2 },
+    "rotatable": true,
+    "properties": { "cutting": 1, "scraping": 1, "leverage": 1 },
+    "durability": 20,
+    "tags": ["tool", "crude", "cutting"],
+    "observation": "No es una gran herramienta, pero es mejor que mis manos."
+  },
+  {
+    "id": "simple_axe",
+    "name": "Hacha simple",
+    "description": "Un hacha con filo de verdad. Corta árboles y abre la jungla.",
+    "shape": { "w": 1, "h": 2 },
+    "rotatable": true,
+    "properties": { "cutting": 3, "chopping": 3 },
+    "durability": 40,
+    "tags": ["tool", "axe", "cutting", "jungle_clear"],
+    "observation": "Un hacha simple. Con esto puedo cortar de verdad."
+  }
+]

@@ -1,0 +1,46 @@
+[
+  {
+    "id": "idea_binding",
+    "name": "Atar",
+    "kind": "idea",
+    "unlockThought": "Puedo unir piezas si las ato bien."
+  },
+  {
+    "id": "tech_basic_binding",
+    "name": "Atadura básica",
+    "kind": "technique",
+    "unlockThought": "La fibra no solo sirve para guardar cosas. Sirve para construir."
+  },
+  {
+    "id": "idea_crude_tool",
+    "name": "Improvisar herramienta",
+    "kind": "idea",
+    "unlockThought": "Si junto una piedra, una rama y algo para atar, quizás arme algo."
+  },
+  {
+    "id": "tech_crude_toolmaking",
+    "name": "Herrería rudimentaria",
+    "kind": "technique",
+    "unlockThought": "Le voy agarrando la mano a armar herramientas toscas."
+  },
+  {
+    "id": "idea_fire",
+    "name": "Hacer fuego",
+    "kind": "idea",
+    "unlockOnObserveTags": ["fire"],
+    "unlockThought": "Necesito fuego si quiero pasar la noche."
+  },
+  {
+    "id": "discovery_fire_lit",
+    "name": "Mantener el fuego",
+    "kind": "discovery",
+    "unlockThought": "Empiezo a entender cómo se sostiene una llama."
+  },
+  {
+    "id": "idea_jungle_clearance",
+    "name": "Despejar jungla",
+    "kind": "idea",
+    "unlockOnObserveTags": ["dense_jungle", "blocker"],
+    "unlockThought": "Si pudiera cortar esto, tal vez encontraría un paso."
+  }
+]

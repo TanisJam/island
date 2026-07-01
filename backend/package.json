@@ -1,0 +1,32 @@
+{
+  "name": "isla-misteriosa-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.7.0",
+  "description": "Backend autoritativo de Isla Misteriosa (MVP). Carga el catálogo, valida contra el schema y procesa comandos.",
+  "scripts": {
+    "start": "tsx src/bootstrap/main.ts",
+    "dev": "tsx watch src/bootstrap/main.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test src/**/*.test.ts",
+    "sync:contract": "cp ../schemas/generated/*.ts src/contract/"
+  },
+  "dependencies": {
+    "@fastify/cors": "^9.0.1",
+    "ajv": "^8.20.0",
+    "fastify": "^4.28.1"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^11.3.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["better-sqlite3"]
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.7.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2"
+  }
+}

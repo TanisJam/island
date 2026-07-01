@@ -1,0 +1,9 @@
+[
+  {
+    "id": "heat_containment",
+    "name": "Contención de calor",
+    "status": "hidden",
+    "revealedBy": ["discovery_fire_lit"],
+    "teaserThought": "El fuego se escapa rápido. Quizás pueda contener mejor el calor."
+  }
+]
