@@ -38,7 +38,12 @@ test("rebuildInventories: es idempotente y no duplica ni pierde registros", () =
   const table: WorldObject = { id: "wo_table_3", objectTypeId: "rustic_table", position: { x: 5, y: 5 }, state: {}, tags: [], visibility: "visible" };
   s.objects.push(table);
   rebuildInventories(s, index);
+  const countAfterFirstRebuild = Object.keys(s.inventories).length;
   rebuildInventories(s, index);
   assert.deepEqual(s.inventories["wo_table_3"], { width: 3, height: 2 });
-  assert.equal(Object.keys(s.inventories).length, 1);
+  // The seeded world (bootstrap/seed.ts) now includes its own rustic_table
+  // instance (R7: reachable end-to-end without crafting one first), so the
+  // exact count is no longer a fixed literal — idempotency means a SECOND
+  // rebuild neither duplicates nor drops entries versus the first.
+  assert.equal(Object.keys(s.inventories).length, countAfterFirstRebuild, "a second rebuildInventories call does not change the entry count");
 });

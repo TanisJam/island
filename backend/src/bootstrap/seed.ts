@@ -57,6 +57,13 @@ export function seedState(index: CatalogIndex, playerId = "p1", zoneId = "z1"): 
     obj("tall_grass", 12, 8),
     obj("small_rock", 2, 9),
     obj("wreckage", 10, 10),
+    // Adjacent to the player's spawn tile (8,9) so R7's "interact with a
+    // table" (crafting-surface change) is reachable end-to-end from the very
+    // first tick, without first having to craft/build one.
+    // `blocksMovement: true` (like tree/rock), so it sits on its own tile
+    // rather than the player's; `rebuildInventories` below (already called
+    // unconditionally) populates its grid record from `surfaceGrid`.
+    obj("rustic_table", 8, 8),
   ];
 
   const looseStone: ItemInstance = {
