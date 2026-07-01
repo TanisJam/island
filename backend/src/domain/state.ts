@@ -1,4 +1,5 @@
 import type { ItemInstance, Pile, Thought, WorldObject } from "../contract/events";
+import type { CatalogIndex } from "./catalog";
 
 export type TerrainId = "sand" | "grass" | "shallow_water" | "dense_jungle" | "dirt" | "rocky_ground";
 export type Position = { x: number; y: number };
@@ -32,6 +33,10 @@ export type RuntimeZone = {
   height: number;
 };
 
+/** Dimensiones de una superficie con grilla real (p.ej. una mesa rústica), indexada
+ *  por el id del `WorldObject` que la porta. */
+export type SurfaceInventory = { width: number; height: number };
+
 /** Estado de juego en runtime. Una `ItemInstance` vive en inventario o mundo según
  *  su `location.type` (`player_inventory` | `world`). */
 export type GameState = {
@@ -42,7 +47,21 @@ export type GameState = {
   piles: Pile[];
   player: RuntimePlayer;
   discovered: Set<string>; // tiles explorados, clave "x,y"
+  /** Grillas de superficie por id de world object (sólo los que declaran `surfaceGrid`). */
+  inventories: Record<string, SurfaceInventory>;
 };
+
+/** Reconstruye `s.inventories` a partir de `s.objects` y el catálogo: cada world
+ *  object cuyo tipo declara `surfaceGrid` obtiene (o mantiene) su registro de
+ *  grilla. Idempotente — puede llamarse tras cargar/seedear sin duplicar estado. */
+export function rebuildInventories(s: GameState, index: CatalogIndex): void {
+  for (const o of s.objects) {
+    const def = index.objectById.get(o.objectTypeId);
+    if (def?.surfaceGrid) {
+      s.inventories[o.id] = { width: def.surfaceGrid.w, height: def.surfaceGrid.h };
+    }
+  }
+}
 
 export const VISION_RADIUS = 5;
 export const REST_RECOVERY = 30;

@@ -25,6 +25,8 @@ export function applyEvent(s: GameState, index: CatalogIndex, e: Event): void {
         it.location = { type: "player_inventory", playerId: to.ownerId, x: to.x, y: to.y, rotation: to.rotation ?? 0 };
       } else if (to.type === "world") {
         it.location = { type: "world", zoneId: to.zoneId, x: to.x, y: to.y };
+      } else if (to.type === "surface") {
+        it.location = { type: "surface", surfaceId: to.surfaceId, x: to.x, y: to.y, rotation: to.rotation ?? 0 };
       }
       return;
     }
@@ -54,6 +56,10 @@ export function applyEvent(s: GameState, index: CatalogIndex, e: Event): void {
     }
     case "WorldObjectCreated": {
       if (!s.objects.some((o) => o.id === e.object.id)) s.objects.push(e.object);
+      const def = index.objectById.get(e.object.objectTypeId);
+      if (def?.surfaceGrid) {
+        s.inventories[e.object.id] = { width: def.surfaceGrid.w, height: def.surfaceGrid.h };
+      }
       return;
     }
     case "WorldObjectStateChanged": {
