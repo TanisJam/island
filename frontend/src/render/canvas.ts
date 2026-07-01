@@ -1,50 +1,17 @@
 import type { Position } from "../contract";
 import type { ClientSnapshot } from "../state/snapshot";
 import { visibilityOf } from "../state/visibility";
+import type { AssetResolver } from "./assets";
+import { createEmojiAssets } from "./assets";
+import type { Renderer } from "./renderer";
+import type { Frame, RenderEntity } from "../view/viewstate";
 
 export const TILE = 16;
 export const SCALE = 3;
 export const PX = TILE * SCALE; // 48px/tile, matches the 768x576 (16x12) canvas in index.html
 
-const TERRAIN_COLORS: Record<string, string> = {
-  sand: "#d9c089",
-  grass: "#6a9a4f",
-  shallow_water: "#4a90c2",
-  dense_jungle: "#1f5c3a",
-  dirt: "#8a6b4a",
-  rocky_ground: "#8a8a8a",
-};
-const FALLBACK_TERRAIN_COLOR = "#444";
-
-// MVP sin sprites: los emojis funcionan como stand-in de arte.
-const OBJECT_EMOJI: Record<string, string> = {
-  tree: "🌳",
-  tall_grass: "🌾",
-  small_rock: "🪨",
-  wreckage: "🚢",
-  rustic_table: "🛠️",
-};
-const ITEM_EMOJI: Record<string, string> = {
-  small_stone: "🪨",
-  dry_branch: "🪵",
-  plant_fiber: "🌿",
-  wild_seed: "🌰",
-  cloth_scrap: "🧵",
-  poor_wood: "🪵",
-  bark: "🍂",
-  crude_tool: "🔨",
-  simple_axe: "🪓",
-};
-const PLAYER_EMOJI = "🧍";
-const PILE_EMOJI = "🪙";
-const UNKNOWN_EMOJI = "❔";
-
 const EMOJI_FONT = '"Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", sans-serif';
-
-function objectEmoji(objectTypeId: string, state: Record<string, unknown>): string {
-  if (objectTypeId === "campfire") return state?.["lit"] ? "🔥" : "🪵";
-  return OBJECT_EMOJI[objectTypeId] ?? UNKNOWN_EMOJI;
-}
+const FALLBACK_TERRAIN_COLOR = "#444";
 
 function drawEmoji(ctx: CanvasRenderingContext2D, pos: Position, emoji: string, factor = 0.72): void {
   ctx.font = `${Math.floor(PX * factor)}px ${EMOJI_FONT}`;
@@ -76,11 +43,92 @@ function drawSelection(ctx: CanvasRenderingContext2D, pos: Position): void {
 }
 
 /**
- * Dibuja el frame: terreno sombreado por la visibilidad RE-DERIVADA (ver
- * state/visibility.ts — load-bearing, nunca confiar en `tile.visibility` directo),
- * y encima objetos / pilas / items en el suelo / jugador como emojis (MVP sin
- * sprites), más el resaltado de selección.
+ * Canvas 2D implementation of `Renderer` (design.md SEAM 4). Draws
+ * EXCLUSIVELY from the `Frame` produced by `ViewState.frame()`: terrain and
+ * entity visibility are read from the frame, NEVER recomputed via
+ * `visibilityOf`, and it NEVER receives a `ClientSnapshot`. Visuals come
+ * from `AssetResolver.resolve`, never from a local emoji/color table.
+ *
+ * Draw order is enforced explicitly (object -> pile -> item -> player) to
+ * match the previous inline behavior in render/canvas.ts, regardless of the
+ * iteration order `Frame.entities` happens to carry.
  */
+export function createCanvasRenderer(ctx: CanvasRenderingContext2D, assets: AssetResolver): Renderer {
+  function drawObjectOrItem(entity: RenderEntity): void {
+    if (entity.visibility === "unseen") return;
+    const visual = assets.resolve(entity.kind, entity.typeId, entity.state);
+    drawEmoji(ctx, entity.renderPos, visual.glyph ?? "", visual.scale);
+  }
+
+  function drawPile(entity: RenderEntity): void {
+    if (entity.visibility === "unseen") return;
+    const visual = assets.resolve("pile", entity.typeId);
+    drawEmoji(ctx, entity.renderPos, visual.glyph ?? "", visual.scale);
+    if (entity.count !== undefined) drawCount(ctx, entity.renderPos, entity.count);
+  }
+
+  // Jugador: un halo suave para que "vos" se distinga, y el emoji encima.
+  // Always drawn regardless of `visibility` — matches the previous behavior,
+  // where the player's own position was never fog-culled.
+  function drawPlayer(entity: RenderEntity): void {
+    const p = entity.renderPos;
+    ctx.fillStyle = "rgba(255,240,120,0.28)";
+    ctx.beginPath();
+    ctx.arc(p.x * PX + PX / 2, p.y * PX + PX / 2, PX * 0.44, 0, Math.PI * 2);
+    ctx.fill();
+    const visual = assets.resolve("player", entity.typeId);
+    drawEmoji(ctx, p, visual.glyph ?? "", visual.scale);
+  }
+
+  return {
+    resize(width: number, height: number): void {
+      ctx.canvas.width = width;
+      ctx.canvas.height = height;
+    },
+
+    render(frame: Frame, selection: Position | null): void {
+      ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+
+      for (const tile of frame.tiles) {
+        const px = tile.x * PX;
+        const py = tile.y * PX;
+        if (tile.visibility === "unseen") {
+          ctx.fillStyle = "#000";
+          ctx.fillRect(px, py, PX, PX);
+          continue;
+        }
+        ctx.fillStyle = assets.resolve("terrain", tile.terrain).color ?? FALLBACK_TERRAIN_COLOR;
+        ctx.fillRect(px, py, PX, PX);
+        if (tile.visibility === "explored") {
+          ctx.fillStyle = "rgba(0,0,0,0.45)";
+          ctx.fillRect(px, py, PX, PX);
+        }
+      }
+
+      for (const entity of frame.entities) if (entity.kind === "object") drawObjectOrItem(entity);
+      for (const entity of frame.entities) if (entity.kind === "pile") drawPile(entity);
+      for (const entity of frame.entities) if (entity.kind === "item") drawObjectOrItem(entity);
+      for (const entity of frame.entities) if (entity.kind === "player") drawPlayer(entity);
+
+      if (selection) drawSelection(ctx, selection);
+    },
+
+    destroy(): void {
+      // Canvas 2D holds no external resources to release.
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// TEMPORARY SHIM — kept only so `main.ts` keeps compiling before the Phase 5
+// migration (tasks.md 3.1). Delete this export (tasks.md 5.3) once main.ts
+// builds its loop from `createGame`/`createCanvasRenderer` instead. Uses the
+// same `AssetResolver` as the seam above (no local emoji/color tables), but
+// still reads directly from `ClientSnapshot` + `visibilityOf`, matching the
+// pre-refactor behavior exactly.
+// ---------------------------------------------------------------------------
+const legacyAssets: AssetResolver = createEmojiAssets();
+
 export function render(ctx: CanvasRenderingContext2D, snapshot: ClientSnapshot, selectedPos: Position | null): void {
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 
@@ -93,7 +141,7 @@ export function render(ctx: CanvasRenderingContext2D, snapshot: ClientSnapshot, 
       ctx.fillRect(px, py, PX, PX);
       continue;
     }
-    ctx.fillStyle = TERRAIN_COLORS[tile.terrain] ?? FALLBACK_TERRAIN_COLOR;
+    ctx.fillStyle = legacyAssets.resolve("terrain", tile.terrain).color ?? FALLBACK_TERRAIN_COLOR;
     ctx.fillRect(px, py, PX, PX);
     if (vis === "explored") {
       ctx.fillStyle = "rgba(0,0,0,0.45)";
@@ -103,7 +151,8 @@ export function render(ctx: CanvasRenderingContext2D, snapshot: ClientSnapshot, 
 
   for (const obj of snapshot.objects) {
     if (visibilityOf(snapshot, obj.position) === "unseen") continue;
-    drawEmoji(ctx, obj.position, objectEmoji(obj.objectTypeId, obj.state as Record<string, unknown>));
+    const visual = legacyAssets.resolve("object", obj.objectTypeId, obj.state as Record<string, unknown>);
+    drawEmoji(ctx, obj.position, visual.glyph ?? "", visual.scale);
   }
 
   // Items grouped into a pile are drawn as a single pile glyph (+ count), not as N
@@ -112,7 +161,8 @@ export function render(ctx: CanvasRenderingContext2D, snapshot: ClientSnapshot, 
 
   for (const pile of snapshot.piles) {
     if (visibilityOf(snapshot, pile.position) === "unseen") continue;
-    drawEmoji(ctx, pile.position, PILE_EMOJI, 0.6);
+    const visual = legacyAssets.resolve("pile", pile.itemTypeId);
+    drawEmoji(ctx, pile.position, visual.glyph ?? "", visual.scale);
     drawCount(ctx, pile.position, pile.itemInstanceIds.length);
   }
 
@@ -121,16 +171,17 @@ export function render(ctx: CanvasRenderingContext2D, snapshot: ClientSnapshot, 
     if (piledItemIds.has(item.id)) continue;
     const pos = { x: item.location.x, y: item.location.y };
     if (visibilityOf(snapshot, pos) === "unseen") continue;
-    drawEmoji(ctx, pos, ITEM_EMOJI[item.itemTypeId] ?? UNKNOWN_EMOJI, 0.58);
+    const visual = legacyAssets.resolve("item", item.itemTypeId);
+    drawEmoji(ctx, pos, visual.glyph ?? "", visual.scale);
   }
 
-  // Jugador: un halo suave para que "vos" se distinga, y el emoji encima.
   const p = snapshot.player.position;
   ctx.fillStyle = "rgba(255,240,120,0.28)";
   ctx.beginPath();
   ctx.arc(p.x * PX + PX / 2, p.y * PX + PX / 2, PX * 0.44, 0, Math.PI * 2);
   ctx.fill();
-  drawEmoji(ctx, p, PLAYER_EMOJI, 0.82);
+  const playerVisual = legacyAssets.resolve("player", "player");
+  drawEmoji(ctx, p, playerVisual.glyph ?? "", playerVisual.scale);
 
   if (selectedPos) drawSelection(ctx, selectedPos);
 }
