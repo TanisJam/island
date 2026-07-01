@@ -1,0 +1,45 @@
+/**
+ * "Luz de fuego" identity tokens — ported from
+ * docs/1-diseno/mockups/luz-de-fuego.html (see also
+ * docs/1-diseno/direccion-ux-ui.md §"Paleta" and §"Tipografía").
+ *
+ * NOT imported into main.ts yet (tasks.md Phase 1, task 1.1 — additive
+ * only). The fullscreen DOM shell that actually consumes these tokens and
+ * roles (index.html, hud/hud.ts) lands in Phase 3, and Google Fonts are
+ * loaded there via a <link> tag. Component styles for the floating-window
+ * system and contextual menu (.win, .bar-title, .grid, .cell, #ctx-style
+ * sections, .act, etc.) are added in Phase 2 alongside window-manager.ts /
+ * context-menu.ts so the DOM those modules build is visually coherent even
+ * before the shell wires it into the live page.
+ */
+
+:root {
+  --sombra: #0f1a16;
+  --madera: #2b2620;
+  --arena: #e8dcc0;
+  --brasa: #f0a24e;
+  --descubrir: #ff7a3d;
+  --recuerdo: #6b6a5c;
+  --linea: #3a332b;
+}
+
+/*
+ * Typographic roles (direccion-ux-ui.md §"Tipografía"):
+ * - "instrument" text (energy, counters, labels, window titles) uses a
+ *   bitmap/pixel typeface — reinforces the pixel-art world.
+ * - "voice" text (thoughts, actions, examine copy) uses a warm humanist
+ *   typeface — the thought feels "thought", not "printed by the system".
+ */
+.font-instrument {
+  font-family: "Silkscreen", monospace;
+}
+
+.font-voice {
+  font-family: "Spectral", Georgia, serif;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+  }
+}
