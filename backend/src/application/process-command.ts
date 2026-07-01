@@ -4,7 +4,7 @@ import type { EngineCtx, TargetRef } from "../domain/engine";
 import { executeAction, resolveTarget } from "../domain/engine";
 import { applyEvent } from "../domain/reducer";
 import { findPath } from "../domain/pathfinding";
-import { findFreeInventorySlot, HAND_LEFT, HAND_RIGHT } from "../domain/inventory";
+import { canPlaceOnSurface, findFreeInventorySlot, HAND_LEFT, HAND_RIGHT } from "../domain/inventory";
 import { chebyshev, REST_RECOVERY, tileAt } from "../domain/state";
 import { derivePiles, reconcilePiles } from "../domain/piles";
 import { newId } from "../domain/ids";
@@ -102,6 +102,17 @@ export function processCommand(ctx: EngineCtx, env: CommandEnvelope): CommandRes
     case "MoveItem": {
       const item = ctx.state.items.find((i) => i.id === cmd.itemInstanceId);
       if (!item) return no({ code: "invalid_target" });
+      const to = cmd.to;
+      if (to.type === "surface") {
+        const dims = ctx.state.inventories[to.surfaceId];
+        if (!dims) return no({ code: "invalid_target", thought: thought("No hay una superficie ahí para dejar esto.", "warning") });
+        const surface = ctx.state.objects.find((o) => o.id === to.surfaceId);
+        if (!surface || chebyshev(ctx.state.player.position, surface.position) > 1)
+          return no({ code: "out_of_range", thought: thought("Tengo que acercarme a la mesa.", "warning") });
+        const rotation = to.rotation ?? 0;
+        const fits = canPlaceOnSurface(ctx.state, ctx.index, to.surfaceId, item.itemTypeId, to.x, to.y, rotation, dims, item.id);
+        if (!fits) return no({ code: "no_space", thought: thought("No entra ahí.", "warning") });
+      }
       emit({ type: "ItemMoved", itemInstanceId: item.id, to: cmd.to });
       const left = item.location.type === "player_inventory" && item.location.x === HAND_LEFT.x && item.location.y === HAND_LEFT.y ? item.id : undefined;
       const right = item.location.type === "player_inventory" && item.location.x === HAND_RIGHT.x && item.location.y === HAND_RIGHT.y ? item.id : undefined;
