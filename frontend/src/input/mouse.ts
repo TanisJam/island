@@ -1,6 +1,6 @@
 import type { Catalog, Command, ItemInstance, Position, Tile, WorldObject } from "../contract";
 import { type ActionTarget } from "../actions/available";
-import { buildContextMenu, type WireTargetRef } from "../actions/context-menu";
+import { buildContextMenu, targetName, type WireTargetRef } from "../actions/context-menu";
 import { cameraOffset, screenToTile, type CanvasRect } from "../render/camera";
 import type { Frame } from "../view/viewstate";
 import type { ClientSnapshot } from "../state/snapshot";
@@ -135,6 +135,63 @@ export function classifyClick(
   return "double";
 }
 
+export type ClickDecision = "select" | "move" | "menu";
+
+/**
+ * PURE decision behind the SELECT-FIRST click model (fix-list: "1 click
+ * selects, re-click on the already-selected tile opens the menu, double
+ * click moves"):
+ *
+ * 1. A "double" cadence on a WALKABLE tile always moves — this is the one
+ *    case cadence overrides everything else, since it's the explicit "just
+ *    walk there" shortcut.
+ * 2. Otherwise (a genuine single, OR a "double" that landed on a
+ *    non-walkable tile — nothing to walk to, so it degrades to a single
+ *    rather than a failed move) — a click on the CURRENTLY SELECTED tile
+ *    opens the contextual menu (this is how a re-click surfaces the menu
+ *    without ever needing a menu-open delay on the first click).
+ * 3. Any other click (a different tile, or no tile selected yet) just moves
+ *    the selection there and asks for an inspect thought — no menu, no move.
+ *
+ * Exported for unit testing; `onCanvasClick` is the only caller.
+ */
+export function resolveClickDecision(
+  cadence: ClickCadence,
+  tile: Position,
+  selectedTile: Position | null,
+  walkable: boolean,
+): ClickDecision {
+  if (cadence === "double" && walkable) return "move";
+  if (selectedTile !== null && tile.x === selectedTile.x && tile.y === selectedTile.y) return "menu";
+  return "select";
+}
+
+/**
+ * PURE first-person "inspect" thought for a freshly selected tile (fix-list:
+ * "1 click selects and surfaces a brief inspect observation"). Deliberately
+ * terse fixed templates by target kind, using only the catalog's `name`
+ * lookup (the same one `actions/context-menu.ts`'s `targetName` already
+ * uses for menu titles) — NOT the catalog's richer per-entry `observation`/
+ * `observationByState` flavor text, which stays reserved for the `Observe`
+ * action's own thought (kept out of scope by this fix). `resolved.preview`
+ * is always `world_object` | `item` | `tile` here — `resolveClickTarget`
+ * never returns a `self` `ActionTarget` — the `self` branch below only
+ * exists to keep the switch exhaustive against `ActionTarget`'s full union.
+ */
+export function describeSelection(catalog: Catalog, resolved: ClickResolution): string {
+  const preview = resolved.preview;
+  switch (preview.kind) {
+    case "world_object":
+      return `Veo ${targetName(catalog, preview)}.`;
+    case "item":
+      return `Veo ${targetName(catalog, preview)} en el suelo.`;
+    case "tile":
+      return `${targetName(catalog, preview)}.`;
+    case "self":
+      return `Veo ${targetName(catalog, preview)}.`;
+  }
+}
+
 export function createInputController(deps: InputDeps): InputController {
   let selection: ClickResolution | null = null;
   let lastClickTime: number | null = null;
@@ -143,12 +200,16 @@ export function createInputController(deps: InputDeps): InputController {
   /**
    * Opens the sectioned contextual menu built by `actions/context-menu.ts`
    * (design.md "Taxonomy" / spec "Contextual Menu from Real Action Logic" /
-   * "Self Click-Target Resolution") for `resolved` at screen point `at`. This
-   * is now the ONLY inspect path for every tile kind — the walkable-tile
-   * move affordance ("Ir hasta acá"/"Ir hasta ahí") already lives inside the
-   * menu via `buildReachableMenu`, so this function never moves the player
-   * itself; the sole direct-move path is the double-click branch in
-   * `onCanvasClick`.
+   * "Self Click-Target Resolution") for `resolved` at screen point `at`.
+   * SELECT-FIRST model (supersedes the previous "always the only inspect
+   * path" comment): `onCanvasClick` only calls this for the `"menu"`
+   * decision — a re-click on the tile that's ALREADY selected. The first
+   * click on any tile only selects it (ring + a terse `describeSelection`
+   * thought, no menu); the walkable-tile move affordance ("Ir hasta acá"/"Ir
+   * hasta ahí") still lives inside the menu via `buildReachableMenu` once
+   * it's open, and the fast-double-click direct-move shortcut is handled
+   * entirely by the `"move"` decision in `onCanvasClick` — this function
+   * itself never moves the player.
    *
    * Defensively wrapped (fix for "no object is interactable anymore"): any
    * new/unanticipated game state on this tile (a fresh world-item pile, a
@@ -202,8 +263,9 @@ export function createInputController(deps: InputDeps): InputController {
     // listener from ever running for canvas clicks — so an open
     // inventory/context-menu window could never be dismissed by clicking the
     // map. It's called ONLY right before synchronously opening a NEW context
-    // menu inside this same handler — which is now every branch except a
-    // preempting double-click move (see below).
+    // menu inside this same handler (the "menu" branch below) — a plain
+    // select or a double-click move never opens anything, so they let the
+    // click bubble to the outside-click dismiss listener as before.
     const { x, y } = canvasToTile(ev, deps.canvas, deps.getFrame());
     const snapshot = deps.getSnapshot();
     const resolved = resolveClickTarget(deps.catalog, snapshot, x, y);
@@ -217,27 +279,39 @@ export function createInputController(deps: InputDeps): InputController {
     lastClickTime = cadence === "double" ? null : now;
     lastClickTile = cadence === "double" ? null : { x, y };
 
-    // Single click: open the contextual menu IMMEDIATELY, no debounce wait
-    // (fix-list: "the single-click menu delay is too noticeable — make it
-    // minimal/none"). A genuine double click on a WALKABLE tile (handled
-    // right below) PREEMPTS this: it closes the menu the first click of the
-    // pair already opened and sends `MovePlayer` instead — trading a
-    // possible brief menu flash for zero perceived delay on every single
-    // click, per the fix-list's explicit preference.
-    if (cadence === "double" && resolved.walkable) {
+    // SELECT-FIRST model (fix-list supersedes the previous "single click
+    // opens the menu instantly" behavior): 1 click SELECTS a tile (ring +
+    // inspect thought, no menu, no move); a re-click on the ALREADY-selected
+    // tile opens the menu; a fast double click on a WALKABLE tile moves
+    // there instead of either. See `resolveClickDecision`'s doc for the full
+    // decision table — this handler only wires that pure decision to the
+    // actual side effects (move / menu / select+thought).
+    const selectedTile = selection ? selection.preview.pos : null;
+    const decision = resolveClickDecision(cadence, { x, y }, selectedTile, resolved.walkable);
+
+    if (decision === "move") {
       selection = null;
       deps.ui.closeContextMenu(); // never leave a menu open after a double-click move
       await deps.sendCommand({ type: "MovePlayer", to: { x, y } });
       return;
     }
 
-    // Every other case — a genuine single click, or a "double" landing on a
-    // non-walkable tile (nothing to walk to, so inspecting is the only
-    // useful option) — opens/refreshes the menu right now, against the
-    // snapshot captured at the top of this handler (always current: there is
-    // no debounce gap anymore for it to go stale during).
-    ev.stopPropagation();
-    openMenuFor(resolved, x, y, { x: ev.clientX, y: ev.clientY }, snapshot);
+    if (decision === "menu") {
+      // Re-click on the already-selected tile: open the menu right now,
+      // against the snapshot captured at the top of this handler.
+      ev.stopPropagation();
+      openMenuFor(resolved, x, y, { x: ev.clientX, y: ev.clientY }, snapshot);
+      return;
+    }
+
+    // decision === "select": first click on this tile — just move the
+    // selection ring here and surface a terse inspect thought. No menu, no
+    // move, no network call. Closes any menu left open from a PREVIOUS
+    // selection (clicking a new tile while a menu from the old one is open
+    // must not leave that stale menu on screen).
+    selection = resolved;
+    deps.ui.closeContextMenu();
+    deps.ui.showThought(describeSelection(deps.catalog, resolved));
   }
 
   // Outermost safety net (fix for "no object is interactable anymore"): a

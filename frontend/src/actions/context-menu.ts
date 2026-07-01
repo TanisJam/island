@@ -155,7 +155,10 @@ function terrainName(catalog: Catalog, terrain: Tile["terrain"]): string {
   return catalog.terrains.find((t) => t.id === terrain)?.name ?? terrain;
 }
 
-function targetName(catalog: Catalog, target: ActionTarget): string {
+/** Exported so `input/mouse.ts` can reuse the exact same name lookup for the
+ * select-first "inspect" thought (fix-list select-first click model) without
+ * duplicating the world_object/item/terrain name-resolution logic here. */
+export function targetName(catalog: Catalog, target: ActionTarget): string {
   switch (target.kind) {
     case "world_object":
       return catalog.worldObjects.find((o) => o.id === target.object.objectTypeId)?.name ?? target.object.objectTypeId;
