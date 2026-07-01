@@ -332,6 +332,44 @@ test("buildContextMenu: 'Acercarme' falls back to a diagonal neighbor when no or
   assert.deepEqual(approach!.command, { type: "MovePlayer", to: { x: 9, y: 4 } });
 });
 
+// --- "Usar la mesa" synthesis (crafting-surface change, R7/design.md 7d) ---
+
+const surfaceCatalog: Catalog = {
+  ...catalog,
+  worldObjects: [
+    ...catalog.worldObjects,
+    { id: "rustic_table", name: "Mesa rústica", description: "", tags: [], blocksMovement: true, surfaceGrid: { w: 3, h: 2 } },
+  ],
+};
+
+test("buildContextMenu: a world_object whose type declares surfaceGrid gets a 'Usar la mesa' entry", () => {
+  const s = makeSnapshot();
+  const table: WorldObject = { id: "wo_table", objectTypeId: "rustic_table", position: { x: 6, y: 5 }, state: {} };
+  const resolution = {
+    preview: { kind: "world_object" as const, pos: table.position, tags: [], object: table },
+    wireRef: { kind: "world_object" as const, id: "wo_table" },
+    self: false,
+  };
+  const menu = buildContextMenu(surfaceCatalog, s, resolution, "visible");
+  const surfaceItem = menu.sections[0]?.items.find((i) => i.id === "ui:surface");
+  assert.ok(surfaceItem, "a surfaceGrid-bearing object offers 'Usar la mesa'");
+  assert.equal(surfaceItem!.label, "Usar la mesa");
+  assert.equal(surfaceItem!.uiIntent, "surface");
+  assert.equal(surfaceItem!.surfaceId, "wo_table");
+});
+
+test("buildContextMenu: a world_object whose type does NOT declare surfaceGrid never gets 'Usar la mesa'", () => {
+  const s = makeSnapshot();
+  const object: WorldObject = { id: "wo1", objectTypeId: "tree", position: { x: 6, y: 5 }, state: {} };
+  const resolution = {
+    preview: { kind: "world_object" as const, pos: object.position, tags: ["tree"], object },
+    wireRef: { kind: "world_object" as const, id: "wo1" },
+    self: false,
+  };
+  const menu = buildContextMenu(surfaceCatalog, s, resolution, "visible");
+  assert.ok(!menu.sections[0]?.items.some((i) => i.id === "ui:surface"));
+});
+
 test("buildContextMenu: adjacent world_object does NOT get an 'Acercarme' item (already close enough)", () => {
   const s = makeSnapshot();
   const object: WorldObject = { id: "wo1", objectTypeId: "tree", position: { x: 6, y: 5 }, state: {} };

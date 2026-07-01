@@ -254,8 +254,23 @@ export function createInputController(deps: InputDeps): InputController {
           return;
         }
         if (item.kind === "ui") {
-          if (item.uiIntent === "thoughts") deps.ui.toggleThoughts();
-          else deps.ui.toggleInventory();
+          // Explicit switch (NOT a binary ternary) — deliberately restructured
+          // from the previous `thoughts ? toggleThoughts() : toggleInventory()`
+          // form, which would have silently misrouted `uiIntent === "surface"`
+          // into `toggleInventory()` if a "surface" branch had merely been
+          // appended to it (crafting-surface change, tasks.md Phase 12.2).
+          switch (item.uiIntent) {
+            case "thoughts":
+              deps.ui.toggleThoughts();
+              break;
+            case "surface":
+              if (item.surfaceId) deps.ui.toggleSurface(item.surfaceId);
+              break;
+            case "inventory":
+            default:
+              deps.ui.toggleInventory();
+              break;
+          }
         }
         // item.kind === "mute" never reaches here — `hud/ui.ts`'s
         // `renderContextMenuBody` never wires a click listener for it.

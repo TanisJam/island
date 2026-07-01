@@ -33,7 +33,10 @@ export interface ContextMenuItem {
   hint?: string;
   kind: "action" | "move" | "ui" | "mute";
   command?: Command;
-  uiIntent?: "inventory" | "thoughts";
+  uiIntent?: "inventory" | "thoughts" | "surface";
+  /** Only set when `uiIntent === "surface"` — the world object id `input/mouse.ts`
+   * forwards to `Ui.toggleSurface`. */
+  surfaceId?: string;
 }
 
 export interface ContextMenuSection {
@@ -261,6 +264,17 @@ function buildReachableMenu(
   const pos = preview.pos;
   const actions = computeAvailableActions(catalog, preview, snapshot);
   const items: ContextMenuItem[] = actions.map((a) => actionToItem(a, wireRef));
+
+  // "Usar la mesa" (spec R7 / design.md 7d): synthesized the same way as
+  // "Recoger"/"Ver mis cosas" — a UI-only affordance, not a catalog action —
+  // for any world object whose TYPE declares `surfaceGrid` (a rustic_table
+  // today, any future surface-bearing object automatically tomorrow).
+  if (preview.kind === "world_object") {
+    const def = catalog.worldObjects.find((o) => o.id === preview.object.objectTypeId);
+    if (def?.surfaceGrid) {
+      items.push({ id: "ui:surface", label: "Usar la mesa", kind: "ui", uiIntent: "surface", surfaceId: preview.object.id });
+    }
+  }
 
   // Adjacent loose items are pickable: the catalog has no item-kind actions, so
   // synthesize "Recoger" here too (mirrors the self-tile "En el suelo" section).
