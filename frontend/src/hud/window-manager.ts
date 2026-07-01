@@ -46,6 +46,13 @@ export interface WindowManager {
   /** Closes every window for which `shouldDismiss` is true, skipping any
    * window that contains `exceptTarget` (e.g. the click that opened it). */
   dismissTransient(exceptTarget?: EventTarget | null): void;
+  /** Replaces the body of an already-open window with `body`, in place (no
+   * close/reopen, no z-order/position change). No-op if `id` isn't open —
+   * callers that don't know/care whether a window is currently open (e.g. a
+   * store-notify re-render) can call this unconditionally. Needed so the
+   * inventory/thoughts windows can live-refresh while open (fix for the
+   * "stale inventory window" regression). */
+  setBody(id: WindowId, body: HTMLElement): void;
   destroy(): void;
 }
 
@@ -75,12 +82,36 @@ export function shouldDismiss(win: { pinned: boolean; variant: "window" | "menu"
   return !win.pinned;
 }
 
-type Entry = { el: HTMLElement; pinned: boolean; variant: "window" | "menu" };
+type Entry = { el: HTMLElement; bodyEl: HTMLElement; pinned: boolean; variant: "window" | "menu" };
+
+/**
+ * True when `target` sits inside a window's `.btns` cluster (the pin/close
+ * buttons in the title bar). MUST be checked before starting a drag on
+ * pointerdown: `wireDrag` listens on the whole `.bar-title`, and if a drag
+ * starts (and calls `setPointerCapture`) on a pointerdown that landed on a
+ * *button*, the browser retargets the follow-up `click` event to the
+ * captured element (the title bar) instead of the button — the button's own
+ * `click` listener never fires. That is the root cause of "the ✕ button does
+ * nothing": every pointerdown inside `.bar-title`, including on ✕/📌,
+ * unconditionally started a drag capture before this guard existed. Duck-typed
+ * (checks for `.closest` rather than `instanceof Element`) so it stays safe
+ * to call from a plain fake-DOM object in tests, not just real DOM nodes.
+ */
+export function isInsideButtons(target: EventTarget | null): boolean {
+  const el = target as { closest?: (selector: string) => unknown } | null;
+  return Boolean(el?.closest?.(".btns"));
+}
 
 /** DOM implementation of `WindowManager`. `root` defaults to `document.body`
  * so `createDomUi()` can just call `createWindowManager()`. */
 export function createWindowManager(root: HTMLElement = document.body): WindowManager {
   const entries = new Map<WindowId, Entry>();
+  // Remembers each window's last on-screen position by stable id, across
+  // close/reopen, so e.g. the inventory reopens where the player left it
+  // instead of snapping back to its default `at` (fix for "windows should
+  // reopen at their last position"). Survives for the lifetime of this
+  // `WindowManager` (i.e. the page session) — never persisted further.
+  const lastPositions = new Map<WindowId, ScreenPoint>();
   let topZ = 20; // base windows sit at z>=20 per the mockup
 
   function viewport(): { w: number; h: number } {
@@ -101,7 +132,7 @@ export function createWindowManager(root: HTMLElement = document.body): WindowMa
     entries.delete(id);
   }
 
-  function wireDrag(el: HTMLElement, handleEl: HTMLElement): void {
+  function wireDrag(el: HTMLElement, handleEl: HTMLElement, onMove: (at: ScreenPoint) => void): void {
     let dragging = false;
     let startX = 0;
     let startY = 0;
@@ -109,6 +140,11 @@ export function createWindowManager(root: HTMLElement = document.body): WindowMa
     let originTop = 0;
 
     handleEl.addEventListener("pointerdown", (ev: PointerEvent) => {
+      // Never start a drag (and never call setPointerCapture) for a
+      // pointerdown that landed on the pin/close buttons — see
+      // `isInsideButtons`'s docstring for why this is load-bearing, not
+      // cosmetic.
+      if (isInsideButtons(ev.target)) return;
       dragging = true;
       startX = ev.clientX;
       startY = ev.clientY;
@@ -125,6 +161,7 @@ export function createWindowManager(root: HTMLElement = document.body): WindowMa
       el.style.top = `${clamped.y}px`;
       el.style.right = "auto";
       el.style.bottom = "auto";
+      onMove(clamped);
     });
     const stopDrag = (ev: PointerEvent): void => {
       dragging = false;
@@ -134,7 +171,7 @@ export function createWindowManager(root: HTMLElement = document.body): WindowMa
     handleEl.addEventListener("pointercancel", stopDrag);
   }
 
-  function buildElement(spec: WindowSpec): { el: HTMLElement; pinButton: HTMLButtonElement } {
+  function buildElement(spec: WindowSpec): { el: HTMLElement; bodyEl: HTMLElement; pinButton: HTMLButtonElement } {
     const variant = spec.variant ?? "window";
     const el = document.createElement("div");
     el.id = spec.id;
@@ -184,9 +221,18 @@ export function createWindowManager(root: HTMLElement = document.body): WindowMa
     body.appendChild(spec.body);
     el.appendChild(body);
 
-    if (spec.draggable ?? true) wireDrag(el, barTitle);
+    if (spec.draggable ?? true) wireDrag(el, barTitle, (at) => lastPositions.set(spec.id, at));
 
-    return { el, pinButton };
+    // Click-to-focus/raise (spec "Multiple windows stack predictably"):
+    // clicking anywhere in the window — including inside its body, e.g. an
+    // inventory cell — bumps it to the top of the z-order. The pin/close
+    // buttons and menu-item buttons already `stopPropagation()` on their own
+    // click handlers, so this listener simply never fires for those clicks;
+    // that's fine, they don't need to also raise (they either toggle pin,
+    // close the window, or select-and-close it).
+    el.addEventListener("click", () => focus(spec.id));
+
+    return { el, bodyEl: body, pinButton };
   }
 
   function makeHandle(id: WindowId): WindowHandle {
@@ -202,15 +248,19 @@ export function createWindowManager(root: HTMLElement = document.body): WindowMa
 
   function open(spec: WindowSpec): WindowHandle {
     close(spec.id); // idempotent — replace if already open, matches `toggle`'s reuse-by-id contract
-    const { el } = buildElement(spec);
-    const at = spec.at ?? { x: 0, y: 0 };
+    const { el, bodyEl } = buildElement(spec);
+    // Reopen at the last remembered position (post-drag or post-clamp) if
+    // this id has been opened before this session; otherwise fall back to
+    // the caller-supplied `at` (fix "windows should reopen at their last
+    // position").
+    const at = lastPositions.get(spec.id) ?? spec.at ?? { x: 0, y: 0 };
 
     const initial = clampToViewport(at, FALLBACK_SIZE, viewport());
     el.style.left = `${initial.x}px`;
     el.style.top = `${initial.y}px`;
 
     root.appendChild(el);
-    entries.set(spec.id, { el, pinned: spec.pinned ?? false, variant: spec.variant ?? "window" });
+    entries.set(spec.id, { el, bodyEl, pinned: spec.pinned ?? false, variant: spec.variant ?? "window" });
 
     // Re-clamp using the now-measured size (offsetWidth/Height are 0 before
     // insertion) so windows opened near an edge never overflow the viewport.
@@ -218,6 +268,7 @@ export function createWindowManager(root: HTMLElement = document.body): WindowMa
     const reclamped = clampToViewport(at, measured, viewport());
     el.style.left = `${reclamped.x}px`;
     el.style.top = `${reclamped.y}px`;
+    lastPositions.set(spec.id, reclamped);
 
     focus(spec.id);
     return makeHandle(spec.id);
@@ -242,9 +293,16 @@ export function createWindowManager(root: HTMLElement = document.body): WindowMa
     }
   }
 
+  function setBody(id: WindowId, body: HTMLElement): void {
+    const entry = entries.get(id);
+    if (!entry) return; // not open — caller doesn't need to check first
+    while (entry.bodyEl.firstChild) entry.bodyEl.removeChild(entry.bodyEl.firstChild); // drop the previous body + its listeners
+    entry.bodyEl.appendChild(body);
+  }
+
   function destroy(): void {
     for (const id of [...entries.keys()]) close(id);
   }
 
-  return { open, close, toggle, get, dismissTransient, destroy };
+  return { open, close, toggle, get, dismissTransient, setBody, destroy };
 }

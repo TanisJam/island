@@ -184,6 +184,53 @@ test("buildContextMenu: penumbra target gets a single dim move-only item", () =>
   assert.deepEqual(menu.sections[0]?.items.map((i) => i.kind), ["move"]);
 });
 
+test("buildContextMenu: far-visible world_object gets an 'Acercarme' move item alongside whatever real actions apply", () => {
+  const s = makeSnapshot({ tiles: [makeTile(5, 5, "sand", true), makeTile(10, 5, "sand", true)] });
+  const object: WorldObject = { id: "wo1", objectTypeId: "tree", position: { x: 10, y: 5 }, state: {} };
+  const resolution = {
+    preview: { kind: "world_object" as const, pos: object.position, tags: ["tree"], object },
+    wireRef: { kind: "world_object" as const, id: "wo1" },
+    self: false,
+  };
+  const menu = buildContextMenu(catalog, s, resolution, "visible");
+  const approach = menu.sections[0]?.items.find((i) => i.id === "move:approach");
+  assert.ok(approach, "far-visible object with a walkable tile gets an Acercarme item");
+  assert.equal(approach!.label, "Acercarme");
+  assert.deepEqual(approach!.command, { type: "MovePlayer", to: { x: 10, y: 5 } });
+  // The real catalog action (pull_branches applies to adjacent only, not far) is
+  // correctly absent — this menu is ONLY the approach item, since `computeAvailableActions`
+  // itself gates on distance and rejects it from this far away.
+  assert.deepEqual(menu.sections[0]?.items.map((i) => i.id), ["move:approach"]);
+});
+
+test("buildContextMenu: far-visible object on a non-walkable tile still gets 'Acercarme' to the nearest walkable neighbor", () => {
+  const s = makeSnapshot({
+    tiles: [makeTile(5, 5, "sand", true), makeTile(10, 5, "shallow_water", false), makeTile(11, 5, "sand", true)],
+  });
+  const object: WorldObject = { id: "wo1", objectTypeId: "tree", position: { x: 10, y: 5 }, state: {} };
+  const resolution = {
+    preview: { kind: "world_object" as const, pos: object.position, tags: ["tree"], object },
+    wireRef: { kind: "world_object" as const, id: "wo1" },
+    self: false,
+  };
+  const menu = buildContextMenu(catalog, s, resolution, "visible");
+  const approach = menu.sections[0]?.items.find((i) => i.id === "move:approach");
+  assert.ok(approach, "still offers Acercarme by walking to the nearest walkable neighbor tile");
+  assert.deepEqual(approach!.command, { type: "MovePlayer", to: { x: 11, y: 5 } });
+});
+
+test("buildContextMenu: adjacent world_object does NOT get an 'Acercarme' item (already close enough)", () => {
+  const s = makeSnapshot();
+  const object: WorldObject = { id: "wo1", objectTypeId: "tree", position: { x: 6, y: 5 }, state: {} };
+  const resolution = {
+    preview: { kind: "world_object" as const, pos: object.position, tags: ["tree"], object },
+    wireRef: { kind: "world_object" as const, id: "wo1" },
+    self: false,
+  };
+  const menu = buildContextMenu(catalog, s, resolution, "visible");
+  assert.ok(!menu.sections[0]?.items.some((i) => i.id === "move:approach"));
+});
+
 test("buildContextMenu: unseen target gets a single dim mute item that is never a disabled action", () => {
   const s = makeSnapshot();
   const resolution = {

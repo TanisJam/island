@@ -116,12 +116,17 @@ export function createInputController(deps: InputDeps): InputController {
   let selection: ClickResolution | null = null;
 
   async function onCanvasClick(ev: MouseEvent): Promise<void> {
-    // Stops the click from bubbling to `document`, where `hud/ui.ts`'s
-    // outside-click listener (`WindowManager.dismissTransient`) would
-    // otherwise immediately dismiss the contextual menu THIS SAME click is
-    // about to open — mirrors the mockup's per-cell `e.stopPropagation()`.
-    ev.stopPropagation();
-
+    // NOTE: `ev.stopPropagation()` is deliberately NOT called at the top
+    // of this handler (it used to be, unconditionally — that was the root
+    // cause of "no object is interactable anymore" after several
+    // interactions). Blocking it here meant EVERY canvas click, not just the
+    // one about to open a menu, prevented `hud/ui.ts`'s document-level
+    // outside-click listener from ever running for canvas clicks — so an
+    // open inventory/context-menu window could never be dismissed by
+    // clicking the map (only by ✕, which had its own bug), and windows piled
+    // up over the map, eating clicks that never reached the canvas at all.
+    // It's now called ONLY right before opening a NEW context menu below,
+    // which is the one case that genuinely needs it (see that call site).
     const { x, y } = canvasToTile(ev, deps.canvas, deps.getFrame());
     const snapshot = deps.getSnapshot();
     const resolved = resolveClickTarget(deps.catalog, snapshot, x, y);
@@ -155,9 +160,22 @@ export function createInputController(deps: InputDeps): InputController {
     // "Contextual Menu from Real Action Logic" / "Self Click-Target
     // Resolution"). `self` is true whenever the clicked tile IS the player's
     // own position, regardless of what `resolveClickTarget` found there.
-    const self = x === snapshot.player.position.x && y === snapshot.player.position.y;
-    const visibility = visibilityOf(snapshot, resolved.preview.pos);
-    const menu = buildContextMenu(deps.catalog, snapshot, { preview: resolved.preview, wireRef: resolved.wireRef, self }, visibility);
+    //
+    // Defensively wrapped (fix for "no object is interactable anymore"):
+    // any new/unanticipated game state on this tile (a fresh world-item
+    // pile, a full inventory, an unrecognized typeId, etc.) must never throw
+    // out of this handler — a thrown menu build here would leave `selection`
+    // stuck and, worse, is exactly the kind of failure that could cascade
+    // into an unusable map. Degrade to a thought instead.
+    let menu: ReturnType<typeof buildContextMenu>;
+    try {
+      const self = x === snapshot.player.position.x && y === snapshot.player.position.y;
+      const visibility = visibilityOf(snapshot, resolved.preview.pos);
+      menu = buildContextMenu(deps.catalog, snapshot, { preview: resolved.preview, wireRef: resolved.wireRef, self }, visibility);
+    } catch {
+      showThought("No pude entender bien qué hay ahí. Mejor intento otra cosa.");
+      return;
+    }
 
     const totalItems = menu.sections.reduce((n, sec) => n + sec.items.length, 0);
     if (totalItems === 0) {
@@ -165,21 +183,45 @@ export function createInputController(deps: InputDeps): InputController {
       return;
     }
 
+    // Stops the click from bubbling to `document`, where `hud/ui.ts`'s
+    // outside-click listener (`WindowManager.dismissTransient`) would
+    // otherwise immediately dismiss the menu THIS SAME click is about to
+    // open — mirrors the mockup's per-cell `e.stopPropagation()`. Scoped to
+    // exactly this call site (see the note at the top of the handler for why
+    // it must NOT be unconditional).
+    ev.stopPropagation();
+
     deps.ui.openContextMenu(menu, { x: ev.clientX, y: ev.clientY }, (item) => {
-      if ((item.kind === "action" || item.kind === "move") && item.command) {
-        if (item.kind === "move") selection = null;
-        void deps.sendCommand(item.command);
-        return;
+      try {
+        if ((item.kind === "action" || item.kind === "move") && item.command) {
+          if (item.kind === "move") selection = null;
+          void deps.sendCommand(item.command);
+          return;
+        }
+        if (item.kind === "ui") {
+          if (item.uiIntent === "thoughts") deps.ui.toggleThoughts();
+          else deps.ui.toggleInventory();
+        }
+        // item.kind === "mute" never reaches here — `hud/ui.ts`'s
+        // `renderContextMenuBody` never wires a click listener for it.
+      } catch {
+        showThought("Algo salió mal. Mejor intento otra cosa.");
       }
-      if (item.kind === "ui") {
-        deps.ui.toggleInventory();
-      }
-      // item.kind === "mute" never reaches here — `hud/ui.ts`'s
-      // `renderContextMenuBody` never wires a click listener for it.
     });
   }
 
-  deps.canvas.addEventListener("click", (ev) => void onCanvasClick(ev));
+  // Outermost safety net (fix for "no object is interactable anymore"): a
+  // browser click-event dispatch is one-shot per click regardless of
+  // whether the listener throws, but an uncaught rejection here would still
+  // leave `selection` in whatever half-updated state it was in, and — per
+  // the fix list — nothing in this path is allowed to degrade to silence
+  // instead of a thought. `onCanvasClick` already handles the specific
+  // failure mode (menu building) with its own try/catch above; this catches
+  // anything else (e.g. a `resolveClickTarget` lookup throwing on
+  // unanticipated snapshot shape).
+  deps.canvas.addEventListener("click", (ev) => {
+    void onCanvasClick(ev).catch(() => showThought("Algo salió mal. Mejor intento otra cosa."));
+  });
 
   return { getSelection: () => selection };
 }

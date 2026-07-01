@@ -80,6 +80,35 @@ function tileWalkableAt(snapshot: ClientSnapshot, pos: Position): boolean {
   return snapshot.tiles.find((t) => t.x === pos.x && t.y === pos.y)?.walkable ?? false;
 }
 
+const NEIGHBOR_OFFSETS: Position[] = [
+  { x: 1, y: 0 },
+  { x: -1, y: 0 },
+  { x: 0, y: 1 },
+  { x: 0, y: -1 },
+  { x: 1, y: 1 },
+  { x: 1, y: -1 },
+  { x: -1, y: 1 },
+  { x: -1, y: -1 },
+];
+
+/**
+ * Best-effort walkable position to approach `pos` from — `pos` itself if
+ * walkable, otherwise the first walkable neighbor found (a world object's
+ * own tile is very often non-walkable, e.g. a tree that `blocksMovement`).
+ * Purely a client-side convenience for the "Acercarme" move item: the
+ * backend still pathfinds/revalidates the actual `MovePlayer`, so a
+ * best-effort miss just surfaces as a normal rejection thought, same
+ * tolerance as every other client-side preview in this module.
+ */
+function findApproachPosition(snapshot: ClientSnapshot, pos: Position): Position | null {
+  if (tileWalkableAt(snapshot, pos)) return pos;
+  for (const d of NEIGHBOR_OFFSETS) {
+    const candidate = { x: pos.x + d.x, y: pos.y + d.y };
+    if (tileWalkableAt(snapshot, candidate)) return candidate;
+  }
+  return null;
+}
+
 function terrainName(catalog: Catalog, terrain: Tile["terrain"]): string {
   return catalog.terrains.find((t) => t.id === terrain)?.name ?? terrain;
 }
@@ -175,6 +204,14 @@ function buildReachableMenu(
         ? moveItem("move:far", "Ir hasta ahí", "caminar", pos)
         : moveItem("move:adjacent", "Ir hasta acá", "pisar ese lugar", pos),
     );
+  } else if (proximity === "far-visible" && (preview.kind === "world_object" || preview.kind === "item")) {
+    // A far-visible object/item is never itself a move destination (only
+    // `tile`-kind previews are, above), but it must always offer a way to
+    // get closer — otherwise a real thing the player can see has literally
+    // nothing to do from here except "observe" (fix: distant objects need an
+    // "Acercarme" option even when not interactable).
+    const approach = findApproachPosition(snapshot, pos);
+    if (approach) items.push(moveItem("move:approach", "Acercarme", "acercarme", approach));
   }
 
   const name = targetName(catalog, preview);
