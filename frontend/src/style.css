@@ -37,7 +37,16 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  * {
+  /* `*` alone only matches real elements — it does NOT implicitly cover
+   * `::before`/`::after` pseudo-elements, which is exactly where the
+   * equip-reactive hand-slot glow (`.hslot.filled::after`) and the
+   * one-shot discovery flare (`.flare::after`) live, plus the existing
+   * `.thought`/`.voice` emberlight animation. Without the explicit
+   * `*::before, *::after`, this kill-switch silently did nothing for any of
+   * them (fix for "respect prefers-reduced-motion" on the new treatments). */
+  *,
+  *::before,
+  *::after {
     animation: none !important;
   }
 }
@@ -79,6 +88,36 @@ body {
     linear-gradient(180deg, transparent 62%, rgba(6, 10, 8, 0.82) 100%);
 }
 
+/* One-shot warm "descubrimiento" flare (spec "Light-Semantics State
+ * Treatments", MUST — previously unimplemented). Toggled by
+ * `hud/hud.ts`'s `flashDiscovery()` on every new `discovery`-kind thought.
+ * `--descubrir` is the dedicated warm-orange token for this exact moment
+ * (distinct from the everyday `--brasa` ember color), so a discovery reads
+ * as a brighter, one-time event rather than the ambient firelight. The
+ * global `prefers-reduced-motion` kill-switch above already neutralizes this
+ * animation; `flashDiscovery()` also skips adding the class at all under
+ * that preference, so this rule never even runs for those users. */
+.flare::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(120% 80% at 50% 42%, rgba(255, 122, 61, 0.32) 0%, transparent 60%);
+  animation: discovery-flare 0.9s ease-out 1;
+}
+
+@keyframes discovery-flare {
+  0% {
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
 #hint {
   position: fixed;
   top: 14px;
@@ -104,6 +143,14 @@ body {
   grid-template-columns: 1fr minmax(320px, 2fr) 1fr;
   align-items: end;
   gap: 24px;
+  /* Fix "HUD hands drift to the screen edges": without a max-width, the
+   * grid's `1fr` edge columns stretch to fill the full viewport on wide
+   * screens, pinning [left hand] and [right hand] far apart and away from
+   * the [thought+energy] column between them. Capping the width and
+   * centering it keeps the three-part overlay grouped and legible
+   * regardless of viewport width. */
+  max-width: 900px;
+  margin: 0 auto;
   padding: 0 34px 22px;
   pointer-events: none;
 }
@@ -148,6 +195,17 @@ body {
   border-radius: 50%;
   background: radial-gradient(circle, rgba(240, 162, 78, 0.28), transparent 70%);
   z-index: -1;
+  /* Equip-reactive (spec "Light-Semantics State Treatments" — the brasa glow
+   * around a hand slot reacts to equip state, not a static ambient flicker
+   * regardless of contents): dormant by default; `.filled` (hud/hud.ts,
+   * toggled per-render from whether the slot actually holds an item) is what
+   * turns the glow — and its flicker animation — on. */
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+
+.hslot.filled::after {
+  opacity: 0.75;
   animation: flicker 4.5s ease-in-out infinite;
 }
 

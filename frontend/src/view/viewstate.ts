@@ -7,8 +7,11 @@ export type Visibility = "unseen" | "explored" | "visible";
 
 /** Tween duration for an entity moving between two tiles. Resolves design.md's
  * open question ("MOVE_MS tween duration constant") — not architectural, just
- * a reasonable default for a single-tile step at the game's pace. */
-export const MOVE_MS = 120;
+ * a reasonable default for a single-tile step at the game's pace. Bumped from
+ * the original 120ms (playtest feedback: movement felt too fast/mechanical);
+ * kept modest — this only softens the tween easing/duration, it does NOT add
+ * real action-durations (that's a separate, future change). */
+export const MOVE_MS = 200;
 
 export interface RenderEntity {
   id: string;
