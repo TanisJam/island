@@ -119,6 +119,48 @@ export function canPlaceOnSurface(
   return fitsOnGrid(set, x, y, w, h, dims.width, dims.height);
 }
 
+/** Determina si un item con forma `itemTypeId` (rotado según `rotation`) puede
+ *  colocarse en `(x,y)` del inventario del jugador sin salirse de la grilla 4x4 ni
+ *  solapar con otro item ya presente (salvo `exceptId`, para permitir mover un item
+ *  dentro de su propio footprint). Espejo de `canPlaceOnSurface` para la grilla del
+ *  jugador. */
+export function canPlaceInInventory(
+  s: GameState,
+  index: CatalogIndex,
+  itemTypeId: string,
+  x: number,
+  y: number,
+  rotation: number,
+  exceptId?: string,
+): boolean {
+  const def = index.itemById.get(itemTypeId);
+  const w0 = def?.shape.w ?? 1;
+  const h0 = def?.shape.h ?? 1;
+  const [w, h] = rotation === 90 ? [h0, w0] : [w0, h0];
+  const set = occupiedSetOnGrid(inventoryItems(s), index, playerCell, exceptId);
+  return fitsOnGrid(set, x, y, w, h, INV_W, INV_H);
+}
+
+/** Determina si un item con forma `itemTypeId` (SIN rotar — un equipamiento en mano
+ *  siempre ancla la forma sin rotación) entra en el slot de mano `hand` sin solapar
+ *  con otro item que ya ocupe alguna de sus celdas (salvo `exceptId`). Valida el
+ *  footprint completo, no solo la celda ancla, porque un item 1x2 equipado en una
+ *  mano ocupa dos celdas. */
+export function handEquipFits(
+  s: GameState,
+  index: CatalogIndex,
+  itemTypeId: string,
+  hand: "left" | "right",
+  exceptId?: string,
+): boolean {
+  const slot = hand === "left" ? HAND_LEFT : HAND_RIGHT;
+  const def = index.itemById.get(itemTypeId);
+  const w = def?.shape.w ?? 1;
+  const h = def?.shape.h ?? 1;
+  const set = occupiedSetOnGrid(inventoryItems(s), index, playerCell, exceptId);
+  return fitsOnGrid(set, slot.x, slot.y, w, h, INV_W, INV_H);
+}
+
 /** Si una forma colocada en (x,y) ocuparía un slot de mano. */
 function coversHand(x: number, y: number, w: number, h: number): boolean {
   for (const slot of [HAND_LEFT, HAND_RIGHT])

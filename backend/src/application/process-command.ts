@@ -4,7 +4,7 @@ import type { EngineCtx, TargetRef } from "../domain/engine";
 import { executeAction, resolveTarget } from "../domain/engine";
 import { applyEvent } from "../domain/reducer";
 import { findPath } from "../domain/pathfinding";
-import { canPlaceOnSurface, findFreeInventorySlot, HAND_LEFT, HAND_RIGHT } from "../domain/inventory";
+import { canPlaceInInventory, canPlaceOnSurface, findFreeInventorySlot, handEquipFits, HAND_LEFT, HAND_RIGHT } from "../domain/inventory";
 import { chebyshev, REST_RECOVERY, tileAt } from "../domain/state";
 import { derivePiles, reconcilePiles } from "../domain/piles";
 import { newId } from "../domain/ids";
@@ -112,6 +112,13 @@ export function processCommand(ctx: EngineCtx, env: CommandEnvelope): CommandRes
         const rotation = to.rotation ?? 0;
         const fits = canPlaceOnSurface(ctx.state, ctx.index, to.surfaceId, item.itemTypeId, to.x, to.y, rotation, dims, item.id);
         if (!fits) return no({ code: "no_space", thought: thought("No entra ahí.", "warning") });
+      } else if (to.type === "inventory") {
+        const rotation = to.rotation ?? 0;
+        const fits = canPlaceInInventory(ctx.state, ctx.index, item.itemTypeId, to.x, to.y, rotation, item.id);
+        if (!fits) return no({ code: "no_space", thought: thought("No entra ahí.", "warning") });
+      } else if (to.type === "hand") {
+        const fits = handEquipFits(ctx.state, ctx.index, item.itemTypeId, to.hand, item.id);
+        if (!fits) return no({ code: "no_space", thought: thought("Ya tengo algo en esa mano.", "warning") });
       }
       emit({ type: "ItemMoved", itemInstanceId: item.id, to: cmd.to });
       const left = item.location.type === "player_inventory" && item.location.x === HAND_LEFT.x && item.location.y === HAND_LEFT.y ? item.id : undefined;

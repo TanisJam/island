@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadCatalog } from "../infrastructure/catalog/loader";
 import { seedState } from "../bootstrap/seed";
-import { canPlaceOnSurface, findFreeInventorySlot, handItems, occupiedCells } from "./inventory";
+import { canPlaceInInventory, canPlaceOnSurface, findFreeInventorySlot, handEquipFits, handItems, occupiedCells } from "./inventory";
 import type { ItemInstance, WorldObject } from "../contract/events";
 
 const { index } = loadCatalog();
@@ -80,4 +80,60 @@ test("canPlaceOnSurface: honra rotación (1x2 rotado a 2x1 cambia lo que entra)"
   assert.equal(canPlaceOnSurface(s, index, TABLE_ID, "dry_branch", 1, 1, 90, DIMS), true);
   // Unrotated (1x2) at (1,1) would need y in [1,2] -> out of bounds (height 2).
   assert.equal(canPlaceOnSurface(s, index, TABLE_ID, "dry_branch", 1, 1, 0, DIMS), false);
+});
+
+// --- canPlaceInInventory: fit / overflow / overlap / exceptId / rotation ---
+
+test("canPlaceInInventory: un item 1x1 entra en una celda vacía de la grilla 4x4", () => {
+  const s = seedState(index);
+  assert.equal(canPlaceInInventory(s, index, "small_stone", 3, 3, 0), true);
+});
+
+test("canPlaceInInventory: rechaza overlap con un item ya presente en el inventario", () => {
+  const s = seedState(index);
+  s.items.push({ id: "it_occupant", itemTypeId: "small_stone", location: { type: "player_inventory", playerId: s.player.id, x: 1, y: 1, rotation: 0 } });
+  assert.equal(canPlaceInInventory(s, index, "plant_fiber", 1, 1, 0), false);
+});
+
+test("canPlaceInInventory: permite mover un item sobre su propio footprint via exceptId", () => {
+  const s = seedState(index);
+  s.items.push({ id: "it_move", itemTypeId: "dry_branch", location: { type: "player_inventory", playerId: s.player.id, x: 2, y: 0, rotation: 0 } });
+  // Moving the SAME item onto its own cells must not self-collide.
+  assert.equal(canPlaceInInventory(s, index, "dry_branch", 2, 0, 0, "it_move"), true);
+  // A DIFFERENT item is still rejected against the same footprint.
+  assert.equal(canPlaceInInventory(s, index, "dry_branch", 2, 0, 0, "other_id"), false);
+});
+
+test("canPlaceInInventory: rechaza fuera de los límites de la grilla 4x4", () => {
+  const s = seedState(index);
+  assert.equal(canPlaceInInventory(s, index, "small_stone", 4, 0, 0), false);
+  assert.equal(canPlaceInInventory(s, index, "dry_branch", 0, 3, 0), false); // 1x2 vertical en y=3 se sale (h=2, gh=4)
+});
+
+test("canPlaceInInventory: honra rotación (1x2 rotado a 2x1 cambia lo que entra)", () => {
+  const s = seedState(index);
+  // dry_branch rotated 90 becomes 2x1: fits at (2,3) within the 4x4 grid.
+  assert.equal(canPlaceInInventory(s, index, "dry_branch", 2, 3, 90), true);
+  // Unrotated (1x2) at (2,3) would need y in [3,4] -> out of bounds (gh=4).
+  assert.equal(canPlaceInInventory(s, index, "dry_branch", 2, 3, 0), false);
+});
+
+// --- handEquipFits: empty hand / occupied hand / footprint collision ---
+
+test("handEquipFits: mano vacía acepta un item 1x1", () => {
+  const s = seedState(index);
+  assert.equal(handEquipFits(s, index, "small_stone", "left"), true);
+});
+
+test("handEquipFits: rechaza cuando la mano ya está ocupada por otro item", () => {
+  const s = seedState(index);
+  s.items.push({ id: "it_left", itemTypeId: "small_stone", location: { type: "player_inventory", playerId: s.player.id, x: 0, y: 0, rotation: 0 } });
+  assert.equal(handEquipFits(s, index, "plant_fiber", "left"), false);
+});
+
+test("handEquipFits: rechaza colisión de footprint 1x2 contra el resto de la mano izquierda", () => {
+  const s = seedState(index);
+  // dry_branch/simple_axe are 1x2 (w x h): equipping left anchors at (0,0) and also occupies (0,1).
+  s.items.push({ id: "it_blocker", itemTypeId: "small_stone", location: { type: "player_inventory", playerId: s.player.id, x: 0, y: 1, rotation: 0 } });
+  assert.equal(handEquipFits(s, index, "simple_axe", "left"), false);
 });
