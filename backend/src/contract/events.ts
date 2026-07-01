@@ -74,6 +74,13 @@ export interface ItemMoved {
         x: number;
         y: number;
         rotation?: 0 | 90;
+      }
+    | {
+        type: "surface";
+        surfaceId: string;
+        x: number;
+        y: number;
+        rotation?: 0 | 90;
       };
 }
 export interface ActiveHandsChanged {
@@ -120,6 +127,13 @@ export interface ItemInstance {
     | {
         type: "pile";
         pileId: string;
+      }
+    | {
+        type: "surface";
+        surfaceId: string;
+        x: number;
+        y: number;
+        rotation: number;
       };
 }
 export interface ItemRemovedFromInventory {

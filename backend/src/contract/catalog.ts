@@ -142,6 +142,7 @@ export interface WorldObjectTypeDef {
   blocksMovement: boolean;
   states?: string[];
   defaultState?: {};
+  surfaceGrid?: Shape;
   observation?: string;
   observationByState?: {
     [k: string]: string;

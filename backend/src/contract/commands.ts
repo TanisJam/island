@@ -42,6 +42,13 @@ export interface MoveItem {
         x: number;
         y: number;
         rotation?: 0 | 90;
+      }
+    | {
+        type: "surface";
+        surfaceId: string;
+        x: number;
+        y: number;
+        rotation?: 0 | 90;
       };
 }
 export interface DropItem {

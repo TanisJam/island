@@ -55,6 +55,7 @@
         "blocksMovement": { "type": "boolean" },
         "states": { "type": "array", "items": { "type": "string" } },
         "defaultState": { "type": "object" },
+        "surfaceGrid": { "$ref": "#/definitions/Shape" },
         "observation": { "type": "string" },
         "observationByState": {
           "type": "object",

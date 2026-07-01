@@ -51,6 +51,7 @@
     "description": "Una superficie estable para combinar y ensamblar piezas.",
     "tags": ["station", "surface", "work_surface"],
     "blocksMovement": true,
+    "surfaceGrid": { "w": 3, "h": 2 },
     "observation": "Con una superficie estable puedo probar mejor las piezas."
   }
 ]
