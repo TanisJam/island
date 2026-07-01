@@ -1,17 +1,26 @@
 import type { Position, Tile } from "../contract";
 import type { Store } from "../state/store";
 import type { ClientSnapshot } from "../state/snapshot";
-import { visibilityOf } from "../state/visibility";
+import { chebyshev, visibilityOf } from "../state/visibility";
 
 export type Visibility = "unseen" | "explored" | "visible";
 
-/** Tween duration for an entity moving between two tiles. Resolves design.md's
- * open question ("MOVE_MS tween duration constant") — not architectural, just
- * a reasonable default for a single-tile step at the game's pace. Bumped from
- * the original 120ms (playtest feedback: movement felt too fast/mechanical);
- * kept modest — this only softens the tween easing/duration, it does NOT add
- * real action-durations (that's a separate, future change). */
-export const MOVE_MS = 200;
+/**
+ * Per-tile tween-duration constant (2nd playtest pass fix: "movement tween
+ * has a FIXED duration regardless of distance"). Previously every tween used
+ * a single fixed `MOVE_MS` (200ms) no matter how many tiles it covered — a
+ * far "ir hasta ahí" straight-line move (design.md "Graceful Degradation":
+ * far movement is a straight-line `MovePlayer`, no stepped tween) crossed
+ * many tiles in the SAME 200ms as an adjacent 1-tile step, so it visually
+ * raced across the screen while the 1-tile step looked comparatively slow.
+ * `tweenDurationFor` below multiplies this per-tile constant by the tile
+ * distance so every tween moves at the same constant tiles-per-second pace,
+ * clamped by `MIN_TWEEN_MS`/`MAX_TWEEN_MS` so a 1-tile step never feels
+ * instant and a very long trek never feels sluggish. This does NOT add real
+ * action-durations — it only scales the existing tween easing/duration. */
+export const MS_PER_TILE = 100;
+const MIN_TWEEN_MS = 100;
+const MAX_TWEEN_MS = 600;
 
 export interface RenderEntity {
   id: string;
@@ -62,6 +71,15 @@ function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;
 }
 
+/** Tween duration for moving from `from` to `to`: constant per-tile speed
+ * (`MS_PER_TILE`), using the same CHEBYSHEV metric as the rest of the
+ * codebase (state/visibility.ts, actions/available.ts's "distance"
+ * requirement), clamped to `[MIN_TWEEN_MS, MAX_TWEEN_MS]`. */
+function tweenDurationFor(from: Position, to: Position): number {
+  const distance = chebyshev(from, to);
+  return Math.min(MAX_TWEEN_MS, Math.max(MIN_TWEEN_MS, distance * MS_PER_TILE));
+}
+
 /** Smoothstep. Movement stays a straight line in SPACE (no path waypoints —
  * `PlayerMoved.path` tweening is deferred, see design.md "Open Questions"),
  * but eases in TIME so it doesn't feel mechanically linear. Symmetric around
@@ -107,8 +125,8 @@ export function createViewState(store: Store): ViewState {
         fromPos: pos,
         targetPos: pos,
         renderPos: { ...pos },
-        elapsed: MOVE_MS,
-        duration: MOVE_MS,
+        elapsed: 0,
+        duration: 0,
         count: extra.count,
         state: extra.state,
       });
@@ -120,12 +138,14 @@ export function createViewState(store: Store): ViewState {
     existing.state = extra.state;
     if (!samePos(existing.authoritativePos, pos)) {
       // Mid-tween redirect: remember the CURRENT interpolated renderPos as
-      // the new starting point — no snap (tasks.md 2.2/2.4).
+      // the new starting point — no snap (tasks.md 2.2/2.4). Duration now
+      // scales with the actual distance of THIS leg (fromPos -> new pos),
+      // not a fixed constant — see `tweenDurationFor`.
       existing.fromPos = existing.renderPos;
       existing.targetPos = pos;
       existing.authoritativePos = pos;
       existing.elapsed = 0;
-      existing.duration = MOVE_MS;
+      existing.duration = tweenDurationFor(existing.fromPos, pos);
     }
   }
 

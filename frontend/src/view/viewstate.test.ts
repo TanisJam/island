@@ -4,7 +4,7 @@ import type { ItemInstance, Tile, WorldObject } from "../contract";
 import type { ClientSnapshot } from "../state/snapshot";
 import { createStore } from "../state/store";
 import { visibilityOf } from "../state/visibility";
-import { createViewState, MOVE_MS, type RenderEntity } from "./viewstate";
+import { createViewState, MS_PER_TILE, type RenderEntity } from "./viewstate";
 
 function makeTile(x: number, y: number, terrain: Tile["terrain"] = "grass", walkable = true): Tile {
   return { x, y, terrain, walkable, tags: ["ground"], visibility: "visible" };
@@ -47,20 +47,54 @@ test("frame(): new entities spawn at the authoritative position with no tween", 
   assert.deepEqual(player.renderPos, { x: 8, y: 9 });
 });
 
-test("update(): lerps renderPos toward the target across MOVE_MS, landing exactly on target", () => {
+test("update(): lerps renderPos toward the target across a 1-tile move's duration (MS_PER_TILE), landing exactly on target", () => {
   const store = createStore(makeSnapshot());
   const vs = createViewState(store);
 
   store.ingest([{ type: "PlayerMoved", playerId: "p1", path: [{ x: 9, y: 9 }], position: { x: 9, y: 9 } }]);
 
-  vs.update(MOVE_MS / 2);
+  vs.update(MS_PER_TILE / 2);
   const mid = findPlayer(vs.frame().entities);
   assert.equal(mid.renderPos.x, 8.5, "smoothstep ease is symmetric: t=0.5 midway in time is midway in space");
   assert.equal(mid.renderPos.y, 9);
 
-  vs.update(MOVE_MS / 2);
+  vs.update(MS_PER_TILE / 2);
   const end = findPlayer(vs.frame().entities);
   assert.deepEqual(end.renderPos, { x: 9, y: 9 });
+});
+
+test("update(): tween duration scales with tile distance — a farther move takes proportionally longer to complete", () => {
+  const store = createStore(makeSnapshot());
+  const vs = createViewState(store);
+
+  // A 1-tile move fully completes within exactly MS_PER_TILE.
+  store.ingest([{ type: "PlayerMoved", playerId: "p1", path: [{ x: 9, y: 9 }], position: { x: 9, y: 9 } }]);
+  vs.update(MS_PER_TILE);
+  assert.deepEqual(findPlayer(vs.frame().entities).renderPos, { x: 9, y: 9 }, "1-tile move is done after MS_PER_TILE");
+
+  // A 5-tile straight-line move ("ir hasta ahí") must NOT be done yet at
+  // that same elapsed time — constant per-tile speed means more distance
+  // takes proportionally more time, not the same fixed duration.
+  store.ingest([{ type: "PlayerMoved", playerId: "p1", path: [{ x: 14, y: 9 }], position: { x: 14, y: 9 } }]);
+  vs.update(MS_PER_TILE);
+  const midFar = findPlayer(vs.frame().entities).renderPos;
+  assert.notDeepEqual(midFar, { x: 14, y: 9 }, "a 5-tile move takes longer than a 1-tile move to complete");
+  assert.ok(midFar.x > 9 && midFar.x < 14, "still mid-tween toward the far target");
+
+  // ...but it does finish once enough time has elapsed for its own (longer) duration.
+  vs.update(5 * MS_PER_TILE);
+  assert.deepEqual(findPlayer(vs.frame().entities).renderPos, { x: 14, y: 9 }, "5-tile move eventually lands exactly on target");
+});
+
+test("update(): very long treks are capped — duration never grows unbounded with distance", () => {
+  const store = createStore(makeSnapshot({ tiles: [{ x: 8, y: 9, terrain: "grass", walkable: true, tags: ["ground"], visibility: "visible" }] }));
+  const vs = createViewState(store);
+
+  // A 50-tile move: at MS_PER_TILE-per-tile with no cap this would take
+  // 5000ms+ — the cap means it's fully done well before that.
+  store.ingest([{ type: "PlayerMoved", playerId: "p1", path: [{ x: 58, y: 9 }], position: { x: 58, y: 9 } }]);
+  vs.update(700); // comfortably above MAX_TWEEN_MS (600), well under an uncapped 50 * MS_PER_TILE
+  assert.deepEqual(findPlayer(vs.frame().entities).renderPos, { x: 58, y: 9 }, "capped duration means even a very long trek finishes quickly");
 });
 
 test("sync(): a mid-tween redirect sets fromPos to the current renderPos (no snap)", () => {
@@ -69,7 +103,7 @@ test("sync(): a mid-tween redirect sets fromPos to the current renderPos (no sna
 
   // Start a tween 8,9 -> 9,9.
   store.ingest([{ type: "PlayerMoved", playerId: "p1", path: [{ x: 9, y: 9 }], position: { x: 9, y: 9 } }]);
-  vs.update(MOVE_MS / 2);
+  vs.update(MS_PER_TILE / 2);
   const midway = findPlayer(vs.frame().entities).renderPos;
   assert.ok(midway.x > 8 && midway.x < 9, "player is mid-tween before the redirect");
 
@@ -83,7 +117,7 @@ test("sync(): a mid-tween redirect sets fromPos to the current renderPos (no sna
   assert.deepEqual(rightAfterRedirect, midway);
 
   // Advancing time now moves FROM the midway point TOWARD the new target.
-  vs.update(MOVE_MS);
+  vs.update(MS_PER_TILE);
   const afterFullTween = findPlayer(vs.frame().entities).renderPos;
   assert.deepEqual(afterFullTween, { x: 9, y: 10 });
 });
