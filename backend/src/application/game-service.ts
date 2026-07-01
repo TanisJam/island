@@ -4,6 +4,7 @@ import type { CatalogIndex } from "../domain/catalog";
 import type { GameRepository } from "../infrastructure/persistence/ports";
 import { HAND_LEFT, HAND_RIGHT, inventoryItems, worldItems } from "../domain/inventory";
 import { VISION_RADIUS } from "../domain/state";
+import { derivePiles } from "../domain/piles";
 import { visibilityOf } from "../domain/visibility";
 import { processCommand } from "./process-command";
 
@@ -29,7 +30,9 @@ export class GameService {
       visionRadius: VISION_RADIUS,
       tiles: s.tiles.map((t) => ({ x: t.x, y: t.y, terrain: t.terrain, walkable: t.walkable, tags: t.tags, visibility: visibilityOf(s, { x: t.x, y: t.y }) })),
       objects: s.objects.filter((o) => visibilityOf(s, o.position) !== "unseen"),
-      piles: s.piles,
+      // Derive piles from world items so the served snapshot is always consistent with
+      // them, regardless of how this state was constructed (seed, SQLite load, etc.).
+      piles: [...derivePiles(s).values()],
       worldItems: worldItems(s),
       catalogVersion: this.index.raw.catalogVersion,
     };

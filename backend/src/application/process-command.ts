@@ -6,6 +6,7 @@ import { applyEvent } from "../domain/reducer";
 import { findPath } from "../domain/pathfinding";
 import { findFreeInventorySlot, HAND_LEFT, HAND_RIGHT } from "../domain/inventory";
 import { chebyshev, REST_RECOVERY, tileAt } from "../domain/state";
+import { derivePiles, reconcilePiles } from "../domain/piles";
 import { newId } from "../domain/ids";
 
 const intersects = (a: string[], b: string[]): boolean => a.some((x) => b.includes(x));
@@ -24,6 +25,12 @@ export function processCommand(ctx: EngineCtx, env: CommandEnvelope): CommandRes
     applyEvent(ctx.state, ctx.index, e);
   };
 
+  // Piles are derived from the world-item layout. Snapshot them before the command
+  // mutates state so reconcilePiles can emit PileChanged for any group that forms,
+  // grows, shrinks, or dissolves as a side effect of this command.
+  const before = derivePiles(ctx.state);
+
+  const result: CommandResult = (() => {
   switch (cmd.type) {
     case "ExecuteAction": {
       const res = executeAction(ctx, cmd.actionId, cmd.target as TargetRef);
@@ -105,4 +112,8 @@ export function processCommand(ctx: EngineCtx, env: CommandEnvelope): CommandRes
     default:
       return no({ code: "not_applicable" });
   }
+  })();
+
+  if (result.accepted) reconcilePiles(ctx, before, result.events);
+  return result;
 }

@@ -76,6 +76,17 @@ test("ItemMoved: to.type=inventory maps onto a player_inventory cell at the give
   assert.deepEqual(moved.location, { type: "player_inventory", playerId: "p1", x: 2, y: 1, rotation: 90 });
 });
 
+test("PileChanged: stores a pile, and removes it once it drops below 2 members", () => {
+  const s = makeSnapshot();
+  const pile: Pile = { id: "pile_z1_8_9_small_stone", itemTypeId: "small_stone", zoneId: "z1", position: { x: 8, y: 9 }, itemInstanceIds: ["a", "b"] };
+
+  applyClientEvent(s, { type: "PileChanged", pile });
+  assert.equal(s.piles.length, 1, "a pile with 2 members is stored");
+
+  applyClientEvent(s, { type: "PileChanged", pile: { ...pile, itemInstanceIds: ["a"] } });
+  assert.equal(s.piles.length, 0, "a pile dropping below 2 members is removed");
+});
+
 test("ItemMoved: to.type=inventory without rotation defaults rotation to 0", () => {
   const item: ItemInstance = { id: "it_4", itemTypeId: "plant_fiber", location: { type: "world", zoneId: "z1", x: 8, y: 9 } };
   const s = makeSnapshot({ items: [item] });

@@ -46,6 +46,8 @@ export type GameState = {
 
 export const VISION_RADIUS = 5;
 export const REST_RECOVERY = 30;
+/** Minimum number of same-type world items on a tile to form a pile (visual grouping). */
+export const MIN_PILE = 2;
 
 export const tileKey = (x: number, y: number): string => `${x},${y}`;
 

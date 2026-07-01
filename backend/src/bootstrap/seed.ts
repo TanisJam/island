@@ -2,6 +2,7 @@ import type { ItemInstance, WorldObject } from "../contract/events";
 import type { CatalogIndex } from "../domain/catalog";
 import type { GameState, RuntimeTile, TerrainId } from "../domain/state";
 import { newId } from "../domain/ids";
+import { derivePiles } from "../domain/piles";
 import { markVisibleAround } from "../domain/visibility";
 
 const W = 16;
@@ -85,5 +86,8 @@ export function seedState(index: CatalogIndex, playerId = "p1", zoneId = "z1"): 
   };
 
   markVisibleAround(state, state.player.position);
+  // Derive piles from any co-located same-type world items so the initial state is
+  // consistent even if seed content ever places >= MIN_PILE such items on one tile.
+  state.piles = [...derivePiles(state).values()];
   return state;
 }

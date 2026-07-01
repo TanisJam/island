@@ -1,7 +1,7 @@
 import type { Event } from "../contract/events";
 import type { CatalogIndex } from "./catalog";
 import type { GameState, TerrainId } from "./state";
-import { tileAt, tileKey } from "./state";
+import { MIN_PILE, tileAt, tileKey } from "./state";
 import { HAND_LEFT, HAND_RIGHT } from "./inventory";
 import { markVisibleAround } from "./visibility";
 
@@ -43,8 +43,12 @@ export function applyEvent(s: GameState, index: CatalogIndex, e: Event): void {
       return;
     }
     case "PileChanged": {
+      // A pile groups >= 2 same-type world items on a tile; fewer than 2 means it
+      // dissolved, so a PileChanged carrying < 2 members removes it (no PileRemoved event).
       const idx = s.piles.findIndex((p) => p.id === e.pile.id);
-      if (idx >= 0) s.piles[idx] = e.pile;
+      if (e.pile.itemInstanceIds.length < MIN_PILE) {
+        if (idx >= 0) s.piles.splice(idx, 1);
+      } else if (idx >= 0) s.piles[idx] = e.pile;
       else s.piles.push(e.pile);
       return;
     }

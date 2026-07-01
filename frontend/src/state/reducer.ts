@@ -55,9 +55,14 @@ export function applyClientEvent(snapshot: ClientSnapshot, event: Event): void {
       return;
     }
     case "PileChanged": {
-      const idx = snapshot.piles.findIndex((p) => p.id === event.pile.id);
-      if (idx >= 0) snapshot.piles[idx] = event.pile;
-      else snapshot.piles.push(event.pile);
+      // Mirrors the backend reducer: a pile groups >= 2 same-type world items on a
+      // tile, so a PileChanged carrying < 2 members means it dissolved and is removed.
+      const pile = event.pile;
+      const idx = snapshot.piles.findIndex((p) => p.id === pile.id);
+      if (pile.itemInstanceIds.length < 2) {
+        if (idx >= 0) snapshot.piles.splice(idx, 1);
+      } else if (idx >= 0) snapshot.piles[idx] = pile;
+      else snapshot.piles.push(pile);
       return;
     }
     case "WorldObjectCreated": {

@@ -53,6 +53,22 @@ function drawEmoji(ctx: CanvasRenderingContext2D, pos: Position, emoji: string, 
   ctx.fillText(emoji, pos.x * PX + PX / 2, pos.y * PX + PX / 2 + 1);
 }
 
+/** Small "×N" badge in the bottom-right of a tile, used to show how many items a pile
+ *  holds. Stroked then filled so it stays legible over any terrain or glyph. */
+function drawCount(ctx: CanvasRenderingContext2D, pos: Position, n: number): void {
+  ctx.font = `bold ${Math.floor(PX * 0.28)}px sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const cx = pos.x * PX + PX * 0.74;
+  const cy = pos.y * PX + PX * 0.74;
+  const label = `×${n}`;
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = "rgba(0,0,0,0.75)";
+  ctx.strokeText(label, cx, cy);
+  ctx.fillStyle = "#fff";
+  ctx.fillText(label, cx, cy);
+}
+
 function drawSelection(ctx: CanvasRenderingContext2D, pos: Position): void {
   ctx.strokeStyle = "#ffeb3b";
   ctx.lineWidth = 3;
@@ -90,13 +106,19 @@ export function render(ctx: CanvasRenderingContext2D, snapshot: ClientSnapshot, 
     drawEmoji(ctx, obj.position, objectEmoji(obj.objectTypeId, obj.state as Record<string, unknown>));
   }
 
+  // Items grouped into a pile are drawn as a single pile glyph (+ count), not as N
+  // overlapping item emojis, so collect their ids to skip them in the world-item pass.
+  const piledItemIds = new Set(snapshot.piles.flatMap((p) => p.itemInstanceIds));
+
   for (const pile of snapshot.piles) {
     if (visibilityOf(snapshot, pile.position) === "unseen") continue;
     drawEmoji(ctx, pile.position, PILE_EMOJI, 0.6);
+    drawCount(ctx, pile.position, pile.itemInstanceIds.length);
   }
 
   for (const item of snapshot.items) {
     if (item.location.type !== "world") continue;
+    if (piledItemIds.has(item.id)) continue;
     const pos = { x: item.location.x, y: item.location.y };
     if (visibilityOf(snapshot, pos) === "unseen") continue;
     drawEmoji(ctx, pos, ITEM_EMOJI[item.itemTypeId] ?? UNKNOWN_EMOJI, 0.58);
