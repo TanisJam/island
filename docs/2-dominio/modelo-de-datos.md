@@ -113,6 +113,7 @@ type ItemLocation =
   | { type: "container"; containerId: string; x: number; y: number; rotation: number }
   | { type: "machine_slot"; machineId: string; slotId: string }
   | { type: "pile"; pileId: string }
+  | { type: "surface"; surfaceId: string; x: number; y: number; rotation: number }
 ```
 
 **Propiedades** (no recetas exactas): `hardness`, `sharpness`, `flexibility`,
@@ -138,7 +139,17 @@ type InventoryGrid = {
     right: Position
   }
 }
+```
 
+> `ownerType: "surface"` ahora tiene su variante `ItemLocation` correspondiente
+> (arriba) — ya no hay contradicción entre ambos. En la rebanada actual, la
+> grilla de una superficie (ej. la mesa rústica) NO está respaldada por un
+> `InventoryGrid` genérico: vive como un registro liviano
+> `GameState.inventories: Record<string, { width: number; height: number }>`
+> indexado por el id del `WorldObject` (el `surfaceId`). `container` y
+> `machine_slot` siguen sin implementar/diferidos.
+
+```ts
 // MVP
 type Pile = {
   id: string
