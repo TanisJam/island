@@ -43,3 +43,157 @@
     animation: none !important;
   }
 }
+
+/*
+ * Floating-window + contextual-menu chrome (hud/window-manager.ts,
+ * actions/context-menu.ts rendering in hud/ui.ts), ported from
+ * docs/1-diseno/mockups/luz-de-fuego.html. Still not imported into
+ * main.ts — dormant until Phase 3 wires the DOM shell.
+ */
+.win {
+  position: fixed;
+  z-index: 20;
+  background: linear-gradient(180deg, rgba(43, 38, 32, 0.97), rgba(28, 24, 20, 0.97));
+  border: 1px solid #000;
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px rgba(240, 162, 78, 0.25), 0 20px 50px -18px #000, 0 0 30px -8px rgba(240, 162, 78, 0.25);
+  min-width: 210px;
+}
+
+.win .bar-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px 8px 12px;
+  border-bottom: 1px solid var(--linea);
+  cursor: grab;
+  user-select: none;
+}
+
+.win .bar-title h3 {
+  font-family: "Silkscreen";
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--brasa);
+  margin: 0;
+  font-weight: 400;
+}
+
+.win .btns {
+  display: flex;
+  gap: 4px;
+}
+
+.win .btns button {
+  background: none;
+  border: none;
+  color: var(--recuerdo);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.win .btns button:hover {
+  color: var(--brasa);
+  background: rgba(240, 162, 78, 0.12);
+}
+
+.win .btns button.pinned {
+  color: var(--brasa);
+}
+
+.win .body {
+  padding: 14px;
+}
+
+.win.menu {
+  min-width: 230px;
+  max-width: 270px;
+}
+
+.win.menu .body {
+  padding: 4px 0 8px;
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, 52px);
+  grid-auto-rows: 52px;
+  gap: 5px;
+}
+
+.cell {
+  border: 1px solid var(--linea);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.25);
+  display: grid;
+  place-items: center;
+  font-size: 24px;
+  position: relative;
+}
+
+.cell.hand {
+  border-style: dashed;
+  border-color: var(--recuerdo);
+}
+
+.cell.equipped {
+  border-color: var(--brasa);
+  box-shadow: inset 0 0 12px rgba(240, 162, 78, 0.3);
+}
+
+.cell.span2 {
+  grid-row: span 2;
+}
+
+.sect-h {
+  font-family: "Silkscreen";
+  font-size: 8px;
+  letter-spacing: 1px;
+  color: var(--brasa);
+  padding: 9px 14px 3px;
+  opacity: 0.9;
+}
+
+.sect-h.dim {
+  color: var(--recuerdo);
+}
+
+.act {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--arena);
+  font-family: "Spectral";
+  font-size: 14px;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+
+.act:hover {
+  background: rgba(240, 162, 78, 0.15);
+  color: var(--brasa);
+}
+
+.act small {
+  display: block;
+  font-style: italic;
+  font-size: 11px;
+  color: var(--recuerdo);
+}
+
+.act.mute {
+  cursor: default;
+  color: var(--recuerdo);
+  font-style: italic;
+}
+
+.act.mute:hover {
+  background: none;
+}
