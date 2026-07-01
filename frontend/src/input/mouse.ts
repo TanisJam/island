@@ -168,25 +168,35 @@ export function resolveClickDecision(
 
 /**
  * PURE first-person "inspect" thought for a freshly selected tile (fix-list:
- * "1 click selects and surfaces a brief inspect observation"). Deliberately
- * terse fixed templates by target kind, using only the catalog's `name`
- * lookup (the same one `actions/context-menu.ts`'s `targetName` already
- * uses for menu titles) — NOT the catalog's richer per-entry `observation`/
- * `observationByState` flavor text, which stays reserved for the `Observe`
- * action's own thought (kept out of scope by this fix). `resolved.preview`
- * is always `world_object` | `item` | `tile` here — `resolveClickTarget`
- * never returns a `self` `ActionTarget` — the `self` branch below only
- * exists to keep the switch exhaustive against `ActionTarget`'s full union.
+ * "1 click selects and surfaces a brief inspect observation"). Prefers the
+ * catalog's AUTHORED first-person `observation` text (e.g. tree → "Veo ramas
+ * secas. Podría arrancar algunas con las manos.") — the game's own voice —
+ * over a generic template. World objects with an `observationByState` (e.g. a
+ * campfire's lit/unlit lines) resolve the current state by the first state
+ * key whose flag is truthy on the instance (`{ lit: true } → "lit"`), falling
+ * back to the base `observation`. Templates remain only as a last resort when
+ * the catalog has no authored text. `resolved.preview` is always
+ * `world_object` | `item` | `tile` here — `resolveClickTarget` never returns a
+ * `self` `ActionTarget`; the `self` branch only keeps the switch exhaustive.
  */
 export function describeSelection(catalog: Catalog, resolved: ClickResolution): string {
   const preview = resolved.preview;
   switch (preview.kind) {
-    case "world_object":
-      return `Veo ${targetName(catalog, preview)}.`;
-    case "item":
-      return `Veo ${targetName(catalog, preview)} en el suelo.`;
-    case "tile":
-      return `${targetName(catalog, preview)}.`;
+    case "world_object": {
+      const def = catalog.worldObjects.find((o) => o.id === preview.object.objectTypeId);
+      const byState = def?.observationByState;
+      const state = preview.object.state as Record<string, unknown> | undefined;
+      const stateKey = byState && state ? Object.keys(byState).find((k) => state[k]) : undefined;
+      return (stateKey && byState?.[stateKey]) || def?.observation || `Veo ${targetName(catalog, preview)}.`;
+    }
+    case "item": {
+      const def = catalog.items.find((i) => i.id === preview.item.itemTypeId);
+      return def?.observation || `Veo ${targetName(catalog, preview)} en el suelo.`;
+    }
+    case "tile": {
+      const def = catalog.terrains.find((t) => t.id === preview.terrain);
+      return def?.observation || `${targetName(catalog, preview)}.`;
+    }
     case "self":
       return `Veo ${targetName(catalog, preview)}.`;
   }
