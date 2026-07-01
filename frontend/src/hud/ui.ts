@@ -10,17 +10,21 @@ import {
   newlyAddedToInventory,
   renderHud,
   renderInventoryGrid,
+  renderSurfaceGrid,
   renderThoughtsBody,
   showLatestThought,
   showThought as showThoughtDom,
+  surfaceCellMessage,
   type HudHandlers,
 } from "./hud";
+import type { ClientSnapshot } from "../state/snapshot";
 
 export type { ScreenPoint };
 
 const INVENTORY_WINDOW_ID = "inventory";
 const THOUGHTS_WINDOW_ID = "thoughts";
 const CONTEXT_MENU_ID = "context-menu";
+const surfaceWindowId = (surfaceId: string): string => `surface:${surfaceId}`;
 
 /**
  * Sits in front of the DOM HUD (design.md SEAM 7) so a future reactive
@@ -49,6 +53,15 @@ export interface Ui {
    * `toggleInventory`, previously missing entirely (spec names "view
    * inventory, view thoughts" as two distinct self actions). */
   toggleThoughts(): void;
+  /** Opens the "LA MESA" surface-grid window for the world object identified
+   * by `surfaceId` (spec R7, design.md 7c/7d) if closed, closes it if already
+   * open. No-op (defensive, matches this module's style) if `surfaceId`
+   * doesn't resolve to a world object whose type declares `surfaceGrid` —
+   * `input/mouse.ts` only calls this for a `uiIntent === "surface"` item,
+   * which is itself only synthesized for such an object, but state can be
+   * stale between the click and this call. Stays live while open, same as
+   * `toggleInventory`/`toggleThoughts`. */
+  toggleSurface(surfaceId: string): void;
   /** Renders `menu` as a floating window at `at` (clamped to the viewport)
    * and invokes `onSelect` when a non-mute item is clicked. */
   openContextMenu(menu: ContextMenu, at: ScreenPoint, onSelect: (item: ContextMenuItem) => void): void;
@@ -93,10 +106,36 @@ function renderContextMenuBody(menu: ContextMenu, onSelect: (item: ContextMenuIt
  * 3.3) behind the interface above, and owns an internal `WindowManager`
  * (design.md decision) for the inventory window and contextual menu.
  */
+/** Resolves the `{width,height}` of the surface-grid window body from real
+ * catalog + snapshot data (design.md 7a: dims are static catalog data, never
+ * carried on the runtime snapshot) — `null` if `surfaceId` isn't a currently
+ * known world object, or its type doesn't declare `surfaceGrid`. */
+function resolveSurfaceDims(catalog: Catalog, snapshot: ClientSnapshot, surfaceId: string): { width: number; height: number } | null {
+  const object = snapshot.objects.find((o) => o.id === surfaceId);
+  if (!object) return null;
+  const def = catalog.worldObjects.find((o) => o.id === object.objectTypeId);
+  if (!def?.surfaceGrid) return null;
+  return { width: def.surfaceGrid.w, height: def.surfaceGrid.h };
+}
+
 export function createDomUi(): Ui {
   let unsubscribe: (() => void) | null = null;
   let mounted: { store: Store; catalog: Catalog; handlers: HudHandlers } | null = null;
   const windows: WindowManager = createWindowManager();
+  // Tracks the currently-open surface window's id (unlike the fixed
+  // INVENTORY/THOUGHTS ids, a surface window's id is dynamic — one per table
+  // instance) so `rerender()` can live-refresh it, matching the inventory/
+  // thoughts windows. Reset to `null` once `windows.get` reports it's no
+  // longer open (e.g. the player closed it via the ✕ button).
+  let openSurfaceId: string | null = null;
+
+  function buildSurfaceBody(catalog: Catalog, snapshot: ClientSnapshot, surfaceId: string): HTMLElement | null {
+    const dims = resolveSurfaceDims(catalog, snapshot, surfaceId);
+    if (!dims) return null;
+    return renderSurfaceGrid(catalog, snapshot, surfaceId, dims, {
+      onCellClick: (item) => showThoughtDom(surfaceCellMessage(catalog, item)),
+    });
+  }
 
   // Outside-click dismissal is fully self-contained here — `WindowManager`
   // is internal, so `input/mouse.ts` never needs to reach into it directly
@@ -128,6 +167,19 @@ export function createDomUi(): Ui {
         // so these two calls are safe unconditionally.
         windows.setBody(INVENTORY_WINDOW_ID, renderInventoryGrid(catalog, snapshot, handlers));
         windows.setBody(THOUGHTS_WINDOW_ID, renderThoughtsBody(snapshot));
+
+        // Live-refresh the surface window WHILE OPEN, same rationale as
+        // inventory/thoughts above — placements/removals must reflect
+        // instantly, not only on next toggle.
+        if (openSurfaceId) {
+          const id = surfaceWindowId(openSurfaceId);
+          if (windows.get(id)) {
+            const body = buildSurfaceBody(catalog, snapshot, openSurfaceId);
+            if (body) windows.setBody(id, body);
+          } else {
+            openSurfaceId = null; // closed by the player (e.g. the ✕ button) since the last render
+          }
+        }
 
         // Frontend-only "item entered inventory" notification (fix-list,
         // client-side only — never a backend thought): diff the inventory's
@@ -177,6 +229,15 @@ export function createDomUi(): Ui {
       const { store } = mounted;
       const body = renderThoughtsBody(store.getState());
       windows.toggle({ id: THOUGHTS_WINDOW_ID, title: "MIS PENSAMIENTOS", body, variant: "window", closable: true, draggable: true });
+    },
+
+    toggleSurface(surfaceId: string): void {
+      if (!mounted) return;
+      const { store, catalog } = mounted;
+      const body = buildSurfaceBody(catalog, store.getState(), surfaceId);
+      if (!body) return; // defensive: surfaceId no longer resolves to a surfaceGrid-bearing object
+      const handle = windows.toggle({ id: surfaceWindowId(surfaceId), title: "LA MESA", body, variant: "window", closable: true, draggable: true });
+      openSurfaceId = handle ? surfaceId : null;
     },
 
     openContextMenu(menu: ContextMenu, at: ScreenPoint, onSelect: (item: ContextMenuItem) => void): void {

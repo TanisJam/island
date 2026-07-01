@@ -111,6 +111,81 @@ export function renderInventoryGrid(catalog: Catalog, snapshot: ClientSnapshot, 
   return grid;
 }
 
+/** Cells (in the SURFACE's own local grid coordinates) a surface-placed item
+ * occupies, honoring rotation the same way the backend's `occupiedCells`/
+ * `cellsOnGrid` does (`backend/src/domain/inventory.ts`) — a 90° rotation
+ * swaps the catalog-declared `shape.w`/`shape.h`. Pure and pairs with
+ * `renderSurfaceGrid` below: items not currently on ANY surface
+ * (`location.type !== "surface"`) occupy nothing. */
+export function occupiedCellsForItem(item: ItemInstance, catalog: Catalog): Position[] {
+  if (item.location.type !== "surface") return [];
+  const def = catalog.items.find((i) => i.id === item.itemTypeId);
+  const w0 = def?.shape.w ?? 1;
+  const h0 = def?.shape.h ?? 1;
+  const [w, h] = item.location.rotation === 90 ? [h0, w0] : [w0, h0];
+  const cells: Position[] = [];
+  for (let dy = 0; dy < h; dy++) for (let dx = 0; dx < w; dx++) cells.push({ x: item.location.x + dx, y: item.location.y + dy });
+  return cells;
+}
+
+export type SurfaceGridHandlers = {
+  /** Fired when a grid cell is clicked; `item` is the occupant at that cell,
+   * or `undefined` for an empty cell — same "always react, never silently
+   * ignore a click" pattern used across this module. */
+  onCellClick: (item: ItemInstance | undefined) => void;
+};
+
+/** First-person cell-inspect line for the "Usar la mesa" window (mirrors
+ * `describeSelection`'s style in `input/mouse.ts`) — exported so it's a pure,
+ * independently testable unit, not buried inside a DOM click listener. */
+export function surfaceCellMessage(catalog: Catalog, item: ItemInstance | undefined): string {
+  if (!item) return "Esa celda está vacía.";
+  return `Ahí está ${itemName(catalog, item.itemTypeId)}.`;
+}
+
+/**
+ * Renders the "LA MESA" surface-grid window body (spec R7 / design.md 7c): a
+ * REAL `dims.width`×`dims.height` spatial grid — unlike `renderInventoryGrid`
+ * (a flat list), cell position here is the whole point, since it's what
+ * placement means. Reflects `snapshot.items` filtered to
+ * `location.type==="surface" && location.surfaceId===surfaceId` (R7, merged
+ * client-side by `state/snapshot.ts`'s `buildSnapshot`) — never mock/static
+ * data. Reuses the `.grid`/`.cell` styling `renderInventoryGrid` already
+ * uses, with an inline `grid-template-columns` override sized to `dims.width`
+ * (the shared CSS rule hardcodes 4 columns for the 4×4 player inventory).
+ */
+export function renderSurfaceGrid(
+  catalog: Catalog,
+  snapshot: ClientSnapshot,
+  surfaceId: string,
+  dims: { width: number; height: number },
+  handlers: SurfaceGridHandlers,
+): HTMLElement {
+  const grid = document.createElement("div");
+  grid.className = "grid";
+  grid.style.gridTemplateColumns = `repeat(${dims.width}, 52px)`;
+
+  const placed = snapshot.items.filter((it) => it.location.type === "surface" && it.location.surfaceId === surfaceId);
+  const occupantAt = (x: number, y: number): ItemInstance | undefined =>
+    placed.find((it) => occupiedCellsForItem(it, catalog).some((c) => c.x === x && c.y === y));
+
+  for (let y = 0; y < dims.height; y++) {
+    for (let x = 0; x < dims.width; x++) {
+      const occupant = occupantAt(x, y);
+      const cell = document.createElement("div");
+      cell.className = occupant ? "cell filled" : "cell";
+      if (occupant) {
+        const name = itemName(catalog, occupant.itemTypeId);
+        cell.textContent = itemGlyph(occupant.itemTypeId) || name;
+        cell.title = name;
+      }
+      cell.addEventListener("click", () => handlers.onCellClick(occupant));
+      grid.appendChild(cell);
+    }
+  }
+  return grid;
+}
+
 export function showThought(text: string): void {
   const thoughtEl = document.getElementById("thought");
   if (thoughtEl) thoughtEl.textContent = text;
