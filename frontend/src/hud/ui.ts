@@ -1,12 +1,22 @@
-import type { Catalog } from "../contract";
+import type { Catalog, Thought } from "../contract";
 import type { Store } from "../state/store";
 import type { ContextMenu, ContextMenuItem } from "../actions/context-menu";
 import { createWindowManager, type ScreenPoint, type WindowManager } from "./window-manager";
-import { renderHud, renderInventoryGrid, showLatestThought, showThought as showThoughtDom, type HudHandlers } from "./hud";
+import {
+  flashDiscovery,
+  hasDiscoveryThought,
+  renderHud,
+  renderInventoryGrid,
+  renderThoughtsBody,
+  showLatestThought,
+  showThought as showThoughtDom,
+  type HudHandlers,
+} from "./hud";
 
 export type { ScreenPoint };
 
 const INVENTORY_WINDOW_ID = "inventory";
+const THOUGHTS_WINDOW_ID = "thoughts";
 const CONTEXT_MENU_ID = "context-menu";
 
 /**
@@ -27,8 +37,15 @@ export interface Ui {
   destroy(): void;
   /** Opens the "MIS COSAS" inventory grid window if closed, closes it if
    * already open. Requires `mount` to have been called first (no-op
-   * otherwise — mirrors the rest of this module's defensive style). */
+   * otherwise — mirrors the rest of this module's defensive style). Stays
+   * live while open: every store notification re-renders its grid (fix for
+   * the "stale inventory window" regression). */
   toggleInventory(): void;
+  /** Opens the "Ver mis pensamientos" window (most-recent-first `thoughtLog`)
+   * if closed, closes it if already open — same shape/lifecycle as
+   * `toggleInventory`, previously missing entirely (spec names "view
+   * inventory, view thoughts" as two distinct self actions). */
+  toggleThoughts(): void;
   /** Renders `menu` as a floating window at `at` (clamped to the viewport)
    * and invokes `onSelect` when a non-mute item is clicked. */
   openContextMenu(menu: ContextMenu, at: ScreenPoint, onSelect: (item: ContextMenuItem) => void): void;
@@ -89,7 +106,29 @@ export function createDomUi(): Ui {
   return {
     mount(store: Store, catalog: Catalog, handlers: HudHandlers): void {
       mounted = { store, catalog, handlers };
-      const rerender = (): void => renderHud(catalog, store.getState(), handlers);
+      let lastThoughtCount = store.getState().thoughtLog.length;
+
+      const rerender = (): void => {
+        const snapshot = store.getState();
+        renderHud(catalog, snapshot, handlers);
+
+        // Live-refresh the inventory/thoughts windows WHILE OPEN (fix for the
+        // "stale inventory window" CRITICAL: previously only `renderHud` ran
+        // on every store notification, so an already-open floating window's
+        // own body never updated after an equip/drop click inside it).
+        // `setBody` is a documented no-op when the id isn't currently open,
+        // so these two calls are safe unconditionally.
+        windows.setBody(INVENTORY_WINDOW_ID, renderInventoryGrid(catalog, snapshot, handlers));
+        windows.setBody(THOUGHTS_WINDOW_ID, renderThoughtsBody(snapshot));
+
+        // One-shot discovery flare (spec "Light-Semantics State Treatments",
+        // MUST — previously unimplemented). Driven off the thought stream
+        // available to the client: any newly-appended `thoughtLog` entry of
+        // kind "discovery" since the last render triggers it.
+        const newThoughts: Thought[] = snapshot.thoughtLog.slice(lastThoughtCount);
+        lastThoughtCount = snapshot.thoughtLog.length;
+        if (hasDiscoveryThought(newThoughts)) flashDiscovery();
+      };
       rerender();
       showLatestThought(store.getState());
       unsubscribe = store.subscribe(rerender);
@@ -112,6 +151,13 @@ export function createDomUi(): Ui {
       const { store, catalog, handlers } = mounted;
       const body = renderInventoryGrid(catalog, store.getState(), handlers);
       windows.toggle({ id: INVENTORY_WINDOW_ID, title: "MIS COSAS", body, variant: "window", closable: true, draggable: true });
+    },
+
+    toggleThoughts(): void {
+      if (!mounted) return;
+      const { store } = mounted;
+      const body = renderThoughtsBody(store.getState());
+      windows.toggle({ id: THOUGHTS_WINDOW_ID, title: "MIS PENSAMIENTOS", body, variant: "window", closable: true, draggable: true });
     },
 
     openContextMenu(menu: ContextMenu, at: ScreenPoint, onSelect: (item: ContextMenuItem) => void): void {

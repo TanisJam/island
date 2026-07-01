@@ -1,4 +1,4 @@
-import type { Catalog, ItemInstance, Position } from "../contract";
+import type { Catalog, ItemInstance, Position, Thought } from "../contract";
 import type { ClientSnapshot } from "../state/snapshot";
 import { findCraftable } from "../actions/available";
 import { createEmojiAssets } from "../render/assets";
@@ -33,7 +33,15 @@ function itemGlyph(itemTypeId: string): string {
 function renderHandSlot(catalog: Catalog, item: ItemInstance | undefined, slotId: string, nameId: string): void {
   const slotEl = document.getElementById(slotId);
   const nameEl = document.getElementById(nameId);
-  if (slotEl) slotEl.textContent = item ? itemGlyph(item.itemTypeId) : "";
+  if (slotEl) {
+    slotEl.textContent = item ? itemGlyph(item.itemTypeId) : "";
+    // Equip-reactive glow (spec "Light-Semantics State Treatments" — the
+    // brasa glow around a hand slot reacts to equip state instead of being a
+    // static ambient flicker regardless of contents): `.hslot::after` is
+    // dormant by default in style.css, `.filled` is what turns the flicker
+    // animation on.
+    slotEl.classList.toggle("filled", Boolean(item));
+  }
   if (nameEl) nameEl.textContent = item ? itemName(catalog, item.itemTypeId) : "-";
 }
 
@@ -111,4 +119,60 @@ export function showThought(text: string): void {
 export function showLatestThought(snapshot: ClientSnapshot): void {
   const last = snapshot.thoughtLog[snapshot.thoughtLog.length - 1];
   showThought(last ? last.text : "");
+}
+
+/**
+ * Renders `snapshot.thoughtLog` as a `.body`-shaped list, MOST RECENT FIRST,
+ * for the "Ver mis pensamientos" floating window (spec "Self Click-Target
+ * Resolution" names "view inventory, view thoughts" as two distinct self
+ * actions — before this fix both routed to the inventory window). Read-only:
+ * no `HudHandlers` needed, unlike the inventory grid.
+ */
+export function renderThoughtsBody(snapshot: ClientSnapshot): HTMLElement {
+  const list = document.createElement("div");
+  list.className = "thoughts-list";
+
+  if (snapshot.thoughtLog.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "act mute";
+    empty.textContent = "Todavía no pensé nada digno de recordar.";
+    list.appendChild(empty);
+    return list;
+  }
+
+  for (const t of [...snapshot.thoughtLog].reverse()) {
+    const row = document.createElement("div");
+    row.className = "act";
+    row.textContent = t.text;
+    list.appendChild(row);
+  }
+  return list;
+}
+
+/**
+ * One-shot warm "descubrimiento" flare (spec "Light-Semantics State
+ * Treatments", explicit MUST — previously unimplemented). Triggered by
+ * `hud/ui.ts` whenever a NEW `discovery`-kind thought lands in the store.
+ * Adds `.flare` to `#vignette` for one animation cycle then removes it, so it
+ * can retrigger on the next discovery even mid-flare. Respects
+ * `prefers-reduced-motion` (the global kill-switch in style.css already
+ * neutralizes the animation, but skipping the class entirely avoids a
+ * pointless reflow/timer under that preference).
+ */
+export function flashDiscovery(): void {
+  if (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const vignette = document.getElementById("vignette");
+  if (!vignette) return;
+  vignette.classList.remove("flare");
+  void vignette.offsetWidth; // force a reflow so re-adding the class restarts the animation
+  vignette.classList.add("flare");
+  window.setTimeout(() => vignette.classList.remove("flare"), 900);
+}
+
+/** Pure: true when `thoughts` contains at least one `discovery`-kind entry —
+ * the trigger condition for `flashDiscovery()`. Split out so the "should a
+ * new batch of thoughts trigger a flare" decision is unit-testable without a
+ * DOM (`hud/ui.test.ts`). */
+export function hasDiscoveryThought(thoughts: Thought[]): boolean {
+  return thoughts.some((t) => t.kind === "discovery");
 }
