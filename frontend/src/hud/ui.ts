@@ -1,9 +1,8 @@
-import type { Catalog, ItemInstance, Position } from "../contract";
+import type { Catalog } from "../contract";
 import type { Store } from "../state/store";
-import type { ClientSnapshot } from "../state/snapshot";
 import type { ContextMenu, ContextMenuItem } from "../actions/context-menu";
 import { createWindowManager, type ScreenPoint, type WindowManager } from "./window-manager";
-import { renderHud, showLatestThought, showThought as showThoughtDom, type HudHandlers } from "./hud";
+import { renderHud, renderInventoryGrid, showLatestThought, showThought as showThoughtDom, type HudHandlers } from "./hud";
 
 export type { ScreenPoint };
 
@@ -34,46 +33,6 @@ export interface Ui {
    * and invokes `onSelect` when a non-mute item is clicked. */
   openContextMenu(menu: ContextMenu, at: ScreenPoint, onSelect: (item: ContextMenuItem) => void): void;
   closeContextMenu(): void;
-}
-
-function sameSlot(item: ItemInstance, slot: Position): boolean {
-  return item.location.type === "player_inventory" && item.location.x === slot.x && item.location.y === slot.y;
-}
-
-/**
- * Renders the inventory grid body for the floating window (design.md
- * "Inventory as Floating Window"). Deliberately self-contained here rather
- * than in hud/hud.ts — hud.ts stays untouched this batch (tasks.md Phase
- * 2). Equip/drop wiring mirrors hud.ts's existing flat-list logic; a future
- * pass may consolidate the two once hud.ts grows a matching
- * `renderInventoryGrid` (tasks.md 3.3).
- */
-function renderInventoryBody(catalog: Catalog, snapshot: ClientSnapshot, handlers: HudHandlers): HTMLElement {
-  const grid = document.createElement("div");
-  grid.className = "grid";
-
-  const items = snapshot.items.filter((it) => it.location.type === "player_inventory");
-  if (items.length === 0) {
-    const empty = document.createElement("div");
-    empty.textContent = "mochila vacía";
-    grid.appendChild(empty);
-    return grid;
-  }
-
-  for (const it of items) {
-    const inHand = sameSlot(it, snapshot.handSlots.left) || sameSlot(it, snapshot.handSlots.right);
-    const cell = document.createElement("div");
-    cell.className = inHand ? "cell equipped" : "cell";
-    const def = catalog.items.find((i) => i.id === it.itemTypeId);
-    cell.textContent = def?.name ?? it.itemTypeId;
-    cell.title = inHand ? "equipado — click para soltar" : "en la mochila — click para equipar";
-    cell.addEventListener("click", () => {
-      if (inHand) handlers.onDrop(it.id);
-      else handlers.onEquip(it.id);
-    });
-    grid.appendChild(cell);
-  }
-  return grid;
 }
 
 /** Renders a `ContextMenu` data model (actions/context-menu.ts, PURE) into
@@ -151,7 +110,7 @@ export function createDomUi(): Ui {
     toggleInventory(): void {
       if (!mounted) return;
       const { store, catalog, handlers } = mounted;
-      const body = renderInventoryBody(catalog, store.getState(), handlers);
+      const body = renderInventoryGrid(catalog, store.getState(), handlers);
       windows.toggle({ id: INVENTORY_WINDOW_ID, title: "MIS COSAS", body, variant: "window", closable: true, draggable: true });
     },
 

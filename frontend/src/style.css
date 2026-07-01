@@ -3,15 +3,13 @@
  * docs/1-diseno/mockups/luz-de-fuego.html (see also
  * docs/1-diseno/direccion-ux-ui.md §"Paleta" and §"Tipografía").
  *
- * NOT imported into main.ts yet (tasks.md Phase 1, task 1.1 — additive
- * only). The fullscreen DOM shell that actually consumes these tokens and
- * roles (index.html, hud/hud.ts) lands in Phase 3, and Google Fonts are
- * loaded there via a <link> tag. Component styles for the floating-window
- * system and contextual menu (.win, .bar-title, .grid, .cell, #ctx-style
- * sections, .act, etc.) are added in Phase 2 alongside window-manager.ts /
- * context-menu.ts so the DOM those modules build is visually coherent even
- * before the shell wires it into the live page.
+ * Imported from main.ts as of Phase 3 (tasks.md 3.4) — index.html's
+ * fullscreen shell now consumes the tokens/roles/component styles below.
  */
+
+* {
+  box-sizing: border-box;
+}
 
 :root {
   --sombra: #0f1a16;
@@ -42,6 +40,198 @@
   * {
     animation: none !important;
   }
+}
+
+/*
+ * Fullscreen frameless shell (index.html, hud/hud.ts — tasks.md Phase 3).
+ * Ported from docs/1-diseno/mockups/luz-de-fuego.html's #map/#vignette/#hud
+ * layout, adapted to a single fullscreen <canvas id="game"> instead of the
+ * mockup's per-tile DOM grid (render/canvas.ts already draws every tile).
+ */
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--sombra);
+  color: var(--arena);
+  font-family: "Spectral", Georgia, serif;
+}
+
+#game {
+  position: fixed;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  image-rendering: pixelated;
+  z-index: 0;
+}
+
+#vignette {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 80% at 50% 42%, transparent 45%, rgba(6, 10, 8, 0.55) 100%),
+    linear-gradient(180deg, transparent 62%, rgba(6, 10, 8, 0.82) 100%);
+}
+
+#hint {
+  position: fixed;
+  top: 14px;
+  left: 16px;
+  z-index: 6;
+  font-style: italic;
+  color: #c8bd9d;
+  font-size: 13px;
+  text-shadow: 0 1px 4px #000;
+  max-width: 380px;
+  line-height: 1.55;
+  pointer-events: none;
+  min-height: 1.2em;
+}
+
+#hud {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: 1fr minmax(320px, 2fr) 1fr;
+  align-items: end;
+  gap: 24px;
+  padding: 0 34px 22px;
+  pointer-events: none;
+}
+
+#hud > * {
+  pointer-events: auto;
+}
+
+.hand {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hand.right {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.hand .lbl {
+  font-family: "Silkscreen";
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: var(--recuerdo);
+  text-shadow: 0 1px 3px #000;
+}
+
+.hslot {
+  width: 60px;
+  height: 60px;
+  display: grid;
+  place-items: center;
+  font-size: 30px;
+  filter: drop-shadow(0 0 10px rgba(240, 162, 78, 0.55));
+  position: relative;
+}
+
+.hslot::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(240, 162, 78, 0.28), transparent 70%);
+  z-index: -1;
+  animation: flicker 4.5s ease-in-out infinite;
+}
+
+@keyframes flicker {
+  0%,
+  100% {
+    opacity: 0.75;
+  }
+  45% {
+    opacity: 1;
+  }
+  70% {
+    opacity: 0.7;
+  }
+}
+
+.hand .nm {
+  font-family: "Spectral";
+  font-size: 13px;
+  color: var(--arena);
+  text-shadow: 0 1px 4px #000;
+}
+
+.voice {
+  text-align: center;
+  padding-bottom: 2px;
+}
+
+.thought {
+  font-style: italic;
+  font-size: 21px;
+  line-height: 1.4;
+  min-height: 1.4em;
+  color: var(--arena);
+  text-shadow: 0 2px 8px #000, 0 0 22px rgba(240, 162, 78, 0.3);
+  animation: emberlight 5s ease-in-out infinite;
+}
+
+@keyframes emberlight {
+  0%,
+  100% {
+    text-shadow: 0 2px 8px #000, 0 0 16px rgba(240, 162, 78, 0.22);
+  }
+  50% {
+    text-shadow: 0 2px 8px #000, 0 0 26px rgba(240, 162, 78, 0.42);
+  }
+}
+
+.energy {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.energy .lbl {
+  font-family: "Silkscreen";
+  font-size: 9px;
+  color: var(--recuerdo);
+  text-shadow: 0 1px 3px #000;
+}
+
+.bar {
+  width: 200px;
+  height: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 5px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px #000;
+}
+
+.bar > i {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #b56a2a, var(--brasa));
+}
+
+.energy .num {
+  font-family: "Silkscreen";
+  font-size: 10px;
+  color: var(--arena);
+  text-shadow: 0 1px 3px #000;
 }
 
 /*

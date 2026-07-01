@@ -1,3 +1,4 @@
+import "./style.css";
 import { createHttpTransport } from "./net/transport";
 import { createDomUi } from "./hud/ui";
 import { createGame } from "./game/game";
@@ -7,12 +8,11 @@ const BASE_URL = "http://localhost:3000";
 
 async function boot(): Promise<void> {
   const canvas = document.getElementById("game") as HTMLCanvasElement | null;
-  const menuEl = document.getElementById("menu") as HTMLElement | null;
-  if (!canvas || !menuEl) throw new Error("Falta #game o #menu en index.html");
+  if (!canvas) throw new Error("Falta #game en index.html");
 
   const transport = createHttpTransport(BASE_URL);
   const ui = createDomUi();
-  const game = createGame({ canvas, menuEl, transport, ui });
+  const game = createGame({ canvas, transport, ui });
 
   await game.start();
 }

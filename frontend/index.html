@@ -3,42 +3,40 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Isla Misteriosa — Cliente mínimo</title>
-    <style>
-      html, body { margin: 0; padding: 0; background: #111; color: #eee; font-family: monospace; }
-      #app { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px; }
-      canvas { background: #000; image-rendering: pixelated; border: 1px solid #444; }
-      #hud { display: flex; flex-direction: column; gap: 4px; width: 768px; }
-      #hud-row { display: flex; gap: 24px; }
-      #hands, #energy { white-space: nowrap; }
-      #teletype { flex: 1; min-height: 1.4em; }
-      #inventory { min-height: 1.2em; color: #9cf; }
-      #inventory span { margin-right: 6px; }
-      #menu { position: absolute; background: #222; border: 1px solid #555; display: none; z-index: 10; }
-      #menu button { display: block; width: 100%; background: #222; color: #eee; border: none; padding: 6px 12px; text-align: left; cursor: pointer; }
-      #menu button:hover { background: #444; }
-      #legend { font-size: 0.85em; color: #888; }
-      .inv-item { margin-right: 16px; }
-      .inv-action { color: #6cf; cursor: pointer; margin-left: 6px; text-decoration: underline; }
-      .inv-action:hover { color: #9df; }
-      #hint { color: #b7ad72; font-style: italic; min-height: 1.2em; }
-    </style>
+    <title>Isla Misteriosa</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;1,400;1,500&family=Silkscreen:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
   </head>
   <body>
-    <div id="app">
-      <canvas id="game" width="768" height="576"></canvas>
-      <div id="hud">
-        <div id="hud-row">
-          <div id="hands">manos: - / -</div>
-          <div id="energy">energía: -</div>
-          <div id="teletype"></div>
+    <canvas id="game"></canvas>
+    <div id="vignette"></div>
+    <div id="hint"></div>
+
+    <div id="hud">
+      <div class="hand left">
+        <span class="lbl">MANO IZQ</span>
+        <div class="hslot" id="hand-left"></div>
+        <span class="nm" id="hand-left-name">-</span>
+      </div>
+      <div class="voice">
+        <div class="thought" id="thought"></div>
+        <div class="energy">
+          <span class="lbl">ENERGÍA</span>
+          <div class="bar"><i id="energy-bar"></i></div>
+          <span class="num" id="energy-num">-</span>
         </div>
-        <div id="inventory"></div>
-        <div id="hint"></div>
-        <div id="legend">Click: observar · 2º click: mover / acción · inventario: equipar o soltar materiales al lado</div>
+      </div>
+      <div class="hand right">
+        <span class="lbl">MANO DER</span>
+        <div class="hslot" id="hand-right"></div>
+        <span class="nm" id="hand-right-name">-</span>
       </div>
     </div>
-    <div id="menu"></div>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
