@@ -1,14 +1,6 @@
 import type { Position } from "../contract";
 import type { ClientSnapshot } from "./snapshot";
 
-/**
- * VISION_RADIUS mirrors backend/src/domain/state.ts `VISION_RADIUS`. This is a
- * documented coupling risk (see design.md "Risks"): if the backend's radius ever
- * changes, this constant must be updated by hand. There is no endpoint that exposes
- * it today.
- */
-export const VISION_RADIUS = 5;
-
 export type Visibility = "unseen" | "explored" | "visible";
 
 export const tileKey = (x: number, y: number): string => `${x},${y}`;
@@ -30,18 +22,18 @@ export const chebyshev = (a: Position, b: Position): number =>
  * `tile.visibility` directly, or the map will appear frozen after the first move.
  */
 export function visibilityOf(snapshot: ClientSnapshot, pos: Position): Visibility {
-  if (euclid(snapshot.player.position, pos) <= VISION_RADIUS) return "visible";
+  if (euclid(snapshot.player.position, pos) <= snapshot.visionRadius) return "visible";
   if (snapshot.discovered.has(tileKey(pos.x, pos.y))) return "explored";
   return "unseen";
 }
 
 /**
- * Marks every tile within VISION_RADIUS of `pos` as discovered. Mirrors backend
- * `markVisibleAround`. Called whenever the player's position changes (on
+ * Marks every tile within the zone's vision radius of `pos` as discovered. Mirrors
+ * backend `markVisibleAround`. Called whenever the player's position changes (on
  * `PlayerMoved`) so the client's `discovered` set tracks the backend's.
  */
 export function markVisibleAround(snapshot: ClientSnapshot, pos: Position): void {
-  const r = VISION_RADIUS;
+  const r = snapshot.visionRadius;
   const { width, height } = snapshot.zone;
   for (let y = pos.y - r; y <= pos.y + r; y++) {
     for (let x = pos.x - r; x <= pos.x + r; x++) {

@@ -60,6 +60,7 @@ const catalog: Catalog = {
 function makeSnapshot(overrides: Partial<ClientSnapshot> = {}): ClientSnapshot {
   return {
     zone: { id: "z1", width: 16, height: 12 },
+    visionRadius: 5,
     tiles: [],
     objects: [],
     piles: [],

@@ -5,6 +5,7 @@ const BASE_URL = "http://localhost:3000";
 /** Shape returned by backend `GameService.zoneSnapshot` (GET /zones/:zoneId). */
 export type ZoneSnapshotResponse = {
   zone: { id: string; ownerPlayerId?: string; type: "personal" | "shared" | "wild" | "gremio"; width: number; height: number };
+  visionRadius: number;
   tiles: Tile[];
   objects: WorldObject[];
   piles: Pile[];

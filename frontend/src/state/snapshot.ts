@@ -11,6 +11,7 @@ import { tileKey } from "./visibility";
  */
 export type ClientSnapshot = {
   zone: { id: string; width: number; height: number };
+  visionRadius: number; // tile radius the player can see — sourced from the backend zone snapshot, never hardcoded
   tiles: Tile[];
   objects: WorldObject[];
   piles: Pile[];
@@ -40,6 +41,7 @@ export function buildSnapshot(zone: ZoneSnapshotResponse, player: PlayerStateRes
 
   return {
     zone: { id: zone.zone.id, width: zone.zone.width, height: zone.zone.height },
+    visionRadius: zone.visionRadius,
     tiles: zone.tiles,
     objects: zone.objects,
     piles: zone.piles,
