@@ -6,9 +6,10 @@ import { createStore } from "../state/store";
 import { createViewState } from "../view/viewstate";
 import { createEmojiAssets } from "../render/assets";
 import { createCanvasRenderer } from "../render/canvas";
-import { createInputController } from "../input/mouse";
+import { canvasToTile, createInputController } from "../input/mouse";
 import type { Ui } from "../hud/ui";
 import type { HudHandlers } from "../hud/hud";
+import { createDragController } from "../hud/drag";
 
 const PLAYER_ID = "p1";
 const ZONE_ID = "z1";
@@ -89,6 +90,21 @@ export function createGame(deps: GameDeps): Game {
       store.ingest(result.events);
     };
 
+    // Drag controller (design.md "Drag engine (pure + DOM)"): constructed
+    // here because game.ts is the only layer that holds BOTH the canvas AND
+    // `viewState.frame` — the HUD deliberately never touches the camera
+    // directly. `resolveMapTile` reuses the exact same camera inverse the
+    // click handler uses (`input/mouse.ts`'s `canvasToTile`), so a drag-drop
+    // on the map resolves to the same tile a click there would.
+    const dragController = createDragController({
+      getSnapshot: store.getState,
+      sendCommand,
+      catalog,
+      canvas: deps.canvas,
+      resolveMapTile: (clientX, clientY) => canvasToTile(clientX, clientY, deps.canvas, viewState.frame()),
+      showThought: deps.ui.showThought,
+    });
+
     const hudHandlers: HudHandlers = {
       onEquip: (itemInstanceId) => {
         const occupied = handsOccupied(store.getState());
@@ -102,6 +118,7 @@ export function createGame(deps: GameDeps): Game {
       onDrop: (itemInstanceId) => {
         void sendCommand({ type: "DropItem", itemInstanceId, to: dropTargetTile(store.getState()) });
       },
+      bindDrag: dragController.bindCell,
     };
 
     const input = createInputController({

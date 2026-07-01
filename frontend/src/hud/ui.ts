@@ -42,7 +42,7 @@ export interface Ui {
   mount(store: Store, catalog: Catalog, handlers: HudHandlers): void;
   showThought(text: string): void;
   destroy(): void;
-  /** Opens the "MIS COSAS" inventory grid window if closed, closes it if
+  /** Opens the "MIS COSAS · 4×4" inventory grid window if closed, closes it if
    * already open. Requires `mount` to have been called first (no-op
    * otherwise — mirrors the rest of this module's defensive style). Stays
    * live while open: every store notification re-renders its grid (fix for
@@ -129,11 +129,12 @@ export function createDomUi(): Ui {
   // longer open (e.g. the player closed it via the ✕ button).
   let openSurfaceId: string | null = null;
 
-  function buildSurfaceBody(catalog: Catalog, snapshot: ClientSnapshot, surfaceId: string): HTMLElement | null {
+  function buildSurfaceBody(catalog: Catalog, snapshot: ClientSnapshot, surfaceId: string, handlers: HudHandlers): HTMLElement | null {
     const dims = resolveSurfaceDims(catalog, snapshot, surfaceId);
     if (!dims) return null;
     return renderSurfaceGrid(catalog, snapshot, surfaceId, dims, {
       onCellClick: (item) => showThoughtDom(surfaceCellMessage(catalog, item)),
+      bindDrag: handlers.bindDrag,
     });
   }
 
@@ -174,7 +175,7 @@ export function createDomUi(): Ui {
         if (openSurfaceId) {
           const id = surfaceWindowId(openSurfaceId);
           if (windows.get(id)) {
-            const body = buildSurfaceBody(catalog, snapshot, openSurfaceId);
+            const body = buildSurfaceBody(catalog, snapshot, openSurfaceId, handlers);
             if (body) windows.setBody(id, body);
           } else {
             openSurfaceId = null; // closed by the player (e.g. the ✕ button) since the last render
@@ -221,7 +222,7 @@ export function createDomUi(): Ui {
       if (!mounted) return;
       const { store, catalog, handlers } = mounted;
       const body = renderInventoryGrid(catalog, store.getState(), handlers);
-      windows.toggle({ id: INVENTORY_WINDOW_ID, title: "MIS COSAS", body, variant: "window", closable: true, draggable: true });
+      windows.toggle({ id: INVENTORY_WINDOW_ID, title: "MIS COSAS · 4×4", body, variant: "window", closable: true, draggable: true });
     },
 
     toggleThoughts(): void {
@@ -233,8 +234,8 @@ export function createDomUi(): Ui {
 
     toggleSurface(surfaceId: string): void {
       if (!mounted) return;
-      const { store, catalog } = mounted;
-      const body = buildSurfaceBody(catalog, store.getState(), surfaceId);
+      const { store, catalog, handlers } = mounted;
+      const body = buildSurfaceBody(catalog, store.getState(), surfaceId, handlers);
       if (!body) return; // defensive: surfaceId no longer resolves to a surfaceGrid-bearing object
       const handle = windows.toggle({ id: surfaceWindowId(surfaceId), title: "LA MESA", body, variant: "window", closable: true, draggable: true });
       openSurfaceId = handle ? surfaceId : null;

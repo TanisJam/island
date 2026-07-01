@@ -2,11 +2,23 @@ import type { Catalog, ItemInstance, Position, Thought } from "../contract";
 import type { ClientSnapshot } from "../state/snapshot";
 import { findCraftable } from "../actions/available";
 import { createEmojiAssets } from "../render/assets";
+import type { CellDescriptor } from "./drag";
 
 export type HudHandlers = {
   onEquip: (itemInstanceId: string) => void;
   onDrop: (itemInstanceId: string) => void;
+  /** Registers a rendered cell with the drag engine (design.md "Drag
+   * wiring") — optional so callers/tests that don't care about drag (yet)
+   * don't need to stub it; `game/game.ts` is the only real caller that sets
+   * it, wired to `createDragController(...).bindCell`. */
+  bindDrag?: (cellEl: HTMLElement, descriptor: CellDescriptor) => void;
 };
+
+/** 4x4 player inventory grid dimensions (mirrors the backend's
+ * `INV_W`/`INV_H` in `backend/src/domain/inventory.ts` — never hardcode
+ * these two numbers anywhere else in this module). */
+const INV_W = 4;
+const INV_H = 4;
 
 // Reused only for its glyph lookup (item emoji) — the HUD is not a Renderer
 // and never touches visibility/fog, it just wants the same stand-in art the
@@ -76,37 +88,83 @@ export function renderHud(catalog: Catalog, snapshot: ClientSnapshot, _handlers:
   }
 }
 
+/** Cells (in the PLAYER's own 4x4 inventory coordinates) an inventory-placed
+ * item occupies, honoring rotation exactly like `occupiedCellsForItem` does
+ * for the mesa — sibling function, NOT a replacement: `occupiedCellsForItem`
+ * stays untouched (hud.test.ts asserts it returns `[]` for a player_inventory
+ * item, and `renderSurfaceGrid` depends on that). Returns `[]` for any item
+ * not currently in `player_inventory` (spec R4 / design.md "New pure fn
+ * inventoryCellsForItem"). */
+export function inventoryCellsForItem(item: ItemInstance, catalog: Catalog): Position[] {
+  if (item.location.type !== "player_inventory") return [];
+  const def = catalog.items.find((i) => i.id === item.itemTypeId);
+  const w0 = def?.shape.w ?? 1;
+  const h0 = def?.shape.h ?? 1;
+  const [w, h] = item.location.rotation === 90 ? [h0, w0] : [w0, h0];
+  const cells: Position[] = [];
+  for (let dy = 0; dy < h; dy++) for (let dx = 0; dx < w; dx++) cells.push({ x: item.location.x + dx, y: item.location.y + dy });
+  return cells;
+}
+
 /**
- * Renders the "MIS COSAS" inventory as a `.grid`/`.cell` body (mockup shape,
- * style.css) for the floating window `hud/ui.ts` opens via
- * `Ui.toggleInventory()` (spec "Inventory as Floating Window", design.md
- * File Changes). Equip/drop behavior is unchanged from the old flat list:
- * click an unequipped cell to equip it, click an equipped one to drop it.
+ * Renders the "MIS COSAS" inventory as a REAL 4x4 spatial grid (spec R4,
+ * AMENDED rev 2 — per-coordinate fill, mirroring `renderSurfaceGrid`'s
+ * approach, NOT the mockup's `.cell.span2` spanning model, which would
+ * collapse a multi-cell item's coordinates into one DOM element and destroy
+ * the lower-half drop target). Always renders exactly 16 cells, including
+ * every empty coordinate and both hand slots — there is no "mochila vacía"
+ * empty-state branch anymore; an empty inventory is still a full 4x4 grid of
+ * drop targets. Tap (equip/drop) is routed through `descriptor.onTap`,
+ * invoked by the drag controller on a below-threshold pointerup — NOT a
+ * `click` listener — so tap and drag share one deterministic pointer
+ * pipeline (design.md decision 5).
  */
 export function renderInventoryGrid(catalog: Catalog, snapshot: ClientSnapshot, handlers: HudHandlers): HTMLElement {
   const grid = document.createElement("div");
   grid.className = "grid";
 
   const items = snapshot.items.filter((it) => it.location.type === "player_inventory");
-  if (items.length === 0) {
-    const empty = document.createElement("div");
-    empty.textContent = "mochila vacía";
-    grid.appendChild(empty);
-    return grid;
-  }
+  const occupantAt = (x: number, y: number): ItemInstance | undefined =>
+    items.find((it) => inventoryCellsForItem(it, catalog).some((c) => c.x === x && c.y === y));
 
-  for (const it of items) {
-    const inHand = sameSlot(it, snapshot.handSlots.left) || sameSlot(it, snapshot.handSlots.right);
-    const name = itemName(catalog, it.itemTypeId);
-    const cell = document.createElement("div");
-    cell.className = inHand ? "cell equipped" : "cell";
-    cell.textContent = itemGlyph(it.itemTypeId) || name;
-    cell.title = `${name} — ${inHand ? "equipado, click para soltar" : "en la mochila, click para equipar"}`;
-    cell.addEventListener("click", () => {
-      if (inHand) handlers.onDrop(it.id);
-      else handlers.onEquip(it.id);
-    });
-    grid.appendChild(cell);
+  for (let y = 0; y < INV_H; y++) {
+    for (let x = 0; x < INV_W; x++) {
+      const occupant = occupantAt(x, y);
+      // Hand-slot coordinates come from the live snapshot (backend-sourced),
+      // never hardcoded (spec R4 / design.md "hand-slot detection sourced
+      // from snapshot.handSlots.left/right").
+      const isLeftHand = x === snapshot.handSlots.left.x && y === snapshot.handSlots.left.y;
+      const isRightHand = x === snapshot.handSlots.right.x && y === snapshot.handSlots.right.y;
+      const isHandSlot = isLeftHand || isRightHand;
+
+      const cell = document.createElement("div");
+      const classes = ["cell"];
+      let onTap: (() => void) | undefined;
+
+      if (occupant) {
+        classes.push("filled");
+        if (isHandSlot) classes.push("equipped");
+        const name = itemName(catalog, occupant.itemTypeId);
+        cell.textContent = itemGlyph(occupant.itemTypeId) || name;
+        cell.title = `${name} — ${isHandSlot ? "equipado, click para soltar" : "en la mochila, click para equipar"}`;
+        const occupantId = occupant.id;
+        onTap = isHandSlot ? () => handlers.onDrop(occupantId) : () => handlers.onEquip(occupantId);
+      } else if (isHandSlot) {
+        // Empty hand slot: dashed border + "mano" label (style.css), no tap
+        // action — nothing to equip/drop from an empty slot.
+        classes.push("hand");
+      }
+      cell.className = classes.join(" ");
+
+      const descriptor: CellDescriptor = isLeftHand
+        ? { kind: "hand", hand: "left", occupant, onTap }
+        : isRightHand
+          ? { kind: "hand", hand: "right", occupant, onTap }
+          : { kind: "inventory", x, y, occupant, onTap };
+      handlers.bindDrag?.(cell, descriptor);
+
+      grid.appendChild(cell);
+    }
   }
   return grid;
 }
@@ -133,6 +191,13 @@ export type SurfaceGridHandlers = {
    * or `undefined` for an empty cell — same "always react, never silently
    * ignore a click" pattern used across this module. */
   onCellClick: (item: ItemInstance | undefined) => void;
+  /** Same drag registration as `HudHandlers.bindDrag` — the mesa is a valid
+   * drop target (inventory/hand -> surface) AND its occupied cells are drag
+   * sources (surface -> inventory), design.md "Registration covers ...
+   * surface cells". The existing `click` listener below is UNCHANGED (no
+   * regression to the surface-inspect click) — `bindCell` only ADDS drag
+   * capability alongside it, it never replaces the tap path here. */
+  bindDrag?: (cellEl: HTMLElement, descriptor: CellDescriptor) => void;
 };
 
 /** First-person cell-inspect line for the "Usar la mesa" window (mirrors
@@ -180,6 +245,7 @@ export function renderSurfaceGrid(
         cell.title = name;
       }
       cell.addEventListener("click", () => handlers.onCellClick(occupant));
+      handlers.bindDrag?.(cell, { kind: "surface", surfaceId, x, y, occupant });
       grid.appendChild(cell);
     }
   }

@@ -5,12 +5,16 @@ import type { ClientSnapshot } from "../state/snapshot";
 import {
   hasDiscoveryThought,
   inventoryAddedMessage,
+  inventoryCellsForItem,
   inventoryItemIds,
   newlyAddedToInventory,
   occupiedCellsForItem,
+  renderInventoryGrid,
   renderSurfaceGrid,
   surfaceCellMessage,
+  type HudHandlers,
 } from "./hud";
+import type { CellDescriptor } from "./drag";
 
 /**
  * `hud.ts` is otherwise DOM-heavy and only gets smoke coverage by design
@@ -229,5 +233,119 @@ test("renderSurfaceGrid: renders exactly width*height cells and places the occup
     const emptyCell = grid.children[0]!;
     emptyCell.click();
     assert.deepEqual(clicks, [placed, undefined], "clicking reports the real occupant, or undefined for an empty cell");
+  });
+});
+
+// --- inventoryCellsForItem / renderInventoryGrid --------------------------
+// (item-drag-drop change, spec R4 AMENDED rev 2: per-coordinate fill, no
+// `.cell.span2` spanning — mirrors renderSurfaceGrid's model above.)
+
+function inventoryItemAt(id: string, itemTypeId: string, x: number, y: number, rotation: 0 | 90 = 0): ItemInstance {
+  return { id, itemTypeId, location: { type: "player_inventory", playerId: "p1", x, y, rotation } };
+}
+
+const HAND_SLOTS = { left: { x: 0, y: 0 }, right: { x: 3, y: 0 } };
+
+function fullInventorySnapshot(items: ItemInstance[]): ClientSnapshot {
+  return { ...snapshotWithItems(items), handSlots: HAND_SLOTS };
+}
+
+const noopHandlers: HudHandlers = { onEquip: () => {}, onDrop: () => {} };
+
+test("inventoryCellsForItem: an item not in player_inventory occupies nothing", () => {
+  const item = surfaceItem("it1", "small_stone", "wo_table", 0, 0);
+  assert.deepEqual(inventoryCellsForItem(item, surfaceCatalog), []);
+});
+
+test("inventoryCellsForItem: a 1x1 item occupies exactly its own cell", () => {
+  const item = inventoryItemAt("it1", "small_stone", 2, 1);
+  assert.deepEqual(inventoryCellsForItem(item, surfaceCatalog), [{ x: 2, y: 1 }]);
+});
+
+test("inventoryCellsForItem: an unrotated 1x2 item occupies two cells stacked vertically", () => {
+  const item = inventoryItemAt("it1", "poor_wood", 1, 0);
+  assert.deepEqual(inventoryCellsForItem(item, surfaceCatalog), [
+    { x: 1, y: 0 },
+    { x: 1, y: 1 },
+  ]);
+});
+
+test("inventoryCellsForItem: rotation 90 swaps w/h, same as occupiedCellsForItem", () => {
+  const item = inventoryItemAt("it1", "poor_wood", 1, 0, 90);
+  assert.deepEqual(inventoryCellsForItem(item, surfaceCatalog), [
+    { x: 1, y: 0 },
+    { x: 2, y: 0 },
+  ]);
+});
+
+test("renderInventoryGrid: an empty inventory still renders exactly 16 cells (no 'mochila vacía' branch), both hand slots dashed", () => {
+  withFakeDocument(() => {
+    const snapshot = fullInventorySnapshot([]);
+    const grid = renderInventoryGrid(surfaceCatalog, snapshot, noopHandlers) as unknown as FakeCellElement;
+    assert.equal(grid.children.length, 16, "always 16 cells, even with zero items");
+    const handCells = grid.children.filter((c) => c.classes.has("hand"));
+    assert.equal(handCells.length, 2, "both empty hand slots render the dashed '.hand' style");
+    assert.equal(grid.children.filter((c) => c.classes.has("filled")).length, 0);
+  });
+});
+
+test("renderInventoryGrid: a 1x2 item fills BOTH its coordinates as separate 'filled' cells (per-coordinate, no span2 collapsing)", () => {
+  withFakeDocument(() => {
+    const item = inventoryItemAt("it1", "poor_wood", 1, 0);
+    const snapshot = fullInventorySnapshot([item]);
+    const grid = renderInventoryGrid(surfaceCatalog, snapshot, noopHandlers) as unknown as FakeCellElement;
+    assert.equal(grid.children.length, 16, "grid still contains exactly 16 cell elements");
+    const filled = grid.children.filter((c) => c.classes.has("filled"));
+    assert.equal(filled.length, 2, "both (1,0) and (1,1) render as their own filled cell");
+  });
+});
+
+test("renderInventoryGrid: an occupied hand slot renders 'equipped', not the dashed empty-hand style", () => {
+  withFakeDocument(() => {
+    const item = inventoryItemAt("it1", "small_stone", 0, 0); // left hand slot
+    const snapshot = fullInventorySnapshot([item]);
+    const grid = renderInventoryGrid(surfaceCatalog, snapshot, noopHandlers) as unknown as FakeCellElement;
+    const leftHandCell = grid.children[0]!; // (x:0, y:0) is index 0 in row-major order
+    assert.ok(leftHandCell.classes.has("equipped"));
+    assert.ok(leftHandCell.classes.has("filled"));
+    assert.ok(!leftHandCell.classes.has("hand"), "occupied hand slot never shows the empty-hand dashed style");
+  });
+});
+
+test("renderInventoryGrid: registers every cell (occupied, empty, hand) via handlers.bindDrag", () => {
+  withFakeDocument(() => {
+    const item = inventoryItemAt("it1", "small_stone", 2, 2);
+    const snapshot = fullInventorySnapshot([item]);
+    const bound: CellDescriptor[] = [];
+    const handlers: HudHandlers = { ...noopHandlers, bindDrag: (_cell, descriptor) => bound.push(descriptor) };
+    renderInventoryGrid(surfaceCatalog, snapshot, handlers);
+    assert.equal(bound.length, 16, "every one of the 16 cells is registered as a drop target");
+    const occupied = bound.find((d) => d.kind === "inventory" && d.x === 2 && d.y === 2);
+    assert.ok(occupied?.occupant, "the occupied cell's descriptor carries the occupant item");
+  });
+});
+
+test("renderInventoryGrid: a non-hand occupied cell's onTap calls onEquip; an occupied hand cell's onTap calls onDrop", () => {
+  withFakeDocument(() => {
+    const bagItem = inventoryItemAt("bag1", "small_stone", 2, 2);
+    const handItem = inventoryItemAt("hand1", "small_stone", 0, 0); // left hand slot
+    const snapshot = fullInventorySnapshot([bagItem, handItem]);
+    const equipped: string[] = [];
+    const dropped: string[] = [];
+    const byItemId = new Map<string, CellDescriptor>();
+    const handlers: HudHandlers = {
+      onEquip: (id) => equipped.push(id),
+      onDrop: (id) => dropped.push(id),
+      bindDrag: (_cell, descriptor) => {
+        if (descriptor.occupant) byItemId.set(descriptor.occupant.id, descriptor);
+      },
+    };
+    renderInventoryGrid(surfaceCatalog, snapshot, handlers);
+
+    byItemId.get("bag1")?.onTap?.();
+    byItemId.get("hand1")?.onTap?.();
+
+    assert.deepEqual(equipped, ["bag1"]);
+    assert.deepEqual(dropped, ["hand1"]);
   });
 });

@@ -99,10 +99,14 @@ function canvasRectOf(canvas: HTMLCanvasElement): CanvasRect {
  * uses to draw the current frame — never recompute it independently, or a
  * click during a movement tween could resolve to a different tile than the
  * one actually rendered under the cursor (design.md "Renderer camera" / spec
- * "Fullscreen Map with Player-Centered Camera"). */
-function canvasToTile(ev: MouseEvent, canvas: HTMLCanvasElement, frame: Frame): Position {
+ * "Fullscreen Map with Player-Centered Camera"). Generalized to take raw
+ * `clientX`/`clientY` (not a `MouseEvent`) and exported so the drag engine's
+ * canvas-drop resolution (`game/game.ts`'s `resolveMapTile`) reuses the exact
+ * same camera inverse instead of duplicating it (design.md "Drop-target
+ * resolution & map-tile wiring"). */
+export function canvasToTile(clientX: number, clientY: number, canvas: HTMLCanvasElement, frame: Frame): Position {
   const offset = cameraOffset(frame, { width: canvas.width, height: canvas.height });
-  return screenToTile({ x: ev.clientX, y: ev.clientY }, canvasRectOf(canvas), offset);
+  return screenToTile({ x: clientX, y: clientY }, canvasRectOf(canvas), offset);
 }
 
 /** Second click must land within this many ms of the first to count as a
@@ -291,7 +295,7 @@ export function createInputController(deps: InputDeps): InputController {
     // menu inside this same handler (the "menu" branch below) — a plain
     // select or a double-click move never opens anything, so they let the
     // click bubble to the outside-click dismiss listener as before.
-    const { x, y } = canvasToTile(ev, deps.canvas, deps.getFrame());
+    const { x, y } = canvasToTile(ev.clientX, ev.clientY, deps.canvas, deps.getFrame());
     const snapshot = deps.getSnapshot();
     const resolved = resolveClickTarget(deps.catalog, snapshot, x, y);
     if (!resolved) return;
