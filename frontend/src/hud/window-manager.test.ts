@@ -269,6 +269,46 @@ test("createWindowManager: setBody replaces an open window's body content in pla
   });
 });
 
+test("createWindowManager: a 'menu' variant ALWAYS opens at the passed click point, never a remembered position (fix: menu opening away from the click)", () => {
+  withFakeDom(() => {
+    const root = new FakeElement();
+    const wm = createWindowManager(root as unknown as HTMLElement);
+
+    const first = wm.open({ id: "context-menu", title: "TILE", body: new FakeElement() as unknown as HTMLElement, at: { x: 40, y: 50 }, variant: "menu" });
+    const firstEl = first.el as unknown as FakeElement;
+    assert.equal(firstEl.style.left, "40px");
+    assert.equal(firstEl.style.top, "50px");
+    wm.close("context-menu");
+
+    // Reopening at a DIFFERENT click point must land there, not at the
+    // previous menu's position — unlike the "window" variant reopen test
+    // below, a menu never consults `lastPositions`.
+    const second = wm.open({ id: "context-menu", title: "TILE", body: new FakeElement() as unknown as HTMLElement, at: { x: 200, y: 220 }, variant: "menu" });
+    const secondEl = second.el as unknown as FakeElement;
+    assert.equal(secondEl.style.left, "200px");
+    assert.equal(secondEl.style.top, "220px");
+  });
+});
+
+test("createWindowManager: dragging a menu never persists a remembered position for its next open", () => {
+  withFakeDom(() => {
+    const root = new FakeElement();
+    const wm = createWindowManager(root as unknown as HTMLElement);
+    const first = wm.open({ id: "context-menu", title: "TILE", body: new FakeElement() as unknown as HTMLElement, at: { x: 10, y: 10 }, variant: "menu" });
+    const el = first.el as unknown as FakeElement;
+    const barTitle = el.children[0]!;
+
+    fire(barTitle, "pointerdown", { target: barTitle, clientX: 0, clientY: 0, pointerId: 1 });
+    fire(barTitle, "pointermove", { target: barTitle, clientX: 300, clientY: 300, pointerId: 1 });
+
+    wm.close("context-menu");
+    const second = wm.open({ id: "context-menu", title: "TILE", body: new FakeElement() as unknown as HTMLElement, at: { x: 10, y: 10 }, variant: "menu" });
+    const secondEl = second.el as unknown as FakeElement;
+    assert.equal(secondEl.style.left, "10px", "the drag must not have poisoned lastPositions for this menu id");
+    assert.equal(secondEl.style.top, "10px");
+  });
+});
+
 test("createWindowManager: reopening a window after close reuses its last remembered position, ignoring a new `at`", () => {
   withFakeDom(() => {
     const root = new FakeElement();

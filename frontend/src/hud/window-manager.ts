@@ -221,7 +221,17 @@ export function createWindowManager(root: HTMLElement = document.body): WindowMa
     body.appendChild(spec.body);
     el.appendChild(body);
 
-    if (spec.draggable ?? true) wireDrag(el, barTitle, (at) => lastPositions.set(spec.id, at));
+    // Only "window" variant windows remember/restore their last position
+    // (fix: the context menu was reopening away from the click point because
+    // it reused a "window"-style remembered position — a menu MUST always
+    // open exactly at the point the caller clicked, clamped to the
+    // viewport). Dragging a menu (if it's ever made draggable) still moves
+    // it live for THIS open, it just never persists into `lastPositions`.
+    if (spec.draggable ?? true) {
+      wireDrag(el, barTitle, (at) => {
+        if (variant === "window") lastPositions.set(spec.id, at);
+      });
+    }
 
     // Click-to-focus/raise (spec "Multiple windows stack predictably"):
     // clicking anywhere in the window — including inside its body, e.g. an
@@ -248,19 +258,25 @@ export function createWindowManager(root: HTMLElement = document.body): WindowMa
 
   function open(spec: WindowSpec): WindowHandle {
     close(spec.id); // idempotent — replace if already open, matches `toggle`'s reuse-by-id contract
+    const variant = spec.variant ?? "window";
     const { el, bodyEl } = buildElement(spec);
     // Reopen at the last remembered position (post-drag or post-clamp) if
     // this id has been opened before this session; otherwise fall back to
     // the caller-supplied `at` (fix "windows should reopen at their last
-    // position").
-    const at = lastPositions.get(spec.id) ?? spec.at ?? { x: 0, y: 0 };
+    // position"). ONLY for "window" variant — a "menu" (the contextual
+    // menu) MUST always open exactly at the passed click point (clamped to
+    // the viewport), never at a remembered position from a previous open
+    // (fix: "the context menu opens away from the click point", caused by
+    // this exact remembered-position lookup being applied to menus too).
+    const remembered = variant === "window" ? lastPositions.get(spec.id) : undefined;
+    const at = remembered ?? spec.at ?? { x: 0, y: 0 };
 
     const initial = clampToViewport(at, FALLBACK_SIZE, viewport());
     el.style.left = `${initial.x}px`;
     el.style.top = `${initial.y}px`;
 
     root.appendChild(el);
-    entries.set(spec.id, { el, bodyEl, pinned: spec.pinned ?? false, variant: spec.variant ?? "window" });
+    entries.set(spec.id, { el, bodyEl, pinned: spec.pinned ?? false, variant });
 
     // Re-clamp using the now-measured size (offsetWidth/Height are 0 before
     // insertion) so windows opened near an edge never overflow the viewport.
@@ -268,7 +284,7 @@ export function createWindowManager(root: HTMLElement = document.body): WindowMa
     const reclamped = clampToViewport(at, measured, viewport());
     el.style.left = `${reclamped.x}px`;
     el.style.top = `${reclamped.y}px`;
-    lastPositions.set(spec.id, reclamped);
+    if (variant === "window") lastPositions.set(spec.id, reclamped);
 
     focus(spec.id);
     return makeHandle(spec.id);
