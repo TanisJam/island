@@ -5,6 +5,9 @@ import { createWindowManager, type ScreenPoint, type WindowManager } from "./win
 import {
   flashDiscovery,
   hasDiscoveryThought,
+  inventoryAddedMessage,
+  inventoryItemIds,
+  newlyAddedToInventory,
   renderHud,
   renderInventoryGrid,
   renderThoughtsBody,
@@ -107,6 +110,11 @@ export function createDomUi(): Ui {
     mount(store: Store, catalog: Catalog, handlers: HudHandlers): void {
       mounted = { store, catalog, handlers };
       let lastThoughtCount = store.getState().thoughtLog.length;
+      // Seeded from the CURRENT snapshot, before the first `rerender()` call
+      // below — so items already in the inventory at mount time are never
+      // mistaken for "just added" (fix-list: "No feedback when an item is
+      // added to the inventory").
+      let lastInventoryIds = inventoryItemIds(store.getState());
 
       const rerender = (): void => {
         const snapshot = store.getState();
@@ -120,6 +128,17 @@ export function createDomUi(): Ui {
         // so these two calls are safe unconditionally.
         windows.setBody(INVENTORY_WINDOW_ID, renderInventoryGrid(catalog, snapshot, handlers));
         windows.setBody(THOUGHTS_WINDOW_ID, renderThoughtsBody(snapshot));
+
+        // Frontend-only "item entered inventory" notification (fix-list,
+        // client-side only — never a backend thought): diff the inventory's
+        // item ids against the last render's ids. Any id present now that
+        // wasn't before just had its `location.type` become
+        // `"player_inventory"` (TakeItem, or a MoveItem landing in a free
+        // cell) — equip (hand-slot MoveItem) never trips this, the item's id
+        // was already in the set from the moment it entered the inventory.
+        const addedItems = newlyAddedToInventory(lastInventoryIds, snapshot);
+        lastInventoryIds = inventoryItemIds(snapshot);
+        if (addedItems.length > 0) showThoughtDom(inventoryAddedMessage(catalog, addedItems));
 
         // One-shot discovery flare (spec "Light-Semantics State Treatments",
         // MUST — previously unimplemented). Driven off the thought stream

@@ -176,3 +176,40 @@ export function flashDiscovery(): void {
 export function hasDiscoveryThought(thoughts: Thought[]): boolean {
   return thoughts.some((t) => t.kind === "discovery");
 }
+
+/** Ids of every item CURRENTLY in `player_inventory`. Used by `hud/ui.ts`'s
+ * `mount()` rerender to snapshot "what's in the inventory right now" before
+ * and after each `Store.ingest`, so it can diff the two and detect items
+ * that just entered the inventory (see `newlyAddedToInventory`). */
+export function inventoryItemIds(snapshot: ClientSnapshot): Set<string> {
+  const ids = new Set<string>();
+  for (const it of snapshot.items) if (it.location.type === "player_inventory") ids.add(it.id);
+  return ids;
+}
+
+/**
+ * Pure: items in `snapshot`'s inventory whose id was NOT in `previousIds` —
+ * i.e. items whose `location.type` just became `"player_inventory"` since
+ * the last snapshot read (frontend-only "item added to inventory"
+ * notification — a fix-list item explicitly calling for detecting this from
+ * the event/state flow, e.g. "compare inventory contents before/after
+ * `Store.ingest`"). Split out from `hud/ui.ts` (same "extract the pure
+ * decision" pattern as `hasDiscoveryThought`) so the detection logic is
+ * unit-testable without a DOM. */
+export function newlyAddedToInventory(previousIds: ReadonlySet<string>, snapshot: ClientSnapshot): ItemInstance[] {
+  return snapshot.items.filter((it) => it.location.type === "player_inventory" && !previousIds.has(it.id));
+}
+
+/**
+ * Builds the one-line, first-person "just added to inventory" notification
+ * for a batch of newly-added items (fix-list: "No feedback when an item is
+ * added to the inventory" — frontend-only, game voice, Spanish). One line
+ * per BATCH (not per item) so e.g. picking up a pile in one action doesn't
+ * spam multiple lines.
+ */
+export function inventoryAddedMessage(catalog: Catalog, items: ItemInstance[]): string {
+  const names = items.map((it) => itemName(catalog, it.itemTypeId));
+  const last = names[names.length - 1];
+  const joined = names.length > 1 ? `${names.slice(0, -1).join(", ")} y ${last}` : (last ?? "");
+  return `Guardé ${joined} en la mochila.`;
+}
