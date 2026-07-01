@@ -4,7 +4,7 @@ import { buildContextMenu, type WireTargetRef } from "../actions/context-menu";
 import { cameraOffset, screenToTile, type CanvasRect } from "../render/camera";
 import type { Frame } from "../view/viewstate";
 import type { ClientSnapshot } from "../state/snapshot";
-import { chebyshev, visibilityOf } from "../state/visibility";
+import { visibilityOf } from "../state/visibility";
 import { showThought } from "../hud/hud";
 import type { Ui } from "../hud/ui";
 
@@ -14,7 +14,6 @@ type ClickResolution = {
   preview: ActionTarget;
   observation: string;
   walkable: boolean;
-  isLooseItem: boolean;
 };
 
 export type InputDeps = {
@@ -50,7 +49,7 @@ function findTileAt(snapshot: ClientSnapshot, x: number, y: number): Tile | unde
  * world object > loose ground item > tile. Builds both the wire `target` ref (for
  * commands) and the local `ActionTarget` preview (for `computeAvailableActions`,
  * wrapped by `actions/context-menu.ts`), plus the local-only "observation" text
- * shown on first click — zero network calls. */
+ * used as a fallback for empty, non-walkable tiles — zero network calls. */
 function resolveClickTarget(catalog: Catalog, snapshot: ClientSnapshot, x: number, y: number): ClickResolution | null {
   const object = findObjectAt(snapshot, x, y);
   if (object) {
@@ -62,7 +61,6 @@ function resolveClickTarget(catalog: Catalog, snapshot: ClientSnapshot, x: numbe
       preview: { kind: "world_object", pos: object.position, tags, object },
       observation: def?.observation ?? "No reconozco bien qué es esto.",
       walkable: false,
-      isLooseItem: false,
     };
   }
 
@@ -75,7 +73,6 @@ function resolveClickTarget(catalog: Catalog, snapshot: ClientSnapshot, x: numbe
       preview: { kind: "item", pos: { x, y }, tags: def?.tags ?? [], item },
       observation: def?.observation ?? "Algo está tirado ahí.",
       walkable: false,
-      isLooseItem: true,
     };
   }
 
@@ -89,11 +86,27 @@ function resolveClickTarget(catalog: Catalog, snapshot: ClientSnapshot, x: numbe
       preview: { kind: "tile", pos: { x, y }, tags, terrain: tile.terrain },
       observation: def?.observation ?? "Terreno sin nada de particular.",
       walkable: tile.walkable,
-      isLooseItem: false,
     };
   }
 
   return null;
+}
+
+/**
+ * True when tile (x,y) has interactive CONTENT for the click-resolution
+ * model: a world object, a loose ground item, or the player's own tile.
+ * PURE, exported for unit testing (fix-list: "clicking a tile that has
+ * floor items or a world object moves the player directly instead of
+ * opening the contextual menu" — `onCanvasClick` uses this to decide
+ * menu-vs-move BEFORE building any preview, so the decision itself is a
+ * single, testable helper rather than scattered across the click handler). A
+ * CONTENT tile opens the contextual menu; a tile WITHOUT content instead
+ * gets a direct move when walkable (see `onCanvasClick`). */
+export function tileHasContent(snapshot: ClientSnapshot, pos: Position): boolean {
+  if (pos.x === snapshot.player.position.x && pos.y === snapshot.player.position.y) return true;
+  if (findObjectAt(snapshot, pos.x, pos.y)) return true;
+  if (findGroundItemAt(snapshot, pos.x, pos.y)) return true;
+  return false;
 }
 
 function canvasRectOf(canvas: HTMLCanvasElement): CanvasRect {
@@ -132,34 +145,37 @@ export function createInputController(deps: InputDeps): InputController {
     const resolved = resolveClickTarget(deps.catalog, snapshot, x, y);
     if (!resolved) return;
 
-    // Loose ground item: si está adyacente, TakeItem directo; si está lejos, camino
-    // hacia su tile (filtro de adyacencia client-side, consistente con el preview
-    // local — el backend igual re-valida). Bypasses selection/menu entirely,
-    // unchanged from the pre-menu behavior.
-    if (resolved.isLooseItem && resolved.wireRef.kind === "item") {
+    // Click-resolution model (fix-list: "clicking a tile that has floor
+    // items or a world object moves the player directly instead of opening
+    // the contextual menu"): a tile WITHOUT content — no world object, no
+    // loose ground item, and not the player's own tile — is a plain empty
+    // tile. A single click there issues a direct move when walkable, or
+    // falls back to the tile's observation thought when it isn't (there is
+    // nothing a menu could usefully offer for an empty, unreachable tile).
+    // This replaces the previous per-item bypass (which used to `MovePlayer`
+    // straight to a far loose item, literally moving the player instead of
+    // ever offering a menu) with one decision that applies uniformly to
+    // every target kind.
+    if (!tileHasContent(snapshot, { x, y })) {
       selection = null;
-      if (chebyshev(snapshot.player.position, resolved.preview.pos) <= 1) {
-        await deps.sendCommand({ type: "TakeItem", target: { kind: "item", id: resolved.wireRef.id } });
+      if (resolved.walkable) {
+        await deps.sendCommand({ type: "MovePlayer", to: { x, y } });
       } else {
-        const tile = findTileAt(snapshot, resolved.preview.pos.x, resolved.preview.pos.y);
-        if (tile?.walkable) await deps.sendCommand({ type: "MovePlayer", to: resolved.preview.pos });
-        else showThought("Eso está lejos. Tengo que acercarme primero.");
+        showThought(resolved.observation);
       }
       return;
     }
 
-    const isSameSelection = selection?.key === resolved.key;
-    if (!isSameSelection) {
-      selection = resolved;
-      showThought(resolved.observation);
-      return;
-    }
-
-    // Second click on the same target: open the sectioned contextual menu
-    // built by `actions/context-menu.ts` (design.md "Taxonomy" / spec
-    // "Contextual Menu from Real Action Logic" / "Self Click-Target
-    // Resolution"). `self` is true whenever the clicked tile IS the player's
-    // own position, regardless of what `resolveClickTarget` found there.
+    // Content tile (world object, loose ground item, or the player's own
+    // tile): a single click opens the sectioned contextual menu built by
+    // `actions/context-menu.ts` (design.md "Taxonomy" / spec "Contextual
+    // Menu from Real Action Logic" / "Self Click-Target Resolution") —
+    // previously this required an extra "select, then click again" step,
+    // which is what let a click land on a loose item and fall straight
+    // through to the (now-removed) direct-move/take bypass instead of ever
+    // reaching a menu. `self` is true whenever the clicked tile IS the
+    // player's own position, regardless of what `resolveClickTarget` found
+    // there.
     //
     // Defensively wrapped (fix for "no object is interactable anymore"):
     // any new/unanticipated game state on this tile (a fresh world-item
@@ -167,6 +183,7 @@ export function createInputController(deps: InputDeps): InputController {
     // out of this handler — a thrown menu build here would leave `selection`
     // stuck and, worse, is exactly the kind of failure that could cascade
     // into an unusable map. Degrade to a thought instead.
+    selection = resolved;
     let menu: ReturnType<typeof buildContextMenu>;
     try {
       const self = x === snapshot.player.position.x && y === snapshot.player.position.y;
