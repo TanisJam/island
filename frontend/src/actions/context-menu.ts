@@ -130,20 +130,28 @@ function nearestWalkableNeighbor(snapshot: ClientSnapshot, pos: Position, offset
 }
 
 /**
- * Best-effort walkable position to approach `pos` from — `pos` itself if
- * walkable, otherwise the walkable orthogonal neighbor NEAREST to the player
- * (falling back to a diagonal neighbor only if no orthogonal one is
- * walkable) — a world object's own tile is very often non-walkable, e.g. a
- * tree that `blocksMovement`. Purely a client-side convenience for the
- * "Acercarme" move item: the backend still pathfinds/revalidates the actual
+ * Best-effort walkable position to approach `pos` FROM — always a neighbor
+ * tile of `pos`, NEVER `pos` itself (fix: "'Acercarme' must land on a tile
+ * ADJACENT to the object, never the object's own tile"). Previously this
+ * returned `pos` directly whenever the object's own tile happened to be
+ * walkable terrain (e.g. tall grass) — but a world object's tile being
+ * terrain-walkable says nothing about whether the OBJECT blocks movement:
+ * the backend tracks that separately as a per-tile `blockingObjectTiles` set
+ * built from `WorldObjectDef.blocksMovement`
+ * (`backend/src/application/process-command.ts`), which this client has no
+ * visibility into. A tree/rock (`blocksMovement: true`) very often sits on
+ * perfectly walkable ground (grass/sand), so the old shortcut would confidently
+ * send the player to stand ON the tree and get rejected by the backend's
+ * pathfinding as blocked (fix: "'Acercarme' must work for trees and rocks").
+ * Always picking a neighbor sidesteps this entirely — the walkable orthogonal
+ * neighbor NEAREST to the player is preferred (falling back to a diagonal
+ * neighbor only if no orthogonal one is walkable), matching the backend's
+ * 4-connected BFS. The backend still pathfinds/revalidates the actual
  * `MovePlayer` (see the 4-connectivity note above), so a best-effort miss
  * just surfaces as a normal rejection thought, same tolerance as every other
- * client-side preview in this module — but picking the nearest ORTHOGONAL
- * neighbor makes that miss far less likely than the previous fixed-order,
- * diagonals-included scan.
+ * client-side preview in this module.
  */
 function findApproachPosition(snapshot: ClientSnapshot, pos: Position): Position | null {
-  if (tileWalkableAt(snapshot, pos)) return pos;
   const player = snapshot.player.position;
   return (
     nearestWalkableNeighbor(snapshot, pos, ORTHOGONAL_OFFSETS, player) ??

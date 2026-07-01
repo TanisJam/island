@@ -201,8 +201,12 @@ test("buildContextMenu: penumbra target gets a single dim move-only item", () =>
   assert.deepEqual(menu.sections[0]?.items.map((i) => i.kind), ["move"]);
 });
 
-test("buildContextMenu: far-visible world_object gets an 'Acercarme' move item alongside whatever real actions apply", () => {
-  const s = makeSnapshot({ tiles: [makeTile(5, 5, "sand", true), makeTile(10, 5, "sand", true)] });
+test("buildContextMenu: far-visible world_object on a walkable tile still gets 'Acercarme' to an ADJACENT tile, never the object's own tile", () => {
+  // Object at (10,5) sits on walkable ground (e.g. tall grass) — but
+  // 'Acercarme' must never land the player ON TOP of it, only adjacent
+  // (fix: "'Acercarme' must land on a tile ADJACENT to the object, never the
+  // object's own tile").
+  const s = makeSnapshot({ tiles: [makeTile(5, 5, "sand", true), makeTile(9, 5, "sand", true), makeTile(10, 5, "sand", true)] });
   const object: WorldObject = { id: "wo1", objectTypeId: "tree", position: { x: 10, y: 5 }, state: {} };
   const resolution = {
     preview: { kind: "world_object" as const, pos: object.position, tags: ["tree"], object },
@@ -213,11 +217,32 @@ test("buildContextMenu: far-visible world_object gets an 'Acercarme' move item a
   const approach = menu.sections[0]?.items.find((i) => i.id === "move:approach");
   assert.ok(approach, "far-visible object with a walkable tile gets an Acercarme item");
   assert.equal(approach!.label, "Acercarme");
-  assert.deepEqual(approach!.command, { type: "MovePlayer", to: { x: 10, y: 5 } });
+  assert.deepEqual(approach!.command, { type: "MovePlayer", to: { x: 9, y: 5 } }, "targets the adjacent walkable tile, never (10,5) itself");
   // The real catalog action (pull_branches applies to adjacent only, not far) is
   // correctly absent — this menu is ONLY the approach item, since `computeAvailableActions`
   // itself gates on distance and rejects it from this far away.
   assert.deepEqual(menu.sections[0]?.items.map((i) => i.id), ["move:approach"]);
+});
+
+test("buildContextMenu: 'Acercarme' reaches a valid adjacent tile for a non-walkable object (tree/rock blocking its own tile)", () => {
+  // A tree/rock's own tile is very often walkable TERRAIN (grass/sand) even
+  // though the OBJECT itself blocks movement (`blocksMovement: true`,
+  // tracked separately by the backend) — this client only sees terrain
+  // walkability, so this case is indistinguishable from the previous test at
+  // the terrain layer. It's covered separately to document the "trees and
+  // rocks" scenario explicitly (fix: "'Acercarme' must work for trees and
+  // rocks (non-walkable objects)") and pin the exact adjacent tile picked.
+  const s = makeSnapshot({ tiles: [makeTile(5, 5, "sand", true), makeTile(9, 5, "grass", true), makeTile(10, 5, "grass", true)] });
+  const tree: WorldObject = { id: "wo_tree", objectTypeId: "tree", position: { x: 10, y: 5 }, state: {} };
+  const resolution = {
+    preview: { kind: "world_object" as const, pos: tree.position, tags: ["tree"], object: tree },
+    wireRef: { kind: "world_object" as const, id: "wo_tree" },
+    self: false,
+  };
+  const menu = buildContextMenu(catalog, s, resolution, "visible");
+  const approach = menu.sections[0]?.items.find((i) => i.id === "move:approach");
+  assert.ok(approach, "a blocksMovement object still gets an Acercarme item targeting a reachable neighbor");
+  assert.deepEqual(approach!.command, { type: "MovePlayer", to: { x: 9, y: 5 } });
 });
 
 test("buildContextMenu: far-visible object on a non-walkable tile still gets 'Acercarme' to the nearest walkable neighbor", () => {
