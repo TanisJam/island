@@ -1,19 +1,12 @@
-import type { Catalog, Command, ContextActionDef, ItemInstance, Position, Tile, WorldObject } from "../contract";
-import { computeAvailableActions, type ActionTarget } from "../actions/available";
-import { TILE, SCALE } from "../render/canvas";
+import type { Catalog, Command, ItemInstance, Position, Tile, WorldObject } from "../contract";
+import { type ActionTarget } from "../actions/available";
+import { buildContextMenu, type WireTargetRef } from "../actions/context-menu";
+import { cameraOffset, screenToTile, type CanvasRect } from "../render/camera";
+import type { Frame } from "../view/viewstate";
 import type { ClientSnapshot } from "../state/snapshot";
-import { chebyshev } from "../state/visibility";
+import { chebyshev, visibilityOf } from "../state/visibility";
 import { showThought } from "../hud/hud";
-
-/** Wire-shaped target ref — structurally identical to the inline `target` union on
- * `TakeItem`/`ExecuteAction`/`Observe` in contract/commands.ts (those unions aren't
- * exported as a named type, so this mirrors them by hand). */
-type WireTargetRef =
-  | { kind: "world_object"; id: string }
-  | { kind: "tile"; x: number; y: number }
-  | { kind: "item"; id: string }
-  | { kind: "pile"; id: string }
-  | { kind: "self" };
+import type { Ui } from "../hud/ui";
 
 type ClickResolution = {
   key: string;
@@ -26,10 +19,15 @@ type ClickResolution = {
 
 export type InputDeps = {
   canvas: HTMLCanvasElement;
-  menuEl: HTMLElement;
   catalog: Catalog;
   getSnapshot: () => ClientSnapshot;
+  /** Current interpolated `Frame`, sourced from the same `ViewState.frame`
+   * the render loop calls (design.md "Renderer camera" / SEAM 3) — needed so
+   * `canvasToTile` can derive the SAME camera offset `render/canvas.ts` just
+   * drew with. */
+  getFrame: () => Frame;
   sendCommand: (command: Command) => Promise<void>;
+  ui: Ui;
 };
 
 export type InputController = {
@@ -50,8 +48,9 @@ function findTileAt(snapshot: ClientSnapshot, x: number, y: number): Tile | unde
 
 /** Resolves what's at tile (x,y) for the click flow, in priority order:
  * world object > loose ground item > tile. Builds both the wire `target` ref (for
- * commands) and the local `ActionTarget` preview (for `computeAvailableActions`),
- * plus the local-only "observation" text shown on first click — zero network calls. */
+ * commands) and the local `ActionTarget` preview (for `computeAvailableActions`,
+ * wrapped by `actions/context-menu.ts`), plus the local-only "observation" text
+ * shown on first click — zero network calls. */
 function resolveClickTarget(catalog: Catalog, snapshot: ClientSnapshot, x: number, y: number): ClickResolution | null {
   const object = findObjectAt(snapshot, x, y);
   if (object) {
@@ -97,50 +96,41 @@ function resolveClickTarget(catalog: Catalog, snapshot: ClientSnapshot, x: numbe
   return null;
 }
 
-function canvasToTile(ev: MouseEvent, canvas: HTMLCanvasElement): Position {
+function canvasRectOf(canvas: HTMLCanvasElement): CanvasRect {
   const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
-  const px = (ev.clientX - rect.left) * scaleX;
-  const py = (ev.clientY - rect.top) * scaleY;
-  return { x: Math.floor(px / (TILE * SCALE)), y: Math.floor(py / (TILE * SCALE)) };
+  return { left: rect.left, top: rect.top, cssWidth: rect.width, cssHeight: rect.height, bufferWidth: canvas.width, bufferHeight: canvas.height };
+}
+
+/** Camera-aware inverse of the draw transform. MUST derive the offset from
+ * `render/camera.ts`'s `cameraOffset` — the exact function `render/canvas.ts`
+ * uses to draw the current frame — never recompute it independently, or a
+ * click during a movement tween could resolve to a different tile than the
+ * one actually rendered under the cursor (design.md "Renderer camera" / spec
+ * "Fullscreen Map with Player-Centered Camera"). */
+function canvasToTile(ev: MouseEvent, canvas: HTMLCanvasElement, frame: Frame): Position {
+  const offset = cameraOffset(frame, { width: canvas.width, height: canvas.height });
+  return screenToTile({ x: ev.clientX, y: ev.clientY }, canvasRectOf(canvas), offset);
 }
 
 export function createInputController(deps: InputDeps): InputController {
   let selection: ClickResolution | null = null;
 
-  function hideMenu(): void {
-    deps.menuEl.style.display = "none";
-    deps.menuEl.innerHTML = "";
-  }
-
-  function openMenu(actions: ContextActionDef[], wireRef: WireTargetRef, clientX: number, clientY: number): void {
-    deps.menuEl.innerHTML = "";
-    for (const action of actions) {
-      const button = document.createElement("button");
-      button.textContent = action.label;
-      button.addEventListener("click", () => {
-        hideMenu();
-        selection = null;
-        void deps.sendCommand({ type: "ExecuteAction", actionId: action.id, target: wireRef });
-      });
-      deps.menuEl.appendChild(button);
-    }
-    deps.menuEl.style.left = `${clientX}px`;
-    deps.menuEl.style.top = `${clientY}px`;
-    deps.menuEl.style.display = "block";
-  }
-
   async function onCanvasClick(ev: MouseEvent): Promise<void> {
-    hideMenu();
-    const { x, y } = canvasToTile(ev, deps.canvas);
+    // Stops the click from bubbling to `document`, where `hud/ui.ts`'s
+    // outside-click listener (`WindowManager.dismissTransient`) would
+    // otherwise immediately dismiss the contextual menu THIS SAME click is
+    // about to open — mirrors the mockup's per-cell `e.stopPropagation()`.
+    ev.stopPropagation();
+
+    const { x, y } = canvasToTile(ev, deps.canvas, deps.getFrame());
     const snapshot = deps.getSnapshot();
     const resolved = resolveClickTarget(deps.catalog, snapshot, x, y);
     if (!resolved) return;
 
     // Loose ground item: si está adyacente, TakeItem directo; si está lejos, camino
     // hacia su tile (filtro de adyacencia client-side, consistente con el preview
-    // local — el backend igual re-valida).
+    // local — el backend igual re-valida). Bypasses selection/menu entirely,
+    // unchanged from the pre-menu behavior.
     if (resolved.isLooseItem && resolved.wireRef.kind === "item") {
       selection = null;
       if (chebyshev(snapshot.player.position, resolved.preview.pos) <= 1) {
@@ -160,31 +150,36 @@ export function createInputController(deps: InputDeps): InputController {
       return;
     }
 
-    // Second click on the same target. Resolution rule for the Move-vs-Menu overlap
-    // (many walkable ground tiles also carry actions, e.g. "search_sand", per the
-    // real catalog data): if the tile is somewhere else, Move wins (walking there is
-    // the obvious intent); if the tile IS the player's current position, Moving is a
-    // no-op so the action menu wins instead. World objects and non-walkable tiles
-    // always go through the menu branch.
-    const isOwnTile = resolved.preview.kind === "tile" && x === snapshot.player.position.x && y === snapshot.player.position.y;
-    if (!isOwnTile && resolved.walkable) {
-      selection = null;
-      await deps.sendCommand({ type: "MovePlayer", to: { x, y } });
-      return;
-    }
+    // Second click on the same target: open the sectioned contextual menu
+    // built by `actions/context-menu.ts` (design.md "Taxonomy" / spec
+    // "Contextual Menu from Real Action Logic" / "Self Click-Target
+    // Resolution"). `self` is true whenever the clicked tile IS the player's
+    // own position, regardless of what `resolveClickTarget` found there.
+    const self = x === snapshot.player.position.x && y === snapshot.player.position.y;
+    const visibility = visibilityOf(snapshot, resolved.preview.pos);
+    const menu = buildContextMenu(deps.catalog, snapshot, { preview: resolved.preview, wireRef: resolved.wireRef, self }, visibility);
 
-    const actions = computeAvailableActions(deps.catalog, resolved.preview, snapshot);
-    if (actions.length === 0) {
+    const totalItems = menu.sections.reduce((n, sec) => n + sec.items.length, 0);
+    if (totalItems === 0) {
       showThought("No se me ocurre qué hacer ahí ahora.");
       return;
     }
-    openMenu(actions, resolved.wireRef, ev.clientX, ev.clientY);
+
+    deps.ui.openContextMenu(menu, { x: ev.clientX, y: ev.clientY }, (item) => {
+      if ((item.kind === "action" || item.kind === "move") && item.command) {
+        if (item.kind === "move") selection = null;
+        void deps.sendCommand(item.command);
+        return;
+      }
+      if (item.kind === "ui") {
+        deps.ui.toggleInventory();
+      }
+      // item.kind === "mute" never reaches here — `hud/ui.ts`'s
+      // `renderContextMenuBody` never wires a click listener for it.
+    });
   }
 
   deps.canvas.addEventListener("click", (ev) => void onCanvasClick(ev));
-  document.addEventListener("click", (ev) => {
-    if (ev.target !== deps.canvas && !deps.menuEl.contains(ev.target as Node)) hideMenu();
-  });
 
   return { getSelection: () => selection };
 }

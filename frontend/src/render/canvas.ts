@@ -2,13 +2,33 @@ import type { Position } from "../contract";
 import type { AssetResolver } from "./assets";
 import type { Renderer } from "./renderer";
 import type { Frame, RenderEntity } from "../view/viewstate";
+import { cameraOffset } from "./camera";
 
 export const TILE = 16;
 export const SCALE = 3;
-export const PX = TILE * SCALE; // 48px/tile, matches the 768x576 (16x12) canvas in index.html
+export const PX = TILE * SCALE; // 48px/tile
 
 const EMOJI_FONT = '"Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", sans-serif';
 const FALLBACK_TERRAIN_COLOR = "#444";
+const BRASA = "#f0a24e"; // spec "Light-Semantics Visual Identity" — selection ring uses the brasa token
+
+/** `render/camera.ts` is the single source of truth for the camera (design.md
+ * "Renderer camera" + spec "Fullscreen Map with Player-Centered Camera").
+ * `camera.ts` imports `PX` from here, and this module imports `cameraOffset`
+ * back from `camera.ts` — a deliberate two-way ES-module reference. Both
+ * sides only ever read the other's export from inside function bodies
+ * invoked after both modules finish loading (never at top level), so the
+ * cycle is safe. `input/mouse.ts` MUST call the same `cameraOffset` for
+ * hit-testing — never recompute the offset independently — or a click during
+ * a movement tween could resolve to a different tile than the one drawn
+ * under it. */
+
+/** True when the user has requested reduced motion — gates the optional
+ * selection-ring pulse (spec "Reduced motion respected"). Guarded so this
+ * module stays safe to import under Node (`node:test` has no `matchMedia`). */
+function prefersReducedMotion(): boolean {
+  return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
 
 function drawEmoji(ctx: CanvasRenderingContext2D, pos: Position, emoji: string, factor = 0.72): void {
   ctx.font = `${Math.floor(PX * factor)}px ${EMOJI_FONT}`;
@@ -33,10 +53,17 @@ function drawCount(ctx: CanvasRenderingContext2D, pos: Position, n: number): voi
   ctx.fillText(label, cx, cy);
 }
 
-function drawSelection(ctx: CanvasRenderingContext2D, pos: Position): void {
-  ctx.strokeStyle = "#ffeb3b";
+/** Brasa selection ring (spec "Light-Semantics State Treatments" — "the
+ * selection shows a brasa ring"). Pulses gently via `frame.clockMs`, same
+ * global anim clock the loop already advances every tick; suppressed to a
+ * static ring when `prefers-reduced-motion` is set. */
+function drawSelection(ctx: CanvasRenderingContext2D, pos: Position, clockMs: number): void {
+  const pulse = prefersReducedMotion() ? 1 : 0.7 + 0.3 * Math.sin(clockMs / 260);
+  ctx.strokeStyle = BRASA;
   ctx.lineWidth = 3;
+  ctx.globalAlpha = pulse;
   ctx.strokeRect(pos.x * PX + 1.5, pos.y * PX + 1.5, PX - 3, PX - 3);
+  ctx.globalAlpha = 1;
 }
 
 /**
@@ -86,6 +113,13 @@ export function createCanvasRenderer(ctx: CanvasRenderingContext2D, assets: Asse
     render(frame: Frame, selection: Position | null): void {
       ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 
+      // Fullscreen, player-centered camera (spec "Fullscreen Map with
+      // Player-Centered Camera"): every draw below happens inside this
+      // translate, in tile space, exactly as before — only the origin moved.
+      const offset = cameraOffset(frame, { width: ctx.canvas.width, height: ctx.canvas.height });
+      ctx.save();
+      ctx.translate(offset.ox, offset.oy);
+
       for (const tile of frame.tiles) {
         const px = tile.x * PX;
         const py = tile.y * PX;
@@ -107,7 +141,9 @@ export function createCanvasRenderer(ctx: CanvasRenderingContext2D, assets: Asse
       for (const entity of frame.entities) if (entity.kind === "item") drawObjectOrItem(entity);
       for (const entity of frame.entities) if (entity.kind === "player") drawPlayer(entity);
 
-      if (selection) drawSelection(ctx, selection);
+      if (selection) drawSelection(ctx, selection, frame.clockMs);
+
+      ctx.restore();
     },
 
     destroy(): void {

@@ -36,7 +36,7 @@ test("shouldDismiss: window variant only dismisses on outside click when unpinne
 
 // --- WindowManager: smoke coverage only, against a minimal hand-rolled fake
 // DOM (this repo's tests run under plain `node:test`, no jsdom — same pattern
-// `game/game.test.ts` uses for `fakeCanvas`/`fakeMenuEl`/`stubDocument`). ----
+// `game/game.test.ts` uses for `fakeCanvas`/`stubDocument`/`stubWindowGlobal`). ----
 
 class FakeElement {
   classes = new Set<string>();

@@ -16,7 +16,6 @@ const STEP = 1000 / 60; // fixed update step, 60Hz (design.md "Game boot + loop"
 
 export interface GameDeps {
   canvas: HTMLCanvasElement;
-  menuEl: HTMLElement;
   transport: Transport;
   ui: Ui;
 }
@@ -64,6 +63,13 @@ export function createGame(deps: GameDeps): Game {
     const assets = createEmojiAssets();
     const renderer = createCanvasRenderer(ctx, assets);
 
+    // Fullscreen map (spec "Fullscreen Map with Player-Centered Camera"):
+    // size the canvas to the viewport now, and re-fit on every resize —
+    // `render/canvas.ts`'s camera translate recenters on the player using
+    // whatever width/height the canvas buffer currently has.
+    renderer.resize(window.innerWidth, window.innerHeight);
+    window.addEventListener("resize", () => renderer.resize(window.innerWidth, window.innerHeight));
+
     const sendCommand = async (command: Command): Promise<void> => {
       const env: CommandEnvelope = { playerId: PLAYER_ID, clientCommandId: crypto.randomUUID(), command };
       let result: CommandResult;
@@ -100,10 +106,11 @@ export function createGame(deps: GameDeps): Game {
 
     const input = createInputController({
       canvas: deps.canvas,
-      menuEl: deps.menuEl,
       catalog,
       getSnapshot: store.getState,
+      getFrame: viewState.frame,
       sendCommand,
+      ui: deps.ui,
     });
 
     // `Ui.mount` already renders once immediately and subscribes to future

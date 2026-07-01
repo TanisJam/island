@@ -9,6 +9,7 @@ import { createGame } from "./game";
 const ORIGINAL_FETCH = globalThis.fetch;
 const ORIGINAL_RAF = globalThis.requestAnimationFrame;
 const ORIGINAL_CAF = globalThis.cancelAnimationFrame;
+const ORIGINAL_WINDOW = (globalThis as { window?: unknown }).window;
 
 function emptyCatalog(): Catalog {
   return { catalogVersion: "v1", terrains: [], items: [], worldObjects: [], knowledge: [], actions: [], research: [] };
@@ -67,6 +68,7 @@ function fakeCanvasContext(): CanvasRenderingContext2D {
     fillStyle: "",
     strokeStyle: "",
     lineWidth: 1,
+    globalAlpha: 1,
     font: "",
     textAlign: "left",
     textBaseline: "alphabetic",
@@ -78,6 +80,9 @@ function fakeCanvasContext(): CanvasRenderingContext2D {
     beginPath: noop,
     arc: noop,
     fill: noop,
+    save: noop,
+    restore: noop,
+    translate: noop,
   } as unknown as CanvasRenderingContext2D;
 }
 
@@ -85,14 +90,18 @@ function fakeCanvas(): HTMLCanvasElement {
   return { getContext: () => fakeCanvasContext(), addEventListener: () => {} } as unknown as HTMLCanvasElement;
 }
 
-function fakeMenuEl(): HTMLElement {
-  return { style: {}, innerHTML: "", addEventListener: () => {}, contains: () => false } as unknown as HTMLElement;
-}
-
 /** `input/mouse.ts` registers a document-level click listener to close the
  * context menu on outside clicks. Node has no DOM `document` global. */
 function stubDocument(): void {
   (globalThis as { document?: unknown }).document = { addEventListener: () => {} };
+}
+
+/** `game/game.ts` wires `window.addEventListener("resize", ...)` and reads
+ * `window.innerWidth/innerHeight` to size the fullscreen canvas (spec
+ * "Fullscreen Map with Player-Centered Camera"). Node has no DOM `window`
+ * global. */
+function stubWindowGlobal(): void {
+  (globalThis as { window?: unknown }).window = { innerWidth: 64, innerHeight: 64, addEventListener: () => {} };
 }
 
 function fakeTransport(): Transport {
@@ -103,19 +112,28 @@ function fakeTransport(): Transport {
 }
 
 function fakeUi(): Ui {
-  return { mount: () => {}, showThought: () => {}, destroy: () => {} };
+  return {
+    mount: () => {},
+    showThought: () => {},
+    destroy: () => {},
+    toggleInventory: () => {},
+    openContextMenu: () => {},
+    closeContextMenu: () => {},
+  };
 }
 
 test("createGame().start(): boots, builds a store, and one loop tick renders without throwing", async () => {
   stubBootFetch();
   stubSingleTickRaf();
   stubDocument();
+  stubWindowGlobal();
   try {
-    const game = createGame({ canvas: fakeCanvas(), menuEl: fakeMenuEl(), transport: fakeTransport(), ui: fakeUi() });
+    const game = createGame({ canvas: fakeCanvas(), transport: fakeTransport(), ui: fakeUi() });
     await assert.doesNotReject(() => game.start());
   } finally {
     globalThis.fetch = ORIGINAL_FETCH;
     globalThis.requestAnimationFrame = ORIGINAL_RAF;
     globalThis.cancelAnimationFrame = ORIGINAL_CAF;
+    (globalThis as { window?: unknown }).window = ORIGINAL_WINDOW;
   }
 });
