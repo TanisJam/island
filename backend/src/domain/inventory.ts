@@ -8,6 +8,7 @@ export const HAND_LEFT: Position = { x: 0, y: 0 };
 export const HAND_RIGHT: Position = { x: 3, y: 0 };
 
 type InvLoc = { type: "player_inventory"; playerId: string; x: number; y: number; rotation: number };
+type GridCell = { x: number; y: number; rotation: number };
 
 export function invLoc(it: ItemInstance): InvLoc | null {
   return it.location.type === "player_inventory" ? (it.location as InvLoc) : null;
@@ -18,9 +19,17 @@ export const isInWorld = (it: ItemInstance): boolean => it.location.type === "wo
 export const inventoryItems = (s: GameState): ItemInstance[] => s.items.filter(isInInventory);
 export const worldItems = (s: GameState): ItemInstance[] => s.items.filter(isInWorld);
 
-/** Celdas que ocupa un item de inventario según su forma y rotación (B3). */
-export function occupiedCells(it: ItemInstance, index: CatalogIndex): Position[] {
+/** Selector de celda del inventario del jugador (grilla `player_inventory`). */
+const playerCell = (it: ItemInstance): GridCell | null => {
   const loc = invLoc(it);
+  return loc ? { x: loc.x, y: loc.y, rotation: loc.rotation } : null;
+};
+
+/** Celdas que ocupa un item en CUALQUIER grilla, dado un selector de celda para esa
+ *  grilla (`cellOf`). Generaliza el cálculo de forma/rotación compartido por el
+ *  inventario del jugador y cualquier superficie (mesa). */
+export function cellsOnGrid(it: ItemInstance, index: CatalogIndex, cellOf: (it: ItemInstance) => GridCell | null): Position[] {
+  const loc = cellOf(it);
   if (!loc) return [];
   const def = index.itemById.get(it.itemTypeId);
   const w0 = def?.shape.w ?? 1;
@@ -29,6 +38,11 @@ export function occupiedCells(it: ItemInstance, index: CatalogIndex): Position[]
   const cells: Position[] = [];
   for (let dy = 0; dy < h; dy++) for (let dx = 0; dx < w; dx++) cells.push({ x: loc.x + dx, y: loc.y + dy });
   return cells;
+}
+
+/** Celdas que ocupa un item de inventario según su forma y rotación (B3). */
+export function occupiedCells(it: ItemInstance, index: CatalogIndex): Position[] {
+  return cellsOnGrid(it, index, playerCell);
 }
 
 const covers = (cells: Position[], slot: Position): boolean => cells.some((c) => c.x === slot.x && c.y === slot.y);
@@ -46,19 +60,63 @@ export function handItems(s: GameState, index: CatalogIndex): { left?: ItemInsta
   return { left, right, active };
 }
 
-function occupiedSet(s: GameState, index: CatalogIndex, exceptId?: string): Set<string> {
+/** Set de celdas ocupadas ("x,y") por un grupo de items en una grilla arbitraria. */
+export function occupiedSetOnGrid(items: ItemInstance[], index: CatalogIndex, cellOf: (it: ItemInstance) => GridCell | null, exceptId?: string): Set<string> {
   const set = new Set<string>();
-  for (const it of inventoryItems(s)) {
+  for (const it of items) {
     if (it.id === exceptId) continue;
-    for (const c of occupiedCells(it, index)) set.add(`${c.x},${c.y}`);
+    for (const c of cellsOnGrid(it, index, cellOf)) set.add(`${c.x},${c.y}`);
   }
   return set;
 }
 
-function fits(set: Set<string>, x: number, y: number, w: number, h: number): boolean {
-  if (x < 0 || y < 0 || x + w > INV_W || y + h > INV_H) return false;
+function occupiedSet(s: GameState, index: CatalogIndex, exceptId?: string): Set<string> {
+  return occupiedSetOnGrid(inventoryItems(s), index, playerCell, exceptId);
+}
+
+/** Verifica si una forma `w x h` en `(x,y)` entra dentro de una grilla `gw x gh` sin
+ *  colisionar con `set` (celdas ya ocupadas). */
+export function fitsOnGrid(set: Set<string>, x: number, y: number, w: number, h: number, gw: number, gh: number): boolean {
+  if (x < 0 || y < 0 || x + w > gw || y + h > gh) return false;
   for (let dy = 0; dy < h; dy++) for (let dx = 0; dx < w; dx++) if (set.has(`${x + dx},${y + dy}`)) return false;
   return true;
+}
+
+function fits(set: Set<string>, x: number, y: number, w: number, h: number): boolean {
+  return fitsOnGrid(set, x, y, w, h, INV_W, INV_H);
+}
+
+/** Selector de celda para una superficie dada (grilla `surface` de un world object). */
+export const surfaceCell = (surfaceId: string) => (it: ItemInstance): GridCell | null => {
+  const loc = it.location;
+  return loc.type === "surface" && loc.surfaceId === surfaceId ? { x: loc.x, y: loc.y, rotation: loc.rotation } : null;
+};
+
+/** Items realmente colocados en la grilla de una superficie dada. */
+export const surfaceItems = (s: GameState, surfaceId: string): ItemInstance[] =>
+  s.items.filter((i) => i.location.type === "surface" && i.location.surfaceId === surfaceId);
+
+/** Determina si un item con forma `dims` (rotada según `rotation`) puede colocarse en
+ *  `(x,y)` de la superficie `surfaceId` sin salirse de sus dimensiones ni solapar con
+ *  otro item ya colocado (salvo `exceptId`, para permitir mover un item dentro de su
+ *  propia superficie). */
+export function canPlaceOnSurface(
+  s: GameState,
+  index: CatalogIndex,
+  surfaceId: string,
+  itemTypeId: string,
+  x: number,
+  y: number,
+  rotation: number,
+  dims: { width: number; height: number },
+  exceptId?: string,
+): boolean {
+  const def = index.itemById.get(itemTypeId);
+  const w0 = def?.shape.w ?? 1;
+  const h0 = def?.shape.h ?? 1;
+  const [w, h] = rotation === 90 ? [h0, w0] : [w0, h0];
+  const set = occupiedSetOnGrid(surfaceItems(s, surfaceId), index, surfaceCell(surfaceId), exceptId);
+  return fitsOnGrid(set, x, y, w, h, dims.width, dims.height);
 }
 
 /** Si una forma colocada en (x,y) ocuparía un slot de mano. */
