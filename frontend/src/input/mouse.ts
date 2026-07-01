@@ -139,19 +139,6 @@ export function createInputController(deps: InputDeps): InputController {
   let selection: ClickResolution | null = null;
   let lastClickTime: number | null = null;
   let lastClickTile: Position | null = null;
-  // Holds the timer for a deferred single-click menu-open, so a qualifying
-  // second click (a double) can cancel it before the menu ever appears —
-  // "single click inspects, double click moves" must never flash the menu in
-  // between (fix-list: "single click inspects (opens menu), double click/tap
-  // moves").
-  let pendingMenuTimer: ReturnType<typeof setTimeout> | null = null;
-
-  function cancelPendingMenu(): void {
-    if (pendingMenuTimer !== null) {
-      clearTimeout(pendingMenuTimer);
-      pendingMenuTimer = null;
-    }
-  }
 
   /**
    * Opens the sectioned contextual menu built by `actions/context-menu.ts`
@@ -215,9 +202,8 @@ export function createInputController(deps: InputDeps): InputController {
     // listener from ever running for canvas clicks — so an open
     // inventory/context-menu window could never be dismissed by clicking the
     // map. It's called ONLY right before synchronously opening a NEW context
-    // menu inside this same handler (the deferred single-click open below
-    // runs in its own later timer callback, well after this click event has
-    // already finished bubbling, so it needs no `stopPropagation` of its own).
+    // menu inside this same handler — which is now every branch except a
+    // preempting double-click move (see below).
     const { x, y } = canvasToTile(ev, deps.canvas, deps.getFrame());
     const snapshot = deps.getSnapshot();
     const resolved = resolveClickTarget(deps.catalog, snapshot, x, y);
@@ -231,39 +217,27 @@ export function createInputController(deps: InputDeps): InputController {
     lastClickTime = cadence === "double" ? null : now;
     lastClickTile = cadence === "double" ? null : { x, y };
 
-    if (cadence === "double") {
-      cancelPendingMenu();
-      // Express "just walk there" shortcut (fix-list: "double click/tap on a
-      // walkable tile sends MovePlayer directly, bypassing the menu"). Falls
-      // back to the normal single-click menu when the tile isn't walkable —
-      // there's nowhere to walk to, so inspecting is the only useful option.
-      if (resolved.walkable) {
-        selection = null;
-        deps.ui.closeContextMenu(); // never leave a menu open after a double-click move
-        await deps.sendCommand({ type: "MovePlayer", to: { x, y } });
-        return;
-      }
-      ev.stopPropagation();
-      openMenuFor(resolved, x, y, { x: ev.clientX, y: ev.clientY }, snapshot);
+    // Single click: open the contextual menu IMMEDIATELY, no debounce wait
+    // (fix-list: "the single-click menu delay is too noticeable — make it
+    // minimal/none"). A genuine double click on a WALKABLE tile (handled
+    // right below) PREEMPTS this: it closes the menu the first click of the
+    // pair already opened and sends `MovePlayer` instead — trading a
+    // possible brief menu flash for zero perceived delay on every single
+    // click, per the fix-list's explicit preference.
+    if (cadence === "double" && resolved.walkable) {
+      selection = null;
+      deps.ui.closeContextMenu(); // never leave a menu open after a double-click move
+      await deps.sendCommand({ type: "MovePlayer", to: { x, y } });
       return;
     }
 
-    // Single click: defer opening the menu by the same threshold used to
-    // detect a double click, so a genuine double click (handled above, on
-    // the SECOND click) can cancel this before the menu ever appears.
-    // Re-resolves against a FRESH snapshot when the timer actually fires,
-    // rather than reusing the snapshot from the moment of the click — up to
-    // `DOUBLE_CLICK_THRESHOLD_MS` may have passed, during which the world
-    // (and the tile's content) could have changed.
-    cancelPendingMenu();
-    const at = { x: ev.clientX, y: ev.clientY };
-    pendingMenuTimer = setTimeout(() => {
-      pendingMenuTimer = null;
-      const freshSnapshot = deps.getSnapshot();
-      const freshResolved = resolveClickTarget(deps.catalog, freshSnapshot, x, y);
-      if (!freshResolved) return;
-      openMenuFor(freshResolved, x, y, at, freshSnapshot);
-    }, DOUBLE_CLICK_THRESHOLD_MS);
+    // Every other case — a genuine single click, or a "double" landing on a
+    // non-walkable tile (nothing to walk to, so inspecting is the only
+    // useful option) — opens/refreshes the menu right now, against the
+    // snapshot captured at the top of this handler (always current: there is
+    // no debounce gap anymore for it to go stale during).
+    ev.stopPropagation();
+    openMenuFor(resolved, x, y, { x: ev.clientX, y: ev.clientY }, snapshot);
   }
 
   // Outermost safety net (fix for "no object is interactable anymore"): a
