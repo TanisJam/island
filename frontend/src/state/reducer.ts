@@ -35,6 +35,8 @@ export function applyClientEvent(snapshot: ClientSnapshot, event: Event): void {
         item.location = { type: "player_inventory", playerId: to.ownerId, x: to.x, y: to.y, rotation: to.rotation ?? 0 };
       } else if (to.type === "world") {
         item.location = { type: "world", zoneId: to.zoneId, x: to.x, y: to.y };
+      } else if (to.type === "surface") {
+        item.location = { type: "surface", surfaceId: to.surfaceId, x: to.x, y: to.y, rotation: to.rotation ?? 0 };
       }
       // `container` destinations are out of MVP scope (no containers exist yet in
       // the catalog/seed) — intentionally left unhandled, matching the backend.

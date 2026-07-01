@@ -15,7 +15,7 @@ export type ClientSnapshot = {
   tiles: Tile[];
   objects: WorldObject[];
   piles: Pile[];
-  items: ItemInstance[]; // world items (location.type === "world") + inventory items (location.type === "player_inventory")
+  items: ItemInstance[]; // world items (location.type === "world") + surface items (location.type === "surface") + inventory items (location.type === "player_inventory")
   player: {
     id: string;
     name: string;
@@ -45,7 +45,7 @@ export function buildSnapshot(zone: ZoneSnapshotResponse, player: PlayerStateRes
     tiles: zone.tiles,
     objects: zone.objects,
     piles: zone.piles,
-    items: [...zone.worldItems, ...player.items],
+    items: [...zone.worldItems, ...zone.surfaceItems, ...player.items],
     player: {
       id: player.player.id,
       name: player.player.name,

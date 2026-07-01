@@ -111,6 +111,26 @@ test("ItemMoved: to.type=world maps onto a world location (drop from inventory)"
   assert.deepEqual(moved.location, { type: "world", zoneId: "z1", x: 4, y: 4 });
 });
 
+test("ItemMoved: to.type=surface maps onto a surface location (mirrors the backend reducer)", () => {
+  const item: ItemInstance = { id: "it_7", itemTypeId: "small_stone", location: { type: "player_inventory", playerId: "p1", x: 1, y: 1, rotation: 0 } };
+  const s = makeSnapshot({ items: [item] });
+
+  applyClientEvent(s, { type: "ItemMoved", itemInstanceId: "it_7", to: { type: "surface", surfaceId: "wo_table", x: 0, y: 1, rotation: 90 } });
+
+  const moved = s.items.find((i) => i.id === "it_7")!;
+  assert.deepEqual(moved.location, { type: "surface", surfaceId: "wo_table", x: 0, y: 1, rotation: 90 });
+});
+
+test("ItemMoved: to.type=surface without rotation defaults rotation to 0", () => {
+  const item: ItemInstance = { id: "it_8", itemTypeId: "small_stone", location: { type: "world", zoneId: "z1", x: 8, y: 9 } };
+  const s = makeSnapshot({ items: [item] });
+
+  applyClientEvent(s, { type: "ItemMoved", itemInstanceId: "it_8", to: { type: "surface", surfaceId: "wo_table", x: 2, y: 0 } });
+
+  const moved = s.items.find((i) => i.id === "it_8")!;
+  assert.deepEqual(moved.location, { type: "surface", surfaceId: "wo_table", x: 2, y: 0, rotation: 0 });
+});
+
 test("ItemMoved: unknown itemInstanceId is a no-op (item not found)", () => {
   const s = makeSnapshot({ items: [] });
   applyClientEvent(s, { type: "ItemMoved", itemInstanceId: "missing", to: { type: "hand", hand: "left" } });

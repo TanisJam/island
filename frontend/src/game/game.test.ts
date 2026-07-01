@@ -23,6 +23,7 @@ function zoneResponse(): ZoneSnapshotResponse {
     objects: [],
     piles: [],
     worldItems: [],
+    surfaceItems: [],
     catalogVersion: "v1",
   };
 }
