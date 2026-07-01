@@ -236,6 +236,77 @@ test("buildContextMenu: far-visible object on a non-walkable tile still gets 'Ac
   assert.deepEqual(approach!.command, { type: "MovePlayer", to: { x: 11, y: 5 } });
 });
 
+test("buildContextMenu: 'Acercarme' picks the walkable orthogonal neighbor NEAREST to the player, not the first in a fixed scan order", () => {
+  // Object at (10,5) has two walkable orthogonal neighbors: (11,5) and (9,5).
+  // The player at (5,5) is much closer to (9,5) — a fixed x+1-first scan
+  // order would wrongly pick (11,5) (backend's pathfinding is 4-connected and
+  // BFS-based, so the nearer, more-likely-connected side should win).
+  const s = makeSnapshot({
+    tiles: [
+      makeTile(5, 5, "sand", true),
+      makeTile(9, 5, "sand", true),
+      makeTile(10, 5, "shallow_water", false),
+      makeTile(11, 5, "sand", true),
+    ],
+  });
+  const object: WorldObject = { id: "wo1", objectTypeId: "tree", position: { x: 10, y: 5 }, state: {} };
+  const resolution = {
+    preview: { kind: "world_object" as const, pos: object.position, tags: ["tree"], object },
+    wireRef: { kind: "world_object" as const, id: "wo1" },
+    self: false,
+  };
+  const menu = buildContextMenu(catalog, s, resolution, "visible");
+  const approach = menu.sections[0]?.items.find((i) => i.id === "move:approach");
+  assert.ok(approach);
+  assert.deepEqual(approach!.command, { type: "MovePlayer", to: { x: 9, y: 5 } });
+});
+
+test("buildContextMenu: 'Acercarme' prefers an orthogonal neighbor over a closer diagonal one (backend movement is 4-connected)", () => {
+  // Object at (10,5): diagonal neighbor (9,4) is walkable and closer to the
+  // player at (8,4), but the orthogonal neighbor (9,5) is also walkable —
+  // orthogonal must win even though it's farther, because the backend BFS
+  // (backend/src/domain/pathfinding.ts) only ever connects tiles orthogonally.
+  const s = makeSnapshot({
+    tiles: [
+      makeTile(8, 4, "sand", true),
+      makeTile(9, 4, "sand", true),
+      makeTile(9, 5, "sand", true),
+      makeTile(10, 5, "shallow_water", false),
+    ],
+    player: { ...makeSnapshot().player, position: { x: 8, y: 4 } },
+  });
+  const object: WorldObject = { id: "wo1", objectTypeId: "tree", position: { x: 10, y: 5 }, state: {} };
+  const resolution = {
+    preview: { kind: "world_object" as const, pos: object.position, tags: ["tree"], object },
+    wireRef: { kind: "world_object" as const, id: "wo1" },
+    self: false,
+  };
+  const menu = buildContextMenu(catalog, s, resolution, "visible");
+  const approach = menu.sections[0]?.items.find((i) => i.id === "move:approach");
+  assert.ok(approach);
+  assert.deepEqual(approach!.command, { type: "MovePlayer", to: { x: 9, y: 5 } });
+});
+
+test("buildContextMenu: 'Acercarme' falls back to a diagonal neighbor when no orthogonal neighbor is walkable", () => {
+  const s = makeSnapshot({
+    tiles: [
+      makeTile(5, 5, "sand", true),
+      makeTile(9, 4, "sand", true), // only walkable neighbor is diagonal
+      makeTile(10, 5, "shallow_water", false),
+    ],
+  });
+  const object: WorldObject = { id: "wo1", objectTypeId: "tree", position: { x: 10, y: 5 }, state: {} };
+  const resolution = {
+    preview: { kind: "world_object" as const, pos: object.position, tags: ["tree"], object },
+    wireRef: { kind: "world_object" as const, id: "wo1" },
+    self: false,
+  };
+  const menu = buildContextMenu(catalog, s, resolution, "visible");
+  const approach = menu.sections[0]?.items.find((i) => i.id === "move:approach");
+  assert.ok(approach, "falls back to the diagonal neighbor when it's the only walkable option");
+  assert.deepEqual(approach!.command, { type: "MovePlayer", to: { x: 9, y: 4 } });
+});
+
 test("buildContextMenu: adjacent world_object does NOT get an 'Acercarme' item (already close enough)", () => {
   const s = makeSnapshot();
   const object: WorldObject = { id: "wo1", objectTypeId: "tree", position: { x: 6, y: 5 }, state: {} };

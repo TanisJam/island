@@ -80,33 +80,75 @@ function tileWalkableAt(snapshot: ClientSnapshot, pos: Position): boolean {
   return snapshot.tiles.find((t) => t.x === pos.x && t.y === pos.y)?.walkable ?? false;
 }
 
-const NEIGHBOR_OFFSETS: Position[] = [
+/**
+ * Backend movement is 4-CONNECTED (see `backend/src/domain/pathfinding.ts`'s
+ * `findPath`/`NEIGHBORS` — a plain BFS over the 4 orthogonal directions
+ * only). `processCommand`'s `MovePlayer` case (`backend/src/application/process-command.ts`)
+ * rejects with `no_path` ("No puedo llegar allí desde aquí.") whenever no
+ * such BFS path connects the player's current tile to the requested
+ * destination, and with `not_walkable` if the destination tile itself isn't
+ * walkable. The backend re-pathfinds the WHOLE route itself (it isn't
+ * stepwise/adjacent-only) — a far destination is fine as long as it's
+ * walkable and reachable through orthogonal steps — so the frontend's only
+ * job for "Acercarme" is to pick a walkable destination that's actually
+ * connected to the player, and — since diagonal "adjacency" isn't a real
+ * connectivity relationship for this BFS — prefer an orthogonal neighbor of
+ * the target over a diagonal one whenever both are walkable.
+ */
+const ORTHOGONAL_OFFSETS: Position[] = [
   { x: 1, y: 0 },
   { x: -1, y: 0 },
   { x: 0, y: 1 },
   { x: 0, y: -1 },
+];
+
+const DIAGONAL_OFFSETS: Position[] = [
   { x: 1, y: 1 },
   { x: 1, y: -1 },
   { x: -1, y: 1 },
   { x: -1, y: -1 },
 ];
 
+/** Among `offsets` applied to `pos`, returns the walkable candidate CLOSEST
+ * to `player` (chebyshev), or null if none of them are walkable. Preferring
+ * the nearest-to-player candidate (instead of the first match in a fixed
+ * offset order) picks the side of the target that's most likely to already
+ * be on the player's own connected walkable region. */
+function nearestWalkableNeighbor(snapshot: ClientSnapshot, pos: Position, offsets: Position[], player: Position): Position | null {
+  let best: Position | null = null;
+  let bestDistance = Infinity;
+  for (const d of offsets) {
+    const candidate = { x: pos.x + d.x, y: pos.y + d.y };
+    if (!tileWalkableAt(snapshot, candidate)) continue;
+    const distance = chebyshev(player, candidate);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = candidate;
+    }
+  }
+  return best;
+}
+
 /**
  * Best-effort walkable position to approach `pos` from — `pos` itself if
- * walkable, otherwise the first walkable neighbor found (a world object's
- * own tile is very often non-walkable, e.g. a tree that `blocksMovement`).
- * Purely a client-side convenience for the "Acercarme" move item: the
- * backend still pathfinds/revalidates the actual `MovePlayer`, so a
- * best-effort miss just surfaces as a normal rejection thought, same
- * tolerance as every other client-side preview in this module.
+ * walkable, otherwise the walkable orthogonal neighbor NEAREST to the player
+ * (falling back to a diagonal neighbor only if no orthogonal one is
+ * walkable) — a world object's own tile is very often non-walkable, e.g. a
+ * tree that `blocksMovement`. Purely a client-side convenience for the
+ * "Acercarme" move item: the backend still pathfinds/revalidates the actual
+ * `MovePlayer` (see the 4-connectivity note above), so a best-effort miss
+ * just surfaces as a normal rejection thought, same tolerance as every other
+ * client-side preview in this module — but picking the nearest ORTHOGONAL
+ * neighbor makes that miss far less likely than the previous fixed-order,
+ * diagonals-included scan.
  */
 function findApproachPosition(snapshot: ClientSnapshot, pos: Position): Position | null {
   if (tileWalkableAt(snapshot, pos)) return pos;
-  for (const d of NEIGHBOR_OFFSETS) {
-    const candidate = { x: pos.x + d.x, y: pos.y + d.y };
-    if (tileWalkableAt(snapshot, candidate)) return candidate;
-  }
-  return null;
+  const player = snapshot.player.position;
+  return (
+    nearestWalkableNeighbor(snapshot, pos, ORTHOGONAL_OFFSETS, player) ??
+    nearestWalkableNeighbor(snapshot, pos, DIAGONAL_OFFSETS, player)
+  );
 }
 
 function terrainName(catalog: Catalog, terrain: Tile["terrain"]): string {
