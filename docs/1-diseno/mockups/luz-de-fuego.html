@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>01 · Luz de fuego (mapa + menú contextual) — Isla Misteriosa</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;1,400;1,500&family=Silkscreen:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root{ --sombra:#0f1a16; --madera:#2b2620; --arena:#e8dcc0; --brasa:#f0a24e;
+    --descubrir:#ff7a3d; --recuerdo:#6b6a5c; --linea:#3a332b; --tile:64px; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; overflow:hidden; background:var(--sombra); color:var(--arena); font-family:"Spectral",Georgia,serif; }
+
+  #map{ position:fixed; inset:0; display:grid; grid-auto-rows:var(--tile); grid-template-columns:repeat(auto-fill,var(--tile)); image-rendering:pixelated; z-index:0; }
+  .t{ position:relative; cursor:pointer; }
+  .t.sand{background:#d9c089;} .t.grass{background:#6a9a4f;} .t.jungle{background:#1f5c3a;}
+  .t.water{background:#4a90c2;} .t.dirt{background:#8a6b4a;} .t.rock{background:#8a8a8a;}
+  .t.explored::after{content:"";position:absolute;inset:0;background:rgba(6,10,8,.55);}
+  .t.unseen{background:#060a08;}
+  .t .glyph{position:absolute;inset:0;display:grid;place-items:center;font-size:34px;pointer-events:none;}
+  .t .floor{position:absolute;right:4px;bottom:2px;font-size:15px;pointer-events:none;filter:drop-shadow(0 1px 2px #000);}
+  .t.player .glyph::before{content:"";position:absolute;width:120%;height:120%;border-radius:50%;
+    background:radial-gradient(circle,rgba(240,162,78,.5),rgba(240,162,78,0) 68%);animation:breathe 3.2s ease-in-out infinite;}
+  @keyframes breathe{0%,100%{transform:scale(1);opacity:.85;}50%{transform:scale(1.12);opacity:1;}}
+  .t.sel::before{content:"";position:absolute;inset:4px;border:2px solid var(--brasa);border-radius:2px;box-shadow:0 0 14px rgba(240,162,78,.7);animation:selpulse 1.6s ease-in-out infinite;}
+  @keyframes selpulse{0%,100%{opacity:.7;}50%{opacity:1;}}
+
+  #vignette{ position:fixed; inset:0; z-index:1; pointer-events:none;
+    background: radial-gradient(120% 80% at 50% 42%, transparent 45%, rgba(6,10,8,.55) 100%),
+      linear-gradient(180deg, transparent 62%, rgba(6,10,8,.82) 100%); }
+
+  #hud{ position:fixed; left:0; right:0; bottom:0; z-index:5; display:grid; grid-template-columns:1fr minmax(320px,2fr) 1fr; align-items:end; gap:24px; padding:0 34px 22px; pointer-events:none; }
+  #hud > *{ pointer-events:auto; }
+  .hand{ display:flex; flex-direction:column; gap:6px; }
+  .hand.right{ align-items:flex-end; text-align:right; }
+  .hand .lbl{ font-family:"Silkscreen"; font-size:9px; letter-spacing:1px; color:var(--recuerdo); text-shadow:0 1px 3px #000; }
+  .hslot{ width:60px; height:60px; display:grid; place-items:center; font-size:30px; cursor:pointer; filter:drop-shadow(0 0 10px rgba(240,162,78,.55)); position:relative; }
+  .hslot::after{content:"";position:absolute;inset:-6px;border-radius:50%;background:radial-gradient(circle,rgba(240,162,78,.28),transparent 70%);z-index:-1;animation:flicker 4.5s ease-in-out infinite;}
+  @keyframes flicker{0%,100%{opacity:.75;}45%{opacity:1;}70%{opacity:.7;}}
+  .hand .nm{ font-family:"Spectral"; font-size:13px; color:var(--arena); text-shadow:0 1px 4px #000; }
+  .voice{ text-align:center; padding-bottom:2px; }
+  .thought{ font-style:italic; font-size:21px; line-height:1.4; color:var(--arena); text-shadow:0 2px 8px #000, 0 0 22px rgba(240,162,78,.3); animation:emberlight 5s ease-in-out infinite; }
+  @keyframes emberlight{0%,100%{text-shadow:0 2px 8px #000,0 0 16px rgba(240,162,78,.22);}50%{text-shadow:0 2px 8px #000,0 0 26px rgba(240,162,78,.42);}}
+  .energy{ display:flex; align-items:center; justify-content:center; gap:10px; margin-top:10px; }
+  .energy .lbl{ font-family:"Silkscreen"; font-size:9px; color:var(--recuerdo); text-shadow:0 1px 3px #000; }
+  .bar{ width:200px; height:8px; background:rgba(0,0,0,.55); border-radius:5px; overflow:hidden; box-shadow:0 1px 3px #000; }
+  .bar>i{ display:block; height:100%; width:78%; background:linear-gradient(90deg,#b56a2a,var(--brasa)); }
+  .energy .num{ font-family:"Silkscreen"; font-size:10px; color:var(--arena); text-shadow:0 1px 3px #000; }
+
+  .win{ position:fixed; z-index:20; background:linear-gradient(180deg,rgba(43,38,32,.97),rgba(28,24,20,.97)); border:1px solid #000; border-radius:8px; box-shadow:0 0 0 1px rgba(240,162,78,.25), 0 20px 50px -18px #000, 0 0 30px -8px rgba(240,162,78,.25); min-width:210px; }
+  .win.hidden{ display:none; }
+  .win .bar-title{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 10px 8px 12px; border-bottom:1px solid var(--linea); cursor:grab; user-select:none; }
+  .win .bar-title h3{ font-family:"Silkscreen"; font-size:10px; letter-spacing:1px; color:var(--brasa); margin:0; font-weight:400; }
+  .win .btns{ display:flex; gap:4px; }
+  .win .btns button{ background:none; border:none; color:var(--recuerdo); cursor:pointer; font-size:13px; padding:2px 4px; border-radius:4px; }
+  .win .btns button:hover{ color:var(--brasa); background:rgba(240,162,78,.12); }
+  .win .btns button.pinned{ color:var(--brasa); }
+  .win .body{ padding:14px; }
+
+  .grid{ display:grid; grid-template-columns:repeat(4,52px); grid-auto-rows:52px; gap:5px; }
+  .cell{ border:1px solid var(--linea); border-radius:5px; background:rgba(0,0,0,.25); display:grid; place-items:center; font-size:24px; position:relative; }
+  .cell.hand{ border-style:dashed; border-color:var(--recuerdo); }
+  .cell.hand::after{content:"mano";position:absolute;bottom:1px;font-family:"Silkscreen";font-size:6px;color:var(--recuerdo);}
+  .cell.equipped{ border-color:var(--brasa); box-shadow:inset 0 0 12px rgba(240,162,78,.3); }
+  .cell.span2{ grid-row:span 2; }
+
+  /* contextual menu — sectioned */
+  #ctx{ min-width:230px; max-width:270px; }
+  #ctx .body{ padding:4px 0 8px; max-height:70vh; overflow:auto; }
+  .sect-h{ font-family:"Silkscreen"; font-size:8px; letter-spacing:1px; color:var(--brasa); padding:9px 14px 3px; opacity:.9; }
+  .sect-h.dim{ color:var(--recuerdo); }
+  .act{ display:block; width:100%; text-align:left; background:none; border:none; color:var(--arena); font-family:"Spectral"; font-size:14px; padding:7px 14px; cursor:pointer; }
+  .act:hover{ background:rgba(240,162,78,.15); color:var(--brasa); }
+  .act small{ display:block; font-style:italic; font-size:11px; color:var(--recuerdo); }
+  .act.mute{ cursor:default; color:var(--recuerdo); font-style:italic; }
+  .act.mute:hover{ background:none; }
+
+  #hint{ position:fixed; top:14px; left:16px; z-index:6; font-style:italic; color:#c8bd9d; font-size:13px; text-shadow:0 1px 4px #000; max-width:380px; line-height:1.55; }
+  #hint b{ color:var(--brasa); font-style:normal; }
+  #back{ position:fixed; top:14px; right:16px; z-index:6; font-family:"Silkscreen"; font-size:10px; color:var(--recuerdo); text-decoration:none; text-shadow:0 1px 3px #000; }
+  #back:hover{ color:var(--brasa); }
+  @media (prefers-reduced-motion: reduce){ *{animation:none!important;} }
+</style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="vignette"></div>
+
+  <div id="hint">La vista es el mapa. <b>Todo tile es clickeable</b> y el menú cambia según el contexto:<br>
+    · <b>el personaje 🧍</b> → mis cosas + acciones del suelo + improvisar<br>
+    · <b>adyacente</b> (pasto 🌾) → interactuar / soltar / recoger<br>
+    · <b>lejos</b> (árbol 🌳, piedra 🪨, fogata 🔥) → observar / acercarme<br>
+    · <b>penumbra</b> (bordes oscuros) → intentar ver / ir hacia allá</div>
+  <a id="back" href="index.html">← volver</a>
+
+  <div id="hud">
+    <div class="hand left"><span class="lbl">MANO IZQ</span><div class="hslot" data-self="1">🪨</div><span class="nm">Piedra pequeña</span></div>
+    <div class="voice">
+      <div class="thought" id="thought">No reconozco este lugar. Tengo que mirar alrededor y entender qué puedo usar.</div>
+      <div class="energy"><span class="lbl">ENERGÍA</span><div class="bar"><i></i></div><span class="num">78/100</span></div>
+    </div>
+    <div class="hand right"><span class="lbl">MANO DER</span><div class="hslot" data-self="1">🌿</div><span class="nm">Fibra vegetal</span></div>
+  </div>
+
+  <div class="win hidden" id="inv" style="right:28px; bottom:120px;">
+    <div class="bar-title"><h3>MIS COSAS · 4×4</h3><div class="btns"><button class="pin pinned" title="fijar">📌</button><button class="close" title="cerrar">✕</button></div></div>
+    <div class="body"><div class="grid">
+      <div class="cell hand equipped">🪨</div><div class="cell"></div><div class="cell"></div><div class="cell hand equipped">🌿</div>
+      <div class="cell span2">🪵</div><div class="cell">🌰</div><div class="cell"></div><div class="cell"></div>
+      <div class="cell">🍂</div><div class="cell"></div><div class="cell"></div>
+      <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+    </div></div>
+  </div>
+
+  <div class="win hidden" id="ctx">
+    <div class="bar-title"><h3 id="ctx-title">TILE</h3><div class="btns"><button class="pin" title="fijar">📌</button><button class="close" title="cerrar">✕</button></div></div>
+    <div class="body" id="ctx-body"></div>
+  </div>
+
+<script>
+  const map=document.getElementById('map'), T=64;
+  const cols=Math.ceil(innerWidth/T), rows=Math.ceil(innerHeight/T);
+  function h(x,y){ return Math.abs(Math.sin(x*12.9898+y*78.233)*43758.5453)%1; }
+  const cx=Math.floor(cols/2), cy=Math.floor(rows/2), cells=[];
+  for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){
+    const n=h(Math.floor(x/2),Math.floor(y/2)); let cls;
+    if(y<rows*0.28) cls=n<.5?'jungle':'grass';
+    else if(y>rows*0.72) cls=n<.5?'water':'sand';
+    else cls=n<.33?'grass':(n<.55?'sand':(n<.7?'dirt':'grass'));
+    const d=Math.hypot(x-cx,y-cy);
+    const el=document.createElement('div'); el.className='t '+cls;
+    if(d>5.2) el.classList.add('unseen'); else if(d>3.6) el.classList.add('explored');
+    const c={el,x,y,cls,kind:null,floor:[]}; cells.push(c); map.appendChild(el);
+  }
+  const at=(x,y)=>cells.find(c=>c.x===x&&c.y===y);
+  const cheby=(x,y)=>Math.max(Math.abs(x-cx),Math.abs(y-cy));
+  const TN={sand:'arena',grass:'pasto',jungle:'jungla',water:'agua',dirt:'tierra',rock:'roca'};
+
+  // entities + floor
+  const P=at(cx,cy); if(P){P.el.className='t grass player';P.el.innerHTML='<span class="glyph">🧍</span>';P.kind='player';P.floor=['rama seca','corteza'];P.el.insertAdjacentHTML('beforeend','<span class="floor">🪵🍂</span>');}
+  const grass=at(cx+1,cy-1); if(grass){grass.el.className='t grass';grass.el.innerHTML='<span class="glyph">🌾</span>';grass.kind='pasto alto';}
+  const tree=at(cx-2,cy-1); if(tree){tree.el.className='t jungle';tree.el.innerHTML='<span class="glyph">🌳</span>';tree.kind='árbol';}
+  const rock=at(cx+2,cy); if(rock){rock.el.className='t sand';rock.el.innerHTML='<span class="glyph">🪨</span>';rock.kind='piedra';}
+  const fire=at(cx,cy+2); if(fire){fire.el.className='t dirt';fire.el.innerHTML='<span class="glyph">🔥</span>';fire.kind='fogata';}
+  const adjE=at(cx-1,cy); if(adjE){adjE.floor=['semilla'];adjE.el.insertAdjacentHTML('beforeend','<span class="floor">🌰</span>');}
+
+  // interact actions on an adjacent object, given held items (piedra+fibra, no tool)
+  function interact(kind){
+    if(kind==='pasto alto') return [['Apartar el pasto','ver qué esconde'],['Arrancar fibra','me puede servir'],['Examinar','']];
+    if(kind==='árbol')      return [['Golpear con la piedra','tal vez ceda algo'],['Raspar la corteza','quizá sirva'],['Examinar','']];
+    if(kind==='piedra')     return [['Golpear con lo que tengo',''],['Recoger','cabe en mi mano'],['Examinar','dura, pesada']];
+    if(kind==='fogata')     return [['Avivar','que no se apague'],['Calentarme',''],['Examinar','mi punto de vuelta']];
+    return [['Examinar','']];
+  }
+
+  // BUILD the contextual menu from context: distance, tile, floor, held, visibility
+  function menuFor(c){
+    const d=cheby(c.x,c.y), vis=c.el.classList.contains('unseen')?'unseen':(c.el.classList.contains('explored')?'explored':'visible');
+    const terr=TN[c.cls]||c.cls, S=[];
+    if(d===0){ // self
+      S.push({h:'Yo',a:[['Ver mis cosas','el inventario','inv'],['Ver mis pensamientos','lo que fui entendiendo'],['Decir algo','por si alguien pasa']]});
+      S.push({h:`Aquí — ${terr}`,a:[['Rebuscar en el suelo','a ver qué hay'],['Cavar con las manos','va a costar, no tengo pala'],['Cortar el pasto','despejar un poco']]});
+      if(c.floor.length) S.push({h:'En el suelo',a:[['Examinar lo que hay',c.floor.join(', ')],['Improvisar algo','con esto y mis manos'],['Recoger','guardar en mis cosas']]});
+    } else if(d===1){ // adjacent
+      if(c.kind) S.push({h:`${c.kind} (al lado)`,a:interact(c.kind)});
+      const a=[['Soltar algo acá','dejar un material al lado'],['Examinar','mirar de cerca']];
+      if(c.floor.length) a.unshift(['Recoger del suelo',c.floor.join(', ')]);
+      a.push(['Ir hasta acá','pisar ese lugar']);
+      S.push({h:'Puedo alcanzarlo',a});
+    } else { // far
+      if(vis==='visible'){ const a=[['Observar','¿qué es eso?']]; if(c.kind) a.push(['Acercarme','ir hasta poder usarlo']); a.push(['Ir hasta ahí','caminar']); S.push({h:`A lo lejos — ${c.kind||terr}`,a}); }
+      else if(vis==='explored'){ S.push({h:'En la penumbra',a:[['Intentar ver','forzar la vista'],['Ir hacia allá','para ver mejor'],['Recordar','lo que vi antes']]}); }
+      else { S.push({h:'No alcanzo',dim:1,a:[['No alcanzo a ver qué hay ahí.','',null,'mute']]}); }
+    }
+    return S;
+  }
+
+  const ctx=document.getElementById('ctx'), inv=document.getElementById('inv');
+  function wire(w){ const p=w.querySelector('.pin'),cl=w.querySelector('.close');
+    cl.onclick=e=>{e.stopPropagation();w.classList.add('hidden');};
+    p.onclick=e=>{e.stopPropagation();p.classList.toggle('pinned');w.dataset.pinned=p.classList.contains('pinned')?'1':'0';};
+    w.dataset.pinned=p.classList.contains('pinned')?'1':'0'; }
+  wire(ctx); wire(inv);
+  const setThought=t=>{ if(t) document.getElementById('thought').textContent=t; };
+
+  function openMenu(c,px,py){
+    document.getElementById('ctx-title').textContent=(c.kind&&cheby(c.x,c.y)<=1?c.kind:(cheby(c.x,c.y)===0?'aquí':'ese lugar')).toUpperCase();
+    const body=document.getElementById('ctx-body'); body.innerHTML='';
+    menuFor(c).forEach(sec=>{
+      const hh=document.createElement('div'); hh.className='sect-h'+(sec.dim?' dim':''); hh.textContent=sec.h; body.appendChild(hh);
+      sec.a.forEach(([label,sub,id,cls])=>{
+        const b=document.createElement('button'); b.className='act'+(cls?' '+cls:'');
+        b.innerHTML=label+(sub?`<small>${sub}</small>`:'');
+        if(cls!=='mute') b.onclick=e=>{ e.stopPropagation();
+          if(id==='inv'){ inv.classList.toggle('hidden'); }
+          else { setThought(sub||label+'.'); if(ctx.dataset.pinned!=='1') ctx.classList.add('hidden'); }
+        };
+        body.appendChild(b);
+      });
+    });
+    ctx.style.left=Math.min(px+14,innerWidth-280)+'px';
+    ctx.style.top=Math.min(py+8,innerHeight-320)+'px'; ctx.style.bottom='auto'; ctx.style.right='auto';
+    ctx.classList.remove('hidden');
+  }
+
+  cells.forEach(c=>{ c.el.addEventListener('click',e=>{ e.stopPropagation();
+    cells.forEach(k=>k.el.classList.remove('sel')); c.el.classList.add('sel'); openMenu(c,e.clientX,e.clientY);
+  });});
+  // clicking a hand slot = self menu (character options)
+  document.querySelectorAll('.hslot').forEach(s=> s.addEventListener('click',e=>{ e.stopPropagation();
+    cells.forEach(k=>k.el.classList.remove('sel')); P.el.classList.add('sel');
+    openMenu(P, innerWidth/2-120, innerHeight-360);
+  }));
+  document.addEventListener('click',()=>{ if(ctx.dataset.pinned!=='1'){ ctx.classList.add('hidden'); cells.forEach(c=>c.el.classList.remove('sel')); } });
+</script>
+</body>
+</html>
