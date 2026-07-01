@@ -1,8 +1,5 @@
 import type { Position } from "../contract";
-import type { ClientSnapshot } from "../state/snapshot";
-import { visibilityOf } from "../state/visibility";
 import type { AssetResolver } from "./assets";
-import { createEmojiAssets } from "./assets";
 import type { Renderer } from "./renderer";
 import type { Frame, RenderEntity } from "../view/viewstate";
 
@@ -117,71 +114,4 @@ export function createCanvasRenderer(ctx: CanvasRenderingContext2D, assets: Asse
       // Canvas 2D holds no external resources to release.
     },
   };
-}
-
-// ---------------------------------------------------------------------------
-// TEMPORARY SHIM — kept only so `main.ts` keeps compiling before the Phase 5
-// migration (tasks.md 3.1). Delete this export (tasks.md 5.3) once main.ts
-// builds its loop from `createGame`/`createCanvasRenderer` instead. Uses the
-// same `AssetResolver` as the seam above (no local emoji/color tables), but
-// still reads directly from `ClientSnapshot` + `visibilityOf`, matching the
-// pre-refactor behavior exactly.
-// ---------------------------------------------------------------------------
-const legacyAssets: AssetResolver = createEmojiAssets();
-
-export function render(ctx: CanvasRenderingContext2D, snapshot: ClientSnapshot, selectedPos: Position | null): void {
-  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-
-  for (const tile of snapshot.tiles) {
-    const vis = visibilityOf(snapshot, { x: tile.x, y: tile.y });
-    const px = tile.x * PX;
-    const py = tile.y * PX;
-    if (vis === "unseen") {
-      ctx.fillStyle = "#000";
-      ctx.fillRect(px, py, PX, PX);
-      continue;
-    }
-    ctx.fillStyle = legacyAssets.resolve("terrain", tile.terrain).color ?? FALLBACK_TERRAIN_COLOR;
-    ctx.fillRect(px, py, PX, PX);
-    if (vis === "explored") {
-      ctx.fillStyle = "rgba(0,0,0,0.45)";
-      ctx.fillRect(px, py, PX, PX);
-    }
-  }
-
-  for (const obj of snapshot.objects) {
-    if (visibilityOf(snapshot, obj.position) === "unseen") continue;
-    const visual = legacyAssets.resolve("object", obj.objectTypeId, obj.state as Record<string, unknown>);
-    drawEmoji(ctx, obj.position, visual.glyph ?? "", visual.scale);
-  }
-
-  // Items grouped into a pile are drawn as a single pile glyph (+ count), not as N
-  // overlapping item emojis, so collect their ids to skip them in the world-item pass.
-  const piledItemIds = new Set(snapshot.piles.flatMap((p) => p.itemInstanceIds));
-
-  for (const pile of snapshot.piles) {
-    if (visibilityOf(snapshot, pile.position) === "unseen") continue;
-    const visual = legacyAssets.resolve("pile", pile.itemTypeId);
-    drawEmoji(ctx, pile.position, visual.glyph ?? "", visual.scale);
-    drawCount(ctx, pile.position, pile.itemInstanceIds.length);
-  }
-
-  for (const item of snapshot.items) {
-    if (item.location.type !== "world") continue;
-    if (piledItemIds.has(item.id)) continue;
-    const pos = { x: item.location.x, y: item.location.y };
-    if (visibilityOf(snapshot, pos) === "unseen") continue;
-    const visual = legacyAssets.resolve("item", item.itemTypeId);
-    drawEmoji(ctx, pos, visual.glyph ?? "", visual.scale);
-  }
-
-  const p = snapshot.player.position;
-  ctx.fillStyle = "rgba(255,240,120,0.28)";
-  ctx.beginPath();
-  ctx.arc(p.x * PX + PX / 2, p.y * PX + PX / 2, PX * 0.44, 0, Math.PI * 2);
-  ctx.fill();
-  const playerVisual = legacyAssets.resolve("player", "player");
-  drawEmoji(ctx, p, playerVisual.glyph ?? "", playerVisual.scale);
-
-  if (selectedPos) drawSelection(ctx, selectedPos);
 }
