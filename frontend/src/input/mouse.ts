@@ -12,7 +12,6 @@ type ClickResolution = {
   key: string;
   wireRef: WireTargetRef;
   preview: ActionTarget;
-  observation: string;
   walkable: boolean;
 };
 
@@ -46,10 +45,11 @@ function findTileAt(snapshot: ClientSnapshot, x: number, y: number): Tile | unde
 }
 
 /** Resolves what's at tile (x,y) for the click flow, in priority order:
- * world object > loose ground item > tile. Builds both the wire `target` ref (for
- * commands) and the local `ActionTarget` preview (for `computeAvailableActions`,
- * wrapped by `actions/context-menu.ts`), plus the local-only "observation" text
- * used as a fallback for empty, non-walkable tiles — zero network calls. */
+ * world object > loose ground item > tile. Builds both the wire `target` ref
+ * (for commands) and the local `ActionTarget` preview (for
+ * `computeAvailableActions`, wrapped by `actions/context-menu.ts`) — zero
+ * network calls. `walkable` feeds the double-click "just walk there"
+ * shortcut in `onCanvasClick`. */
 function resolveClickTarget(catalog: Catalog, snapshot: ClientSnapshot, x: number, y: number): ClickResolution | null {
   const object = findObjectAt(snapshot, x, y);
   if (object) {
@@ -59,7 +59,6 @@ function resolveClickTarget(catalog: Catalog, snapshot: ClientSnapshot, x: numbe
       key: `wo:${object.id}`,
       wireRef: { kind: "world_object", id: object.id },
       preview: { kind: "world_object", pos: object.position, tags, object },
-      observation: def?.observation ?? "No reconozco bien qué es esto.",
       walkable: false,
     };
   }
@@ -71,7 +70,6 @@ function resolveClickTarget(catalog: Catalog, snapshot: ClientSnapshot, x: numbe
       key: `item:${item.id}`,
       wireRef: { kind: "item", id: item.id },
       preview: { kind: "item", pos: { x, y }, tags: def?.tags ?? [], item },
-      observation: def?.observation ?? "Algo está tirado ahí.",
       walkable: false,
     };
   }
@@ -84,29 +82,11 @@ function resolveClickTarget(catalog: Catalog, snapshot: ClientSnapshot, x: numbe
       key: `tile:${x},${y}`,
       wireRef: { kind: "tile", x, y },
       preview: { kind: "tile", pos: { x, y }, tags, terrain: tile.terrain },
-      observation: def?.observation ?? "Terreno sin nada de particular.",
       walkable: tile.walkable,
     };
   }
 
   return null;
-}
-
-/**
- * True when tile (x,y) has interactive CONTENT for the click-resolution
- * model: a world object, a loose ground item, or the player's own tile.
- * PURE, exported for unit testing (fix-list: "clicking a tile that has
- * floor items or a world object moves the player directly instead of
- * opening the contextual menu" — `onCanvasClick` uses this to decide
- * menu-vs-move BEFORE building any preview, so the decision itself is a
- * single, testable helper rather than scattered across the click handler). A
- * CONTENT tile opens the contextual menu; a tile WITHOUT content instead
- * gets a direct move when walkable (see `onCanvasClick`). */
-export function tileHasContent(snapshot: ClientSnapshot, pos: Position): boolean {
-  if (pos.x === snapshot.player.position.x && pos.y === snapshot.player.position.y) return true;
-  if (findObjectAt(snapshot, pos.x, pos.y)) return true;
-  if (findGroundItemAt(snapshot, pos.x, pos.y)) return true;
-  return false;
 }
 
 function canvasRectOf(canvas: HTMLCanvasElement): CanvasRect {
@@ -125,64 +105,72 @@ function canvasToTile(ev: MouseEvent, canvas: HTMLCanvasElement, frame: Frame): 
   return screenToTile({ x: ev.clientX, y: ev.clientY }, canvasRectOf(canvas), offset);
 }
 
+/** Second click must land within this many ms of the first to count as a
+ * double click/tap — the usual OS/browser double-click window (250–300ms). */
+const DOUBLE_CLICK_THRESHOLD_MS = 280;
+
+export type ClickCadence = "single" | "double";
+
+/**
+ * PURE decision behind the click-cadence model (fix-list: "single click
+ * inspects (opens menu), double click/tap moves"): a click is a "double"
+ * only when a PRIOR click landed on the EXACT SAME tile no more than
+ * `thresholdMs` ago — a fast click on a different tile is always two
+ * independent singles, never a double. Deliberately dumb (no `event.detail`,
+ * no `dblclick`/touch-specific listeners): both mouse double-click and touch
+ * double-tap are just two `click` events close together in time, so one
+ * timing+position check covers both input kinds identically. Exported for
+ * unit testing; `onCanvasClick` is the only caller.
+ */
+export function classifyClick(
+  now: number,
+  lastClickTime: number | null,
+  tile: Position,
+  lastTile: Position | null,
+  thresholdMs: number = DOUBLE_CLICK_THRESHOLD_MS,
+): ClickCadence {
+  if (lastClickTime === null || lastTile === null) return "single";
+  if (now - lastClickTime > thresholdMs) return "single";
+  if (tile.x !== lastTile.x || tile.y !== lastTile.y) return "single";
+  return "double";
+}
+
 export function createInputController(deps: InputDeps): InputController {
   let selection: ClickResolution | null = null;
+  let lastClickTime: number | null = null;
+  let lastClickTile: Position | null = null;
+  // Holds the timer for a deferred single-click menu-open, so a qualifying
+  // second click (a double) can cancel it before the menu ever appears —
+  // "single click inspects, double click moves" must never flash the menu in
+  // between (fix-list: "single click inspects (opens menu), double click/tap
+  // moves").
+  let pendingMenuTimer: ReturnType<typeof setTimeout> | null = null;
 
-  async function onCanvasClick(ev: MouseEvent): Promise<void> {
-    // NOTE: `ev.stopPropagation()` is deliberately NOT called at the top
-    // of this handler (it used to be, unconditionally — that was the root
-    // cause of "no object is interactable anymore" after several
-    // interactions). Blocking it here meant EVERY canvas click, not just the
-    // one about to open a menu, prevented `hud/ui.ts`'s document-level
-    // outside-click listener from ever running for canvas clicks — so an
-    // open inventory/context-menu window could never be dismissed by
-    // clicking the map (only by ✕, which had its own bug), and windows piled
-    // up over the map, eating clicks that never reached the canvas at all.
-    // It's now called ONLY right before opening a NEW context menu below,
-    // which is the one case that genuinely needs it (see that call site).
-    const { x, y } = canvasToTile(ev, deps.canvas, deps.getFrame());
-    const snapshot = deps.getSnapshot();
-    const resolved = resolveClickTarget(deps.catalog, snapshot, x, y);
-    if (!resolved) return;
-
-    // Click-resolution model (fix-list: "clicking a tile that has floor
-    // items or a world object moves the player directly instead of opening
-    // the contextual menu"): a tile WITHOUT content — no world object, no
-    // loose ground item, and not the player's own tile — is a plain empty
-    // tile. A single click there issues a direct move when walkable, or
-    // falls back to the tile's observation thought when it isn't (there is
-    // nothing a menu could usefully offer for an empty, unreachable tile).
-    // This replaces the previous per-item bypass (which used to `MovePlayer`
-    // straight to a far loose item, literally moving the player instead of
-    // ever offering a menu) with one decision that applies uniformly to
-    // every target kind.
-    if (!tileHasContent(snapshot, { x, y })) {
-      selection = null;
-      if (resolved.walkable) {
-        await deps.sendCommand({ type: "MovePlayer", to: { x, y } });
-      } else {
-        showThought(resolved.observation);
-      }
-      return;
+  function cancelPendingMenu(): void {
+    if (pendingMenuTimer !== null) {
+      clearTimeout(pendingMenuTimer);
+      pendingMenuTimer = null;
     }
+  }
 
-    // Content tile (world object, loose ground item, or the player's own
-    // tile): a single click opens the sectioned contextual menu built by
-    // `actions/context-menu.ts` (design.md "Taxonomy" / spec "Contextual
-    // Menu from Real Action Logic" / "Self Click-Target Resolution") —
-    // previously this required an extra "select, then click again" step,
-    // which is what let a click land on a loose item and fall straight
-    // through to the (now-removed) direct-move/take bypass instead of ever
-    // reaching a menu. `self` is true whenever the clicked tile IS the
-    // player's own position, regardless of what `resolveClickTarget` found
-    // there.
-    //
-    // Defensively wrapped (fix for "no object is interactable anymore"):
-    // any new/unanticipated game state on this tile (a fresh world-item
-    // pile, a full inventory, an unrecognized typeId, etc.) must never throw
-    // out of this handler — a thrown menu build here would leave `selection`
-    // stuck and, worse, is exactly the kind of failure that could cascade
-    // into an unusable map. Degrade to a thought instead.
+  /**
+   * Opens the sectioned contextual menu built by `actions/context-menu.ts`
+   * (design.md "Taxonomy" / spec "Contextual Menu from Real Action Logic" /
+   * "Self Click-Target Resolution") for `resolved` at screen point `at`. This
+   * is now the ONLY inspect path for every tile kind — the walkable-tile
+   * move affordance ("Ir hasta acá"/"Ir hasta ahí") already lives inside the
+   * menu via `buildReachableMenu`, so this function never moves the player
+   * itself; the sole direct-move path is the double-click branch in
+   * `onCanvasClick`.
+   *
+   * Defensively wrapped (fix for "no object is interactable anymore"): any
+   * new/unanticipated game state on this tile (a fresh world-item pile, a
+   * full inventory, an unrecognized typeId, etc.) must never throw out of
+   * this handler — a thrown menu build here would leave `selection` stuck
+   * and, worse, is exactly the kind of failure that could cascade into an
+   * unusable map. Degrade to a thought instead.
+   */
+  function openMenuFor(resolved: ClickResolution, x: number, y: number, at: { x: number; y: number }, snapshot: ClientSnapshot): void {
     selection = resolved;
     let menu: ReturnType<typeof buildContextMenu>;
     try {
@@ -200,15 +188,7 @@ export function createInputController(deps: InputDeps): InputController {
       return;
     }
 
-    // Stops the click from bubbling to `document`, where `hud/ui.ts`'s
-    // outside-click listener (`WindowManager.dismissTransient`) would
-    // otherwise immediately dismiss the menu THIS SAME click is about to
-    // open — mirrors the mockup's per-cell `e.stopPropagation()`. Scoped to
-    // exactly this call site (see the note at the top of the handler for why
-    // it must NOT be unconditional).
-    ev.stopPropagation();
-
-    deps.ui.openContextMenu(menu, { x: ev.clientX, y: ev.clientY }, (item) => {
+    deps.ui.openContextMenu(menu, at, (item) => {
       try {
         if ((item.kind === "action" || item.kind === "move") && item.command) {
           if (item.kind === "move") selection = null;
@@ -225,6 +205,65 @@ export function createInputController(deps: InputDeps): InputController {
         showThought("Algo salió mal. Mejor intento otra cosa.");
       }
     });
+  }
+
+  async function onCanvasClick(ev: MouseEvent): Promise<void> {
+    // NOTE: `ev.stopPropagation()` is deliberately NOT called unconditionally
+    // (it used to be — that was the root cause of "no object is interactable
+    // anymore" after several interactions). Blocking it here meant EVERY
+    // canvas click prevented `hud/ui.ts`'s document-level outside-click
+    // listener from ever running for canvas clicks — so an open
+    // inventory/context-menu window could never be dismissed by clicking the
+    // map. It's called ONLY right before synchronously opening a NEW context
+    // menu inside this same handler (the deferred single-click open below
+    // runs in its own later timer callback, well after this click event has
+    // already finished bubbling, so it needs no `stopPropagation` of its own).
+    const { x, y } = canvasToTile(ev, deps.canvas, deps.getFrame());
+    const snapshot = deps.getSnapshot();
+    const resolved = resolveClickTarget(deps.catalog, snapshot, x, y);
+    if (!resolved) return;
+
+    const now = Date.now();
+    const cadence = classifyClick(now, lastClickTime, { x, y }, lastClickTile);
+    // A qualifying double click "consumes" the pair: the very next click
+    // right after must start its own fresh single/double sequence rather
+    // than chaining onto this one (no triple-click semantics).
+    lastClickTime = cadence === "double" ? null : now;
+    lastClickTile = cadence === "double" ? null : { x, y };
+
+    if (cadence === "double") {
+      cancelPendingMenu();
+      // Express "just walk there" shortcut (fix-list: "double click/tap on a
+      // walkable tile sends MovePlayer directly, bypassing the menu"). Falls
+      // back to the normal single-click menu when the tile isn't walkable —
+      // there's nowhere to walk to, so inspecting is the only useful option.
+      if (resolved.walkable) {
+        selection = null;
+        deps.ui.closeContextMenu(); // never leave a menu open after a double-click move
+        await deps.sendCommand({ type: "MovePlayer", to: { x, y } });
+        return;
+      }
+      ev.stopPropagation();
+      openMenuFor(resolved, x, y, { x: ev.clientX, y: ev.clientY }, snapshot);
+      return;
+    }
+
+    // Single click: defer opening the menu by the same threshold used to
+    // detect a double click, so a genuine double click (handled above, on
+    // the SECOND click) can cancel this before the menu ever appears.
+    // Re-resolves against a FRESH snapshot when the timer actually fires,
+    // rather than reusing the snapshot from the moment of the click — up to
+    // `DOUBLE_CLICK_THRESHOLD_MS` may have passed, during which the world
+    // (and the tile's content) could have changed.
+    cancelPendingMenu();
+    const at = { x: ev.clientX, y: ev.clientY };
+    pendingMenuTimer = setTimeout(() => {
+      pendingMenuTimer = null;
+      const freshSnapshot = deps.getSnapshot();
+      const freshResolved = resolveClickTarget(deps.catalog, freshSnapshot, x, y);
+      if (!freshResolved) return;
+      openMenuFor(freshResolved, x, y, at, freshSnapshot);
+    }, DOUBLE_CLICK_THRESHOLD_MS);
   }
 
   // Outermost safety net (fix for "no object is interactable anymore"): a
