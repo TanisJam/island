@@ -165,8 +165,77 @@ test("frame().tiles: visibility matches visibilityOf for every tile", () => {
   assert.equal(frame.tiles.find((t) => t.x === 30 && t.y === 30)!.visibility, "unseen");
 });
 
-// NOTE: `PlayerMoved.path` (already on the wire) carries waypoints for
-// multi-tile moves. This baseline intentionally uses a straight-line lerp
-// from the previous renderPos to the new authoritative position and does not
-// tween through intermediate waypoints — deferred as a follow-up per
-// design.md "Open Questions".
+// --- 7th playtest fix pass: path-waypoint tweening + vision-follows-avatar ---
+
+test("update(): tweens through EACH waypoint of PlayerMoved.path in order, not a straight-line lerp to the destination", () => {
+  const store = createStore(makeSnapshot());
+  const vs = createViewState(store);
+
+  // (8,9) -> (9,9) -> (9,10): an L-shaped route. A straight-line lerp from
+  // (8,9) to (9,10) at the halfway POINT IN TIME would land at (8.5, 9.5) —
+  // off the actual path entirely. Following the path instead means the first
+  // leg completes exactly AT the intermediate waypoint (9,9).
+  store.ingest([
+    { type: "PlayerMoved", playerId: "p1", path: [{ x: 9, y: 9 }, { x: 9, y: 10 }], position: { x: 9, y: 10 } },
+  ]);
+
+  vs.update(MS_PER_TILE);
+  assert.deepEqual(findPlayer(vs.frame().entities).renderPos, { x: 9, y: 9 }, "first leg lands exactly on the intermediate waypoint");
+
+  vs.update(MS_PER_TILE);
+  assert.deepEqual(findPlayer(vs.frame().entities).renderPos, { x: 9, y: 10 }, "second leg lands on the final destination");
+});
+
+test("update(): an event with an empty path falls back to a single direct leg (e.g. a single-tile move)", () => {
+  const store = createStore(makeSnapshot());
+  const vs = createViewState(store);
+
+  store.ingest([{ type: "PlayerMoved", playerId: "p1", path: [], position: { x: 9, y: 9 } }]);
+  vs.update(MS_PER_TILE);
+  assert.deepEqual(findPlayer(vs.frame().entities).renderPos, { x: 9, y: 9 });
+});
+
+test("frame(): the 'visible' ring follows the avatar's CURRENT interpolated tile, not the authoritative destination, while mid-tween", () => {
+  const base = makeSnapshot();
+  const tiles = [5, 6, 7, 8, 9].map((x) => makeTile(x, 5));
+  const store = createStore(
+    makeSnapshot({
+      visionRadius: 1,
+      tiles,
+      player: { ...base.player, position: { x: 5, y: 5 } },
+      discovered: new Set(["5,5"]),
+    }),
+  );
+  const vs = createViewState(store);
+
+  store.ingest([
+    {
+      type: "PlayerMoved",
+      playerId: "p1",
+      path: [{ x: 6, y: 5 }, { x: 7, y: 5 }, { x: 8, y: 5 }],
+      position: { x: 8, y: 5 },
+    },
+  ]);
+
+  // Mid-tween: only the first leg has completed (avatar visually at (6,5)),
+  // even though the AUTHORITATIVE position already jumped to (8,5) and
+  // `discovered` already includes (9,5) — marked around the destination by
+  // the reducer regardless of animation state.
+  vs.update(MS_PER_TILE);
+  const midFrame = vs.frame();
+  assert.equal(
+    midFrame.tiles.find((t) => t.x === 9 && t.y === 5)!.visibility,
+    "explored",
+    "not yet 'visible' — the avatar hasn't visually arrived at the destination, even though it's authoritatively there",
+  );
+  assert.equal(
+    midFrame.tiles.find((t) => t.x === 6 && t.y === 5)!.visibility,
+    "visible",
+    "the tile under the avatar's CURRENT interpolated position is visible",
+  );
+
+  // Once the tween fully completes, the avatar's interpolated tile catches
+  // up to the destination and the far tile becomes visible too.
+  vs.update(2 * MS_PER_TILE);
+  assert.equal(vs.frame().tiles.find((t) => t.x === 9 && t.y === 5)!.visibility, "visible");
+});

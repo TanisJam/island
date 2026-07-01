@@ -74,6 +74,37 @@ test("subscribe: unsubscribe stops further notifications", () => {
   assert.equal(calls, 1, "listener should not fire again after unsubscribe");
 });
 
+test("subscribeEvents: listener receives the raw events array, called before the post-mutation snapshot listener", () => {
+  const store = createStore(makeSnapshot());
+  const order: string[] = [];
+  let seenEvents: Event[] = [];
+
+  store.subscribeEvents((events) => {
+    order.push("events");
+    seenEvents = events;
+  });
+  store.subscribe(() => order.push("snapshot"));
+
+  const events: Event[] = [{ type: "EnergyChanged", energy: 3 }];
+  store.ingest(events);
+
+  assert.deepEqual(order, ["events", "snapshot"], "raw events fire before the post-mutation snapshot listener");
+  assert.deepEqual(seenEvents, events);
+});
+
+test("subscribeEvents: unsubscribe stops further notifications", () => {
+  const store = createStore(makeSnapshot());
+  let calls = 0;
+  const unsubscribe = store.subscribeEvents(() => calls++);
+
+  store.ingest([{ type: "EnergyChanged", energy: 1 }]);
+  assert.equal(calls, 1);
+
+  unsubscribe();
+  store.ingest([{ type: "EnergyChanged", energy: 2 }]);
+  assert.equal(calls, 1, "listener should not fire again after unsubscribe");
+});
+
 test("subscribe: supports multiple independent listeners", () => {
   const store = createStore(makeSnapshot());
   let a = 0;

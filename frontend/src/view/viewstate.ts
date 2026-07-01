@@ -1,33 +1,50 @@
-import type { Position, Tile } from "../contract";
+import type { Event, Position, Tile } from "../contract";
 import type { Store } from "../state/store";
 import type { ClientSnapshot } from "../state/snapshot";
-import { chebyshev, visibilityOf } from "../state/visibility";
+import { chebyshev, visibilityFrom } from "../state/visibility";
 
 export type Visibility = "unseen" | "explored" | "visible";
 
 /**
  * Per-tile tween-duration constant (2nd playtest pass fix: "movement tween
- * has a FIXED duration regardless of distance"). Previously every tween used
- * a single fixed `MOVE_MS` (200ms) no matter how many tiles it covered — a
- * far "ir hasta ahí" straight-line move (design.md "Graceful Degradation":
- * far movement is a straight-line `MovePlayer`, no stepped tween) crossed
- * many tiles in the SAME 200ms as an adjacent 1-tile step, so it visually
- * raced across the screen while the 1-tile step looked comparatively slow.
- * `tweenDurationFor` below multiplies this per-tile constant by the tile
- * distance so every tween moves at the same constant tiles-per-second pace,
- * clamped by `MIN_TWEEN_MS`/`MAX_TWEEN_MS` so a 1-tile step never feels
- * instant and a very long trek never feels sluggish. This does NOT add real
- * action-durations — it only scales the existing tween easing/duration. */
-export const MS_PER_TILE = 100;
+ * has a FIXED duration regardless of distance"; 7th pass fix: "movement
+ * should be slower" bumped this from 100 to 180 so walking reads
+ * deliberately). Previously every tween used a single fixed `MOVE_MS` (200ms)
+ * no matter how many tiles it covered — a far "ir hasta ahí" straight-line
+ * move (design.md "Graceful Degradation": far movement is a straight-line
+ * `MovePlayer`, no stepped tween) crossed many tiles in the SAME 200ms as an
+ * adjacent 1-tile step, so it visually raced across the screen while the
+ * 1-tile step looked comparatively slow. `tweenDurationFor` below multiplies
+ * this per-tile constant by the tile distance so every tween moves at the
+ * same constant tiles-per-second pace, clamped by `MIN_TWEEN_MS`/
+ * `MAX_TWEEN_MS` so a 1-tile step never feels instant and a very long trek
+ * never feels sluggish. This does NOT add real action-durations — it only
+ * scales the existing tween easing/duration. Because movement is now tweened
+ * leg-by-leg along `PlayerMoved.path` (see `buildLegs`), a multi-tile path's
+ * total duration scales with its length automatically — one leg per waypoint,
+ * each at this same per-tile pace. */
+export const MS_PER_TILE = 180;
 const MIN_TWEEN_MS = 100;
 const MAX_TWEEN_MS = 600;
+
+/** Node-safe guard, mirrors `render/canvas.ts`'s own copy — kept local
+ * instead of importing across the presentation-layer boundary. When true,
+ * movement and the vision field it drives should snap instantly rather than
+ * animate (spec "Reduced motion respected"). */
+function prefersReducedMotion(): boolean {
+  return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
 
 export interface RenderEntity {
   id: string;
   kind: "player" | "object" | "item" | "pile";
   typeId: string;
   renderPos: Position; // interpolated float tile coords
-  visibility: Visibility; // derived from the AUTHORITATIVE position, never renderPos
+  // Derived from the avatar's CURRENT interpolated tile (see `avatarTile()`
+  // below), not the authoritative player position — fix: "vision field must
+  // follow the moving avatar, not jump to the destination". Every entity
+  // shares the same vision reference point as the tiles in `Frame.tiles`.
+  visibility: Visibility;
   count?: number; // piles
   state?: Record<string, unknown>; // objects (e.g. campfire lit)
 }
@@ -45,16 +62,17 @@ export interface ViewState {
   frame(): Frame;
 }
 
+/** One waypoint-to-waypoint segment of a tween in flight. */
+type Leg = { from: Position; to: Position; duration: number };
+
 type TweenEntity = {
   id: string;
   kind: RenderEntity["kind"];
   typeId: string;
-  authoritativePos: Position; // == targetPos; kept as its own field for readability
-  fromPos: Position;
-  targetPos: Position;
+  authoritativePos: Position; // == legs.at(-1).to once legs is non-empty; kept as its own field for readability
   renderPos: Position;
-  elapsed: number;
-  duration: number;
+  legs: Leg[]; // remaining legs to walk, in order; empty once settled
+  legElapsed: number; // elapsed within legs[0]
   count?: number;
   state?: Record<string, unknown>;
 };
@@ -80,12 +98,36 @@ function tweenDurationFor(from: Position, to: Position): number {
   return Math.min(MAX_TWEEN_MS, Math.max(MIN_TWEEN_MS, distance * MS_PER_TILE));
 }
 
-/** Smoothstep. Movement stays a straight line in SPACE (no path waypoints —
- * `PlayerMoved.path` tweening is deferred, see design.md "Open Questions"),
- * but eases in TIME so it doesn't feel mechanically linear. Symmetric around
- * t=0.5, which keeps the midpoint of a tween exactly at the spatial midpoint. */
+/** Smoothstep. Eases in TIME so a leg doesn't feel mechanically linear.
+ * Symmetric around t=0.5, which keeps the midpoint of a leg exactly at its
+ * spatial midpoint. */
 function ease(t: number): number {
   return t * t * (3 - 2 * t);
+}
+
+/**
+ * Builds the leg sequence for a move from `startPos` to the final
+ * authoritative `pos`. When `path` (the backend's A* route, `PlayerMoved.path`)
+ * carries waypoints, the avatar tweens through EACH of them in order — one
+ * leg per waypoint, `startPos -> path[0] -> path[1] -> ... -> pos` — instead
+ * of a single straight-line lerp that could cut across obstacles/terrain
+ * (fix: "movement must follow the real path"). Falls back to a single direct
+ * leg when there's no path (e.g. a single-tile step never produces one, or
+ * the caller is a non-player entity that never carries a path). Under
+ * `prefers-reduced-motion`, always collapses to one zero-duration leg — an
+ * instant snap, which also makes the vision field (derived from the same
+ * interpolated position) snap instead of animate. */
+function buildLegs(startPos: Position, pos: Position, path: Position[] | undefined): Leg[] {
+  if (prefersReducedMotion()) return [{ from: startPos, to: pos, duration: 0 }];
+
+  const waypoints = path && path.length > 0 ? path : [pos];
+  const legs: Leg[] = [];
+  let from = startPos;
+  for (const to of waypoints) {
+    legs.push({ from, to, duration: tweenDurationFor(from, to) });
+    from = to;
+  }
+  return legs;
 }
 
 /**
@@ -95,16 +137,35 @@ function ease(t: number): number {
  * position, so `sync` remembers `renderPos` before redirecting a tween.
  *
  * LOAD-BEARING (spec "ViewState as Derived Presentation Layer" + tasks.md
- * 2.3): per-tile and per-entity `visibility` is computed here from the
- * AUTHORITATIVE snapshot position via the existing `visibilityOf`, never
- * from `renderPos`. The `Renderer` must never call `visibilityOf` or receive
- * a `ClientSnapshot` — it only reads `Frame.tiles[].visibility` and
- * `Frame.entities[].visibility`.
+ * 2.3, revised by the 7th playtest fix pass): per-tile and per-entity
+ * `visibility` is computed here from the avatar's CURRENT INTERPOLATED tile
+ * — not the authoritative snapshot position — via `visibilityFrom`, so the
+ * fog/vision field visually follows the moving sprite instead of snapping to
+ * the destination. The reference tile is only recomputed when it actually
+ * changes (crosses a tile boundary), not every frame, to avoid boundary
+ * shimmer and keep it cheap. The `Renderer` must never call `visibilityOf`/
+ * `visibilityFrom` or receive a `ClientSnapshot` — it only reads
+ * `Frame.tiles[].visibility` and `Frame.entities[].visibility`.
  */
 export function createViewState(store: Store): ViewState {
   const entities = new Map<string, TweenEntity>();
   let lastSnapshot: ClientSnapshot = store.getState();
   let clockMs = 0;
+
+  // Fix: "movement must follow the real path" — captures the most recent
+  // `PlayerMoved.path` per player id via the raw-events channel, consumed
+  // (and cleared) the next time that entity's position is reconciled.
+  const pendingPaths = new Map<string, Position[]>();
+  store.subscribeEvents((events: Event[]) => {
+    for (const e of events) {
+      if (e.type === "PlayerMoved") pendingPaths.set(e.playerId, e.path);
+    }
+  });
+
+  // Fix: "vision field must follow the moving avatar" — the tile reference
+  // used for every `visibilityFrom` call this frame. Updated only when the
+  // avatar's rounded (interpolated) tile actually changes.
+  let avatarTile: Position = lastSnapshot.player.position;
 
   function upsert(
     id: string,
@@ -122,11 +183,9 @@ export function createViewState(store: Store): ViewState {
         kind,
         typeId,
         authoritativePos: pos,
-        fromPos: pos,
-        targetPos: pos,
         renderPos: { ...pos },
-        elapsed: 0,
-        duration: 0,
+        legs: [],
+        legElapsed: 0,
         count: extra.count,
         state: extra.state,
       });
@@ -138,14 +197,14 @@ export function createViewState(store: Store): ViewState {
     existing.state = extra.state;
     if (!samePos(existing.authoritativePos, pos)) {
       // Mid-tween redirect: remember the CURRENT interpolated renderPos as
-      // the new starting point — no snap (tasks.md 2.2/2.4). Duration now
-      // scales with the actual distance of THIS leg (fromPos -> new pos),
-      // not a fixed constant — see `tweenDurationFor`.
-      existing.fromPos = existing.renderPos;
-      existing.targetPos = pos;
+      // the new starting point — no snap (tasks.md 2.2/2.4). Duration scales
+      // with the actual distance of each leg, not a fixed constant — see
+      // `tweenDurationFor`/`buildLegs`.
+      const path = pendingPaths.get(id);
+      pendingPaths.delete(id);
+      existing.legs = buildLegs(existing.renderPos, pos, path);
+      existing.legElapsed = 0;
       existing.authoritativePos = pos;
-      existing.elapsed = 0;
-      existing.duration = tweenDurationFor(existing.fromPos, pos);
     }
   }
 
@@ -194,21 +253,44 @@ export function createViewState(store: Store): ViewState {
     update(dt: number): void {
       clockMs += dt;
       for (const entity of entities.values()) {
-        if (entity.elapsed >= entity.duration) {
-          entity.renderPos = entity.targetPos;
-          continue;
+        let remaining = dt;
+        while (remaining > 0 && entity.legs.length > 0) {
+          const leg = entity.legs[0]!;
+          const legRemaining = leg.duration - entity.legElapsed;
+          if (legRemaining <= 0) {
+            // Zero-duration (or already-complete) leg: snap and advance
+            // without consuming any of `remaining` — avoids an infinite loop
+            // and makes the reduced-motion single-leg case instant.
+            entity.renderPos = leg.to;
+            entity.legs.shift();
+            entity.legElapsed = 0;
+            continue;
+          }
+          if (remaining < legRemaining) {
+            entity.legElapsed += remaining;
+            entity.renderPos = lerp(leg.from, leg.to, ease(entity.legElapsed / leg.duration));
+            remaining = 0;
+          } else {
+            remaining -= legRemaining;
+            entity.renderPos = leg.to;
+            entity.legs.shift();
+            entity.legElapsed = 0;
+          }
         }
-        entity.elapsed = Math.min(entity.elapsed + dt, entity.duration);
-        const t = entity.duration === 0 ? 1 : clamp01(entity.elapsed / entity.duration);
-        entity.renderPos = lerp(entity.fromPos, entity.targetPos, ease(t));
       }
     },
 
     frame(): Frame {
       const snapshot = lastSnapshot;
+
+      const player = entities.get(snapshot.player.id);
+      const avatarRenderPos = player ? player.renderPos : snapshot.player.position;
+      const nextAvatarTile = { x: Math.round(avatarRenderPos.x), y: Math.round(avatarRenderPos.y) };
+      if (!samePos(avatarTile, nextAvatarTile)) avatarTile = nextAvatarTile;
+
       const tiles = snapshot.tiles.map((tile) => ({
         ...tile,
-        visibility: visibilityOf(snapshot, { x: tile.x, y: tile.y }),
+        visibility: visibilityFrom(snapshot, avatarTile, { x: tile.x, y: tile.y }),
       }));
 
       const renderEntities: RenderEntity[] = [];
@@ -218,7 +300,7 @@ export function createViewState(store: Store): ViewState {
           kind: entity.kind,
           typeId: entity.typeId,
           renderPos: entity.renderPos,
-          visibility: visibilityOf(snapshot, entity.authoritativePos),
+          visibility: visibilityFrom(snapshot, avatarTile, entity.authoritativePos),
           count: entity.count,
           state: entity.state,
         });
