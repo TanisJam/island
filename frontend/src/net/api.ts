@@ -10,6 +10,7 @@ export type ZoneSnapshotResponse = {
   objects: WorldObject[];
   piles: Pile[];
   worldItems: ItemInstance[];
+  surfaceItems: ItemInstance[];
   catalogVersion: string;
 };
 

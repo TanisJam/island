@@ -3,7 +3,8 @@ import type { CommandResult } from "../contract/events";
 import type { CatalogIndex } from "../domain/catalog";
 import type { GameRepository } from "../infrastructure/persistence/ports";
 import { HAND_LEFT, HAND_RIGHT, inventoryItems, worldItems } from "../domain/inventory";
-import { VISION_RADIUS } from "../domain/state";
+import type { GameState } from "../domain/state";
+import { rebuildInventories, VISION_RADIUS } from "../domain/state";
 import { derivePiles } from "../domain/piles";
 import { visibilityOf } from "../domain/visibility";
 import { processCommand } from "./process-command";
@@ -22,8 +23,17 @@ export class GameService {
     return this.index.raw;
   }
 
+  /** Carga el estado de un jugador y endurece `inventories` contra snapshots viejos
+   *  o cargados de SQLite (rebuild idempotente — ver `rebuildInventories`). */
+  private loadState(playerId: string): GameState | null {
+    const s = this.repo.load(playerId);
+    if (!s) return null;
+    rebuildInventories(s, this.index);
+    return s;
+  }
+
   zoneSnapshot(zoneId: string) {
-    const s = this.repo.load(this.primaryPlayerId);
+    const s = this.loadState(this.primaryPlayerId);
     if (!s || s.zone.id !== zoneId) return null;
     return {
       zone: { id: s.zone.id, ownerPlayerId: s.zone.ownerPlayerId, type: s.zone.type, width: s.zone.width, height: s.zone.height },
@@ -34,12 +44,13 @@ export class GameService {
       // them, regardless of how this state was constructed (seed, SQLite load, etc.).
       piles: [...derivePiles(s).values()],
       worldItems: worldItems(s),
+      surfaceItems: s.items.filter((i) => i.location.type === "surface"),
       catalogVersion: this.index.raw.catalogVersion,
     };
   }
 
   playerState(playerId: string) {
-    const s = this.repo.load(playerId);
+    const s = this.loadState(playerId);
     if (!s) return null;
     return {
       player: {
@@ -64,7 +75,7 @@ export class GameService {
   }
 
   command(env: CommandEnvelope): CommandResult {
-    const s = this.repo.load(env.playerId);
+    const s = this.loadState(env.playerId);
     if (!s) throw new Error(`jugador desconocido: ${env.playerId}`);
     const result = processCommand({ state: s, index: this.index, rng: this.rng, now: this.now }, env);
     this.repo.save(s);

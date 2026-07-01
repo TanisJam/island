@@ -9,7 +9,7 @@
     "start": "tsx src/bootstrap/main.ts",
     "dev": "tsx watch src/bootstrap/main.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test src/**/*.test.ts",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "sync:contract": "cp ../schemas/generated/*.ts src/contract/"
   },
   "dependencies": {
