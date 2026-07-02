@@ -368,10 +368,29 @@ body {
 }
 
 .grid {
+  --cell-size: 52px;
+  --cell-gap: 5px;
+  position: relative;
   display: grid;
-  grid-template-columns: repeat(4, 52px);
-  grid-auto-rows: 52px;
-  gap: 5px;
+  grid-template-columns: repeat(4, var(--cell-size));
+  grid-auto-rows: var(--cell-size);
+  gap: var(--cell-gap);
+}
+
+/* Spanning glyph overlay for MULTI-CELL items only (design.md Decision 1/2):
+ * painted above the per-coordinate `.cell` grid, positioned via inline
+ * left/top/width/height computed from CELL_SIZE_PX/CELL_GAP_PX (hud.ts) —
+ * the SAME two numbers as the `--cell-size`/`--cell-gap` custom properties
+ * above, dual-sourced because the fake-DOM test harness has no layout engine
+ * to read computed geometry back from. `pointer-events:none` is THE
+ * guarantee `elementFromPoint` keeps resolving to the `.cell` beneath (spec
+ * "No interaction regressions") — also set inline as a double-lock. */
+.item-overlay {
+  position: absolute;
+  pointer-events: none;
+  display: grid;
+  place-items: center;
+  z-index: 1;
 }
 
 .cell {
@@ -433,16 +452,6 @@ body {
 .cell.drop-bad {
   border-color: var(--descubrir);
   box-shadow: inset 0 0 0 2px var(--descubrir);
-}
-
-/* Deliberately kept defined-but-UNUSED (item-drag-drop, design.md ADR-4):
- * `renderInventoryGrid` fills every occupied coordinate as its own cell
- * (per-coordinate, mirroring `renderSurfaceGrid`) so a multi-cell item's
- * every coordinate stays a distinct drop target — `grid-row: span 2` would
- * collapse a 1x2 item's two cells into one DOM element and kill the
- * lower-half target. */
-.cell.span2 {
-  grid-row: span 2;
 }
 
 .sect-h {

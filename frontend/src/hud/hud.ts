@@ -20,6 +20,14 @@ export type HudHandlers = {
 const INV_W = 4;
 const INV_H = 4;
 
+/** Pixel layout constants for the multi-cell overlay's inline geometry math
+ * (design.md Decision 1) — dual-sourced with `.grid`'s `--cell-size`/
+ * `--cell-gap` custom properties in `style.css`, same honesty-coupling
+ * pattern as `INV_W`/`INV_H` mirroring the backend. Used ONLY by the overlay
+ * pixel math below; `drag.ts` stays px-free/pure. */
+export const CELL_SIZE_PX = 52;
+export const CELL_GAP_PX = 5;
+
 // Reused only for its glyph lookup (item emoji) — the HUD is not a Renderer
 // and never touches visibility/fog, it just wants the same stand-in art the
 // canvas draws so a hand slot / inventory cell reads at a glance (design.md
@@ -242,7 +250,7 @@ export function renderSurfaceGrid(
 ): HTMLElement {
   const grid = document.createElement("div");
   grid.className = "grid";
-  grid.style.gridTemplateColumns = `repeat(${dims.width}, 52px)`;
+  grid.style.gridTemplateColumns = `repeat(${dims.width}, var(--cell-size))`;
 
   const placed = snapshot.items.filter((it) => it.location.type === "surface" && it.location.surfaceId === surfaceId);
   const occupantAt = (x: number, y: number): ItemInstance | undefined =>
