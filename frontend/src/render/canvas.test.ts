@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PX, SCALE, spriteDrawRect } from "./canvas";
+import { PX, SCALE, createCanvasRenderer, spriteDrawRect } from "./canvas";
+import type { AssetResolver, SpriteRegion } from "./assets";
+import type { Frame } from "../view/viewstate";
 
 // Table-driven over the design's worked examples (design.md "Consumer + draw
 // math"): a single formula serves the single-tile, tall-multi-cell, and
@@ -46,4 +48,114 @@ for (const c of CASES) {
 test("spriteDrawRect: bottom edge of a tall region always lands exactly on the tile's bottom edge", () => {
   const rect = spriteDrawRect(0, 0, { sw: 16, sh: 32 }, PX, SCALE);
   assert.equal(rect.dy + rect.dh, PX, "region's bottom (dy + dh) must equal the logical tile's bottom (1 * PX)");
+});
+
+// Integration coverage for spec "World-canvas sprite draw via drawImage" —
+// the pure `spriteDrawRect` math above is necessary but not sufficient: this
+// verifies `createCanvasRenderer(...).render(...)` actually DISPATCHES to
+// `ctx.drawImage` for a sprite-mapped tile and to `ctx.fillText` (the
+// existing `drawEmoji` path) for an unmapped one, at all four call sites the
+// verify report flagged as inspected-but-untested (entity/pile/player via
+// `drawObjectOrItem`/`drawPile`/`drawPlayer`, terrain via its own
+// fill-OR-sprite branch).
+
+type RecordedCalls = { drawImage: unknown[][]; fillText: unknown[][]; fillRect: unknown[][] };
+
+/** Mirrors `game/game.test.ts`'s `fakeCanvasContext`, extended to RECORD
+ * calls to `drawImage`/`fillText`/`fillRect` instead of no-op'ing them, so
+ * tests can assert which draw path actually fired. */
+function fakeRecordingContext(): { ctx: CanvasRenderingContext2D; calls: RecordedCalls } {
+  const noop = () => {};
+  const calls: RecordedCalls = { drawImage: [], fillText: [], fillRect: [] };
+  const ctx = {
+    canvas: { width: 480, height: 480 },
+    fillStyle: "",
+    strokeStyle: "",
+    lineWidth: 1,
+    globalAlpha: 1,
+    font: "",
+    textAlign: "left",
+    textBaseline: "alphabetic",
+    imageSmoothingEnabled: true,
+    clearRect: noop,
+    fillRect: (...args: unknown[]) => calls.fillRect.push(args),
+    strokeRect: noop,
+    fillText: (...args: unknown[]) => calls.fillText.push(args),
+    strokeText: noop,
+    drawImage: (...args: unknown[]) => calls.drawImage.push(args),
+    beginPath: noop,
+    arc: noop,
+    fill: noop,
+    save: noop,
+    restore: noop,
+    translate: noop,
+  } as unknown as CanvasRenderingContext2D;
+  return { ctx, calls };
+}
+
+const FAKE_IMAGE = {} as CanvasImageSource;
+
+function fakeSpriteRegion(): SpriteRegion {
+  return { image: FAKE_IMAGE, sx: 0, sy: 0, sw: 16, sh: 16 };
+}
+
+function baseFrame(overrides: Partial<Frame> = {}): Frame {
+  return { zone: { width: 4, height: 4 }, tiles: [], entities: [], clockMs: 0, ...overrides };
+}
+
+test("createCanvasRenderer: sprite-mapped entity draws via ctx.drawImage, not ctx.fillText (spec 'Mapped typeId draws via drawImage')", () => {
+  const { ctx, calls } = fakeRecordingContext();
+  const assets: AssetResolver = { resolve: () => ({ sprite: fakeSpriteRegion() }) };
+  const renderer = createCanvasRenderer(ctx, assets);
+  const frame = baseFrame({
+    entities: [{ id: "e1", kind: "object", typeId: "tree", renderPos: { x: 1, y: 1 }, visibility: "visible" }],
+  });
+
+  renderer.render(frame, null);
+
+  assert.equal(calls.drawImage.length, 1, "drawImage must be called once for the sprite-mapped entity");
+  assert.equal(calls.fillText.length, 0, "fillText must NOT be called for a sprite-mapped entity");
+});
+
+test("createCanvasRenderer: unmapped entity draws via ctx.fillText (drawEmoji), not ctx.drawImage (spec 'Unmapped typeId still draws via drawEmoji')", () => {
+  const { ctx, calls } = fakeRecordingContext();
+  const assets: AssetResolver = { resolve: () => ({ glyph: "🌳", scale: 0.72 }) };
+  const renderer = createCanvasRenderer(ctx, assets);
+  const frame = baseFrame({
+    entities: [{ id: "e1", kind: "object", typeId: "unmapped-thing", renderPos: { x: 1, y: 1 }, visibility: "visible" }],
+  });
+
+  renderer.render(frame, null);
+
+  assert.equal(calls.fillText.length, 1, "fillText must be called once for an unmapped entity");
+  assert.equal(calls.drawImage.length, 0, "drawImage must NOT be called for an unmapped entity");
+});
+
+test("createCanvasRenderer: sprite-mapped terrain draws via ctx.drawImage, not ctx.fillRect (terrain's own fill-OR-sprite branch)", () => {
+  const { ctx, calls } = fakeRecordingContext();
+  const assets: AssetResolver = { resolve: (kind) => (kind === "terrain" ? { sprite: fakeSpriteRegion() } : { glyph: "?" }) };
+  const renderer = createCanvasRenderer(ctx, assets);
+  const frame = baseFrame({
+    tiles: [{ x: 0, y: 0, terrain: "sand", walkable: true, tags: [], visibility: "visible" }],
+  });
+
+  renderer.render(frame, null);
+
+  assert.equal(calls.drawImage.length, 1, "drawImage must be called once for the sprite-mapped terrain tile");
+  assert.equal(calls.fillRect.length, 0, "fillRect must NOT be called for a sprite-mapped terrain tile");
+});
+
+test("createCanvasRenderer: unmapped terrain draws via ctx.fillRect with its resolved color, not ctx.drawImage", () => {
+  const { ctx, calls } = fakeRecordingContext();
+  const assets: AssetResolver = { resolve: (kind) => (kind === "terrain" ? { color: "#d9c089" } : { glyph: "?" }) };
+  const renderer = createCanvasRenderer(ctx, assets);
+  const frame = baseFrame({
+    tiles: [{ x: 0, y: 0, terrain: "sand", walkable: true, tags: [], visibility: "visible" }],
+  });
+
+  renderer.render(frame, null);
+
+  assert.equal(calls.fillRect.length, 1, "fillRect must be called once for the unmapped terrain tile");
+  assert.equal(calls.drawImage.length, 0, "drawImage must NOT be called for an unmapped terrain tile");
+  assert.equal(ctx.fillStyle, "#d9c089", "fillStyle must be set to the resolved terrain color before fillRect");
 });
