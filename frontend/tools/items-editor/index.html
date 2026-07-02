@@ -9,11 +9,15 @@
   <body>
     <header class="topbar">
       <h1>Items Editor</h1>
-      <span class="subtitle">Dev-only catalog/items.json editor — not part of the game build</span>
+      <span class="subtitle">Dev-only catalog editor — not part of the game build</span>
+      <nav id="collection-switcher" class="collection-switcher" aria-label="Collection selector">
+        <button id="collection-tab-items" type="button" class="collection-tab active" aria-pressed="true">Items</button>
+        <button id="collection-tab-knowledge" type="button" class="collection-tab" aria-pressed="false">Knowledge</button>
+      </nav>
       <div id="catalog-version" class="catalog-version"></div>
     </header>
 
-    <main class="layout">
+    <main id="items-pane" class="layout">
       <section class="master-pane" aria-label="Item list">
         <div class="master-header">
           <h2>Items</h2>
@@ -46,6 +50,49 @@
             <div class="detail-actions-right">
               <span id="save-status" class="save-status" role="status" aria-live="polite"></span>
               <button id="save-btn" type="submit" class="btn btn-primary">Save</button>
+            </div>
+          </div>
+        </form>
+      </section>
+    </main>
+
+    <!--
+      Generic descriptor-driven pane (design.md "1. Chosen architecture —
+      Layer 4: Generic engine"). Mounted by `engine.ts` for any collection
+      with a registered descriptor — only `knowledge` this slice (Slice 1).
+      No texture-panel section here: `knowledge`'s atlasKind is null, so the
+      sprite panel never mounts for it (spec "Texture panel mounts by
+      atlasKind"). Ids are collection-agnostic ("record-*"), distinct from
+      the items-pane's item-specific ids above.
+    -->
+    <main id="knowledge-pane" class="layout" hidden>
+      <section class="master-pane" aria-label="Knowledge list">
+        <div class="master-header">
+          <h2>Knowledge</h2>
+          <button id="add-record-btn" type="button" class="btn btn-primary" disabled>+ New entry</button>
+        </div>
+        <ul id="record-list" class="item-list"></ul>
+        <div id="generic-master-empty" class="empty-state" hidden>No entries yet. Add one to get started.</div>
+        <div id="generic-master-loading" class="loading-state">Loading catalog…</div>
+        <div id="generic-master-error" class="error-state" role="alert" hidden></div>
+      </section>
+
+      <section class="detail-pane" aria-label="Entry detail form">
+        <div id="generic-detail-empty" class="empty-state">Select an entry on the left, or add a new one.</div>
+
+        <form id="generic-detail-form" novalidate hidden>
+          <div id="generic-error-summary" class="error-summary" role="alert" hidden>
+            <p class="error-summary-title">Fix the following before saving:</p>
+            <ul id="generic-error-summary-list"></ul>
+          </div>
+
+          <div id="generic-fields"></div>
+
+          <div class="detail-actions">
+            <button id="delete-record-btn" type="button" class="btn btn-danger">Delete entry</button>
+            <div class="detail-actions-right">
+              <span id="generic-save-status" class="save-status" role="status" aria-live="polite"></span>
+              <button id="generic-save-btn" type="submit" class="btn btn-primary">Save</button>
             </div>
           </div>
         </form>

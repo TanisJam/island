@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { planSave, type PlanSaveInput } from "./plan-save";
+import { planSave, planSaveCollection, reconstructRecord, type PlanSaveInput } from "./plan-save";
+import { KNOWLEDGE_DESCRIPTOR } from "../shared/descriptors/knowledge";
+import { COLLECTIONS } from "../shared/collection-registry";
 
 /**
  * SECURITY-CRITICAL test suite (spec "Persist via hard-coded server-side
@@ -173,5 +175,93 @@ test("planSave: an absent optional (durability) is omitted from the written item
   if (result.ok) {
     const items = JSON.parse(result.itemsJson);
     assert.equal("durability" in items[0], false);
+  }
+});
+
+// --- reconstructRecord / planSaveCollection (design.md "3. Server generalization") ---
+// Proven on `knowledge` — a NON-item collection — so the descriptor-driven
+// allow-list is confirmed to generalize, not just work for items
+// (design.md Risk 4/6 — "security lockstep").
+
+const validKnowledge: Record<string, unknown> = {
+  id: "idea_binding",
+  name: "Atar",
+  kind: "idea",
+  unlockThought: "Puedo unir piezas si las ato bien.",
+};
+
+test("reconstructRecord: copies ONLY descriptor keys — an extra/unknown field on the raw input is stripped", () => {
+  const raw = { ...validKnowledge, path: "../../etc/passwd", file: "/etc/passwd" };
+  const record = reconstructRecord(KNOWLEDGE_DESCRIPTOR, raw);
+  assert.deepEqual(Object.keys(record).sort(), ["id", "kind", "name", "unlockThought"]);
+  assert.equal(JSON.stringify(record).includes("etc/passwd"), false);
+});
+
+test("reconstructRecord: an absent optional field is omitted from the output, not null", () => {
+  const { unlockThought: _unlockThought, ...withoutThought } = validKnowledge;
+  const record = reconstructRecord(KNOWLEDGE_DESCRIPTOR, withoutThought);
+  assert.equal("unlockThought" in record, false);
+  assert.equal("unlockOnObserveTags" in record, false);
+});
+
+test("reconstructRecord: a `tags`-kind field (unlockOnObserveTags) is deep-cloned, not a shared reference", () => {
+  const tags = ["fire"];
+  const record = reconstructRecord(KNOWLEDGE_DESCRIPTOR, { ...validKnowledge, unlockOnObserveTags: tags });
+  assert.notEqual(record.unlockOnObserveTags, tags);
+  assert.deepEqual(record.unlockOnObserveTags, tags);
+});
+
+test("reconstructRecord: a __proto__-own-property key on the raw input never reaches the output or pollutes Object.prototype", () => {
+  const raw = JSON.parse('{"id":"idea_binding","name":"Atar","kind":"idea","__proto__":{"polluted":true}}') as Record<string, unknown>;
+  const record = reconstructRecord(KNOWLEDGE_DESCRIPTOR, raw);
+  assert.equal((Object.prototype as unknown as { polluted?: unknown }).polluted, undefined);
+  assert.equal((record as { polluted?: unknown }).polluted, undefined);
+});
+
+test("planSaveCollection: a valid knowledge save bumps catalogVersion and writes only descriptor fields", () => {
+  const result = planSaveCollection(
+    { records: [validKnowledge] },
+    { descriptor: KNOWLEDGE_DESCRIPTOR, defName: COLLECTIONS.knowledge?.defName ?? "KnowledgeDef", currentMeta, schemas },
+  );
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.catalogVersion, "0.1.1");
+    const records = JSON.parse(result.dataJson);
+    assert.deepEqual(records[0], validKnowledge);
+  }
+});
+
+test("planSaveCollection: hostile path/file/target fields on the body never reach the write plan", () => {
+  const hostileBody = { records: [validKnowledge], path: "../../etc/passwd", file: "/etc/passwd", target: "../../../root/.ssh/authorized_keys" };
+  const result = planSaveCollection(hostileBody, {
+    descriptor: KNOWLEDGE_DESCRIPTOR,
+    defName: COLLECTIONS.knowledge?.defName ?? "KnowledgeDef",
+    currentMeta,
+    schemas,
+  });
+  assert.equal(result.ok, true);
+  const serialized = JSON.stringify(result);
+  for (const hostileValue of ["../../etc/passwd", "/etc/passwd", "../../../root/.ssh/authorized_keys"]) {
+    assert.equal(serialized.includes(hostileValue), false, `leaked: ${hostileValue}`);
+  }
+});
+
+test("planSaveCollection: rejects a schema-invalid record (bad `kind` enum) — no write plan is produced", () => {
+  const result = planSaveCollection(
+    { records: [{ ...validKnowledge, kind: "not-a-real-kind" }] },
+    { descriptor: KNOWLEDGE_DESCRIPTOR, defName: COLLECTIONS.knowledge?.defName ?? "KnowledgeDef", currentMeta, schemas },
+  );
+  assert.equal(result.ok, false);
+  assert.equal("dataJson" in result, false);
+});
+
+test("planSaveCollection: rejects duplicate ids within the records array", () => {
+  const result = planSaveCollection(
+    { records: [validKnowledge, { ...validKnowledge }] },
+    { descriptor: KNOWLEDGE_DESCRIPTOR, defName: COLLECTIONS.knowledge?.defName ?? "KnowledgeDef", currentMeta, schemas },
+  );
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.ok(result.errors.some((e) => e.message.includes("idea_binding")));
   }
 });

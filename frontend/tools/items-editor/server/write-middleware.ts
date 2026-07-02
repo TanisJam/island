@@ -4,16 +4,19 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Plugin } from "vite";
 import { writeAtomic, writeFileDurable } from "./fs-atomic";
-import { planSave, type CatalogMeta } from "./plan-save";
-import { resolveTargets } from "./targets";
+import { planSave, planSaveCollection, type CatalogMeta } from "./plan-save";
+import { resolveCollectionTarget, resolveTargets } from "./targets";
+import { COLLECTIONS, isKnownCollection } from "../shared/collection-registry";
+import { getDescriptor } from "../shared/descriptors";
 
 export { writeAtomic, writeFileDurable };
 
 /**
- * Vite dev-server middleware exposing `POST /__save-items` (design.md
- * "Request/Response Contract"). Registered ONLY under `dev:tool:items` via
- * `vite.config.items-editor.ts` — never present in `vite build`, never in
- * the game, never in the backend.
+ * Vite dev-server middleware exposing `POST /__save-items` (items, legacy
+ * alias) AND the generalized `POST /__save/:collectionId` (design.md "3.
+ * Server generalization — Route"). Registered ONLY under `dev:tool:items`
+ * via `vite.config.items-editor.ts` — never present in `vite build`, never
+ * in the game, never in the backend.
  *
  * SECURITY: `repoRoot` is derived ONCE, at module-load time, purely from
  * `import.meta.url` — the exact pattern used by
@@ -28,6 +31,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..", "..", "..");
 
 const SAVE_ROUTE = "/__save-items";
+const COLLECTION_SAVE_MOUNT = "/__save";
 
 const readJson = (path: string): unknown => JSON.parse(readFileSync(path, "utf-8"));
 
@@ -54,41 +58,120 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(payload);
 }
 
+/**
+ * Builds the `/__save-items` request handler against an explicit
+ * `repoRoot`, separated from the Vite `Plugin` wiring so it is directly
+ * unit-testable (mirrors `atlas-write-middleware.ts::createAtlasSaveHandler`).
+ * `itemsEditorSavePlugin` below is the ONLY production caller and always
+ * supplies the hard-coded, compile-time-derived `repoRoot`.
+ */
+export function createItemsSaveHandler(root: string) {
+  const targets = resolveTargets(root);
+  return (req: IncomingMessage, res: ServerResponse): void => {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { ok: false, errors: [{ instancePath: "/", message: "method not allowed" }] });
+      return;
+    }
+    readRequestBody(req)
+      .then((rawBody) => {
+        const currentMeta = readJson(targets.metaPath) as CatalogMeta;
+        const schemas = {
+          common: readJson(targets.commonSchema),
+          catalog: readJson(targets.catalogSchema),
+        };
+        const result = planSave(rawBody, { currentMeta, schemas });
+        if (!result.ok) {
+          sendJson(res, 400, { ok: false, errors: result.errors });
+          return;
+        }
+        // Items-first ordering (design.md "ADR-3"): if the process
+        // dies between the two renames, the only possible degraded
+        // state is "catalogVersion not bumped" — never a corrupted
+        // items file.
+        writeAtomic(targets.itemsPath, result.itemsJson);
+        writeAtomic(targets.metaPath, result.metaJson);
+        sendJson(res, 200, { ok: true, catalogVersion: result.catalogVersion, count: result.count });
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : "unexpected error";
+        sendJson(res, 500, { ok: false, errors: [{ instancePath: "/", message }] });
+      });
+  };
+}
+
+/**
+ * Builds the generalized `POST /__save/:collectionId` request handler
+ * (design.md "3. Server generalization — Route"). When mounted via
+ * `server.middlewares.use(COLLECTION_SAVE_MOUNT, handler)`, Vite/connect
+ * strips the mount path so `req.url` is `/${collectionId}` — this handler
+ * also works standalone (as tested) against that same convention.
+ *
+ * SECURITY: `collectionId` is read from the URL and validated with
+ * `isKnownCollection` (an allow-listed registry key) BEFORE it is ever
+ * used to build a file path (`resolveCollectionTarget`) — never trusted
+ * as path text.
+ */
+export function createCollectionSaveHandler(root: string) {
+  return (req: IncomingMessage, res: ServerResponse): void => {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { ok: false, errors: [{ instancePath: "/", message: "method not allowed" }] });
+      return;
+    }
+    const rawUrl = (req.url ?? "/").split("?")[0] ?? "/";
+    const collectionId = decodeURIComponent(rawUrl.replace(/^\/+/, ""));
+    if (!isKnownCollection(collectionId)) {
+      sendJson(res, 404, { ok: false, errors: [{ instancePath: "/", message: `unknown collection "${collectionId}"` }] });
+      return;
+    }
+    const descriptor = getDescriptor(collectionId);
+    if (!descriptor) {
+      sendJson(res, 404, { ok: false, errors: [{ instancePath: "/", message: `collection "${collectionId}" has no descriptor registered yet` }] });
+      return;
+    }
+    const targets = resolveCollectionTarget(root, collectionId);
+    if (!targets) {
+      // Defensive — cannot happen once isKnownCollection passed, but never
+      // build a path from unvalidated input under any circumstance.
+      sendJson(res, 404, { ok: false, errors: [{ instancePath: "/", message: `unknown collection "${collectionId}"` }] });
+      return;
+    }
+    readRequestBody(req)
+      .then((rawBody) => {
+        const currentMeta = readJson(targets.metaPath) as CatalogMeta;
+        const schemas = {
+          common: readJson(targets.commonSchema),
+          catalog: readJson(targets.catalogSchema),
+        };
+        const result = planSaveCollection(rawBody, {
+          descriptor,
+          defName: COLLECTIONS[collectionId]?.defName ?? "",
+          currentMeta,
+          schemas,
+        });
+        if (!result.ok) {
+          sendJson(res, 400, { ok: false, errors: result.errors });
+          return;
+        }
+        // Collection-file-first ordering, mirroring items' ADR-3: if the
+        // process dies between the two renames, the only possible
+        // degraded state is "catalogVersion not bumped".
+        writeAtomic(targets.dataPath, result.dataJson);
+        writeAtomic(targets.metaPath, result.metaJson);
+        sendJson(res, 200, { ok: true, catalogVersion: result.catalogVersion, count: result.count });
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : "unexpected error";
+        sendJson(res, 500, { ok: false, errors: [{ instancePath: "/", message }] });
+      });
+  };
+}
+
 export function itemsEditorSavePlugin(): Plugin {
   return {
     name: "items-editor-save-plugin",
     configureServer(server) {
-      const targets = resolveTargets(repoRoot);
-      server.middlewares.use(SAVE_ROUTE, (req, res) => {
-        if (req.method !== "POST") {
-          sendJson(res, 405, { ok: false, errors: [{ instancePath: "/", message: "method not allowed" }] });
-          return;
-        }
-        readRequestBody(req)
-          .then((rawBody) => {
-            const currentMeta = readJson(targets.metaPath) as CatalogMeta;
-            const schemas = {
-              common: readJson(targets.commonSchema),
-              catalog: readJson(targets.catalogSchema),
-            };
-            const result = planSave(rawBody, { currentMeta, schemas });
-            if (!result.ok) {
-              sendJson(res, 400, { ok: false, errors: result.errors });
-              return;
-            }
-            // Items-first ordering (design.md "ADR-3"): if the process
-            // dies between the two renames, the only possible degraded
-            // state is "catalogVersion not bumped" — never a corrupted
-            // items file.
-            writeAtomic(targets.itemsPath, result.itemsJson);
-            writeAtomic(targets.metaPath, result.metaJson);
-            sendJson(res, 200, { ok: true, catalogVersion: result.catalogVersion, count: result.count });
-          })
-          .catch((error: unknown) => {
-            const message = error instanceof Error ? error.message : "unexpected error";
-            sendJson(res, 500, { ok: false, errors: [{ instancePath: "/", message }] });
-          });
-      });
+      server.middlewares.use(SAVE_ROUTE, createItemsSaveHandler(repoRoot));
+      server.middlewares.use(COLLECTION_SAVE_MOUNT, createCollectionSaveHandler(repoRoot));
     },
   };
 }

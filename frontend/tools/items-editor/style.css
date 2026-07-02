@@ -68,6 +68,25 @@ textarea {
   font-size: 13px;
 }
 
+.collection-switcher {
+  display: flex;
+  gap: 4px;
+}
+
+.collection-tab {
+  background: transparent;
+  border: 1px solid var(--linea);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.collection-tab.active {
+  background: var(--brasa);
+  color: var(--sombra);
+  border-color: var(--brasa);
+}
+
 .catalog-version {
   margin-left: auto;
   font-variant-numeric: tabular-nums;
@@ -81,6 +100,16 @@ textarea {
   gap: 24px;
   padding: 24px;
   align-items: start;
+}
+
+/*
+ * A `<main class="layout">` sets `display: grid`, which outranks the UA
+ * `[hidden] { display: none }` rule (equal specificity, author wins), so the
+ * `hidden` attribute alone would NOT hide an inactive collection pane. This
+ * class+attribute selector (0,2,0) beats `.layout` (0,1,0) and restores it.
+ */
+.layout[hidden] {
+  display: none;
 }
 
 @media (max-width: 768px) {
@@ -361,12 +390,23 @@ textarea {
 
 .field input[type="text"],
 .field input[type="number"],
+.field select,
 .field textarea {
   min-height: 44px;
   padding: 8px 12px;
   background: var(--panel);
   border: 1px solid var(--linea);
   border-radius: 6px;
+}
+
+/*
+ * The native `<select>` popup renders its `<option>`s with the UA default
+ * (white) background; with the inherited light `--arena` text that is
+ * unreadable. Pin both so the dropdown matches the dark theme.
+ */
+.field select option {
+  background: var(--madera);
+  color: var(--arena);
 }
 
 .field textarea {
@@ -398,6 +438,7 @@ textarea {
 }
 
 .field input[aria-invalid="true"],
+.field select[aria-invalid="true"],
 .field textarea[aria-invalid="true"] {
   border-color: var(--peligro);
 }

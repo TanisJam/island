@@ -8,6 +8,8 @@ import { createBooleanField, type BooleanFieldWidget } from "./widgets/boolean-f
 import { createTagsField, type TagsFieldWidget } from "./widgets/tags-field";
 import { createPropsField, type PropsFieldWidget } from "./widgets/props-field";
 import { createTexturePanel } from "./texture-panel";
+import { mountCollectionEngine, type EngineElements } from "./engine";
+import { KNOWLEDGE_DESCRIPTOR } from "./shared/descriptors/knowledge";
 
 /**
  * Master-detail wiring for the items editor (design.md "Components & Data
@@ -454,5 +456,64 @@ async function save(): Promise<void> {
     updateSaveEnabled();
   }
 }
+
+/**
+ * Collection switcher (design.md "1. Chosen architecture — Layer 4",
+ * spec "Descriptor-Driven Form Engine"). Toggles which top-level `<main>`
+ * pane is visible; the `knowledge` engine mounts lazily on first switch
+ * (not on page load) so items — the default/only view before this
+ * slice — keeps booting exactly as it always has. `items` intentionally
+ * stays on its own hand-written path above; only Slice 5 migrates it onto
+ * `engine.ts`.
+ */
+const collectionSwitcherEl = mustEl<HTMLElement>("collection-switcher");
+const itemsTabBtn = mustEl<HTMLButtonElement>("collection-tab-items");
+const knowledgeTabBtn = mustEl<HTMLButtonElement>("collection-tab-knowledge");
+const itemsPaneEl = mustEl<HTMLElement>("items-pane");
+const knowledgePaneEl = mustEl<HTMLElement>("knowledge-pane");
+
+let knowledgeEngineBooted = false;
+
+function activateTab(activeBtn: HTMLButtonElement, ...inactiveBtns: HTMLButtonElement[]): void {
+  activeBtn.classList.add("active");
+  activeBtn.setAttribute("aria-pressed", "true");
+  for (const btn of inactiveBtns) {
+    btn.classList.remove("active");
+    btn.setAttribute("aria-pressed", "false");
+  }
+}
+
+itemsTabBtn.addEventListener("click", () => {
+  itemsPaneEl.hidden = false;
+  knowledgePaneEl.hidden = true;
+  activateTab(itemsTabBtn, knowledgeTabBtn);
+});
+
+knowledgeTabBtn.addEventListener("click", () => {
+  itemsPaneEl.hidden = true;
+  knowledgePaneEl.hidden = false;
+  activateTab(knowledgeTabBtn, itemsTabBtn);
+  if (!knowledgeEngineBooted) {
+    knowledgeEngineBooted = true;
+    const knowledgeEls: EngineElements = {
+      catalogVersionEl,
+      addBtn: mustEl<HTMLButtonElement>("add-record-btn"),
+      listEl: mustEl<HTMLUListElement>("record-list"),
+      masterEmptyEl: mustEl<HTMLDivElement>("generic-master-empty"),
+      masterLoadingEl: mustEl<HTMLDivElement>("generic-master-loading"),
+      masterErrorEl: mustEl<HTMLDivElement>("generic-master-error"),
+      detailEmptyEl: mustEl<HTMLDivElement>("generic-detail-empty"),
+      detailFormEl: mustEl<HTMLFormElement>("generic-detail-form"),
+      errorSummaryEl: mustEl<HTMLDivElement>("generic-error-summary"),
+      errorSummaryListEl: mustEl<HTMLUListElement>("generic-error-summary-list"),
+      fieldsEl: mustEl<HTMLDivElement>("generic-fields"),
+      deleteBtn: mustEl<HTMLButtonElement>("delete-record-btn"),
+      saveBtn: mustEl<HTMLButtonElement>("generic-save-btn"),
+      saveStatusEl: mustEl<HTMLSpanElement>("generic-save-status"),
+    };
+    void mountCollectionEngine(KNOWLEDGE_DESCRIPTOR, knowledgeEls).boot();
+  }
+});
+void collectionSwitcherEl; // referenced only to fail fast via mustEl if index.html's markup drifts
 
 void boot();

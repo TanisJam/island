@@ -34,7 +34,12 @@ function compileItemsArrayValidator(schemas: SchemaBundle) {
   });
 }
 
-function findDuplicateIds(items: readonly unknown[]): string[] {
+/**
+ * Exported so `shared/validate-collection.ts` (the generalized validator,
+ * design.md "3. Server generalization") reuses this AS-IS rather than
+ * duplicating id-duplication-detection logic per collection.
+ */
+export function findDuplicateIds(items: readonly unknown[]): string[] {
   const seen = new Set<string>();
   const duplicates = new Set<string>();
   for (const item of items) {
