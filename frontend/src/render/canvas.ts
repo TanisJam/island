@@ -166,8 +166,19 @@ export function createCanvasRenderer(ctx: CanvasRenderingContext2D, assets: Asse
           ctx.fillRect(px, py, PX, PX);
           continue;
         }
-        ctx.fillStyle = assets.resolve("terrain", tile.terrain).color ?? FALLBACK_TERRAIN_COLOR;
-        ctx.fillRect(px, py, PX, PX);
+        // Terrain has NO glyph fallback (unlike entities), so it needs its
+        // own fill-OR-sprite branch rather than reusing the entity
+        // `sprite ? drawSprite : drawEmoji` shape (design.md "canvas.ts has
+        // TWO draw paths"). Without this explicit branch a mapped terrain
+        // (e.g. sand) would resolve to `{sprite: ...}` with `.color`
+        // undefined and silently fall through to the gray fallback color,
+        // never drawing the sprite.
+        const v = assets.resolve("terrain", tile.terrain);
+        if (v.sprite) drawSprite(ctx, { x: tile.x, y: tile.y }, v.sprite);
+        else {
+          ctx.fillStyle = v.color ?? FALLBACK_TERRAIN_COLOR;
+          ctx.fillRect(px, py, PX, PX);
+        }
         if (tile.visibility === "explored") {
           ctx.fillStyle = "rgba(0,0,0,0.45)";
           ctx.fillRect(px, py, PX, PX);
