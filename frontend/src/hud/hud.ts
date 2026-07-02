@@ -42,6 +42,28 @@ function itemGlyph(itemTypeId: string): string {
   return assets.resolve("item", itemTypeId).glyph ?? "";
 }
 
+/** Rotated `(w,h)` for a catalog `shape` — the single source for the
+ * `rotation===90` swap, shared by `footprintCells` (below) and the overlay
+ * render gate in `renderInventoryGrid`/`renderSurfaceGrid` (design.md
+ * Decision 2). A 90° rotation swaps width/height; anything else (0) is a
+ * no-op. */
+export function rotatedDims(shape: { w: number; h: number }, rotation: number): { w: number; h: number } {
+  return rotation === 90 ? { w: shape.h, h: shape.w } : { w: shape.w, h: shape.h };
+}
+
+/** Cells a `shape` (rotation-aware) occupies when anchored top-left at
+ * `anchor` — the single shared footprint helper `inventoryCellsForItem` and
+ * `occupiedCellsForItem` both delegate to (design.md Decision 2 / tasks.md
+ * T1). Exported so the overlay render pipeline and future footprint-preview
+ * logic (drag.ts) can compute the same cell set from an arbitrary anchor,
+ * not just an item's CURRENT location. */
+export function footprintCells(anchor: Position, shape: { w: number; h: number }, rotation: number): Position[] {
+  const { w, h } = rotatedDims(shape, rotation);
+  const cells: Position[] = [];
+  for (let dy = 0; dy < h; dy++) for (let dx = 0; dx < w; dx++) cells.push({ x: anchor.x + dx, y: anchor.y + dy });
+  return cells;
+}
+
 function renderHandSlot(catalog: Catalog, item: ItemInstance | undefined, slotId: string, nameId: string): void {
   const slotEl = document.getElementById(slotId);
   const nameEl = document.getElementById(nameId);
@@ -98,12 +120,8 @@ export function renderHud(catalog: Catalog, snapshot: ClientSnapshot, _handlers:
 export function inventoryCellsForItem(item: ItemInstance, catalog: Catalog): Position[] {
   if (item.location.type !== "player_inventory") return [];
   const def = catalog.items.find((i) => i.id === item.itemTypeId);
-  const w0 = def?.shape.w ?? 1;
-  const h0 = def?.shape.h ?? 1;
-  const [w, h] = item.location.rotation === 90 ? [h0, w0] : [w0, h0];
-  const cells: Position[] = [];
-  for (let dy = 0; dy < h; dy++) for (let dx = 0; dx < w; dx++) cells.push({ x: item.location.x + dx, y: item.location.y + dy });
-  return cells;
+  const shape = { w: def?.shape.w ?? 1, h: def?.shape.h ?? 1 };
+  return footprintCells({ x: item.location.x, y: item.location.y }, shape, item.location.rotation);
 }
 
 /**
@@ -178,12 +196,8 @@ export function renderInventoryGrid(catalog: Catalog, snapshot: ClientSnapshot, 
 export function occupiedCellsForItem(item: ItemInstance, catalog: Catalog): Position[] {
   if (item.location.type !== "surface") return [];
   const def = catalog.items.find((i) => i.id === item.itemTypeId);
-  const w0 = def?.shape.w ?? 1;
-  const h0 = def?.shape.h ?? 1;
-  const [w, h] = item.location.rotation === 90 ? [h0, w0] : [w0, h0];
-  const cells: Position[] = [];
-  for (let dy = 0; dy < h; dy++) for (let dx = 0; dx < w; dx++) cells.push({ x: item.location.x + dx, y: item.location.y + dy });
-  return cells;
+  const shape = { w: def?.shape.w ?? 1, h: def?.shape.h ?? 1 };
+  return footprintCells({ x: item.location.x, y: item.location.y }, shape, item.location.rotation);
 }
 
 export type SurfaceGridHandlers = {
