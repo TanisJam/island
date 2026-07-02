@@ -135,6 +135,7 @@ export function createDomUi(): Ui {
     return renderSurfaceGrid(catalog, snapshot, surfaceId, dims, {
       onCellClick: (item) => showThoughtDom(surfaceCellMessage(catalog, item)),
       bindDrag: handlers.bindDrag,
+      bindGrid: handlers.bindGrid,
     });
   }
 
@@ -222,7 +223,15 @@ export function createDomUi(): Ui {
       if (!mounted) return;
       const { store, catalog, handlers } = mounted;
       const body = renderInventoryGrid(catalog, store.getState(), handlers);
-      windows.toggle({ id: INVENTORY_WINDOW_ID, title: "MIS COSAS · 4×4", body, variant: "window", closable: true, draggable: true });
+      windows.toggle({
+        id: INVENTORY_WINDOW_ID,
+        title: "MIS COSAS · 4×4",
+        body,
+        variant: "window",
+        closable: true,
+        draggable: true,
+        onClose: () => handlers.unbindGrid?.("inventory"),
+      });
     },
 
     toggleThoughts(): void {
@@ -237,7 +246,15 @@ export function createDomUi(): Ui {
       const { store, catalog, handlers } = mounted;
       const body = buildSurfaceBody(catalog, store.getState(), surfaceId, handlers);
       if (!body) return; // defensive: surfaceId no longer resolves to a surfaceGrid-bearing object
-      const handle = windows.toggle({ id: surfaceWindowId(surfaceId), title: "LA MESA", body, variant: "window", closable: true, draggable: true });
+      const handle = windows.toggle({
+        id: surfaceWindowId(surfaceId),
+        title: "LA MESA",
+        body,
+        variant: "window",
+        closable: true,
+        draggable: true,
+        onClose: () => handlers.unbindGrid?.(`surface:${surfaceId}`),
+      });
       openSurfaceId = handle ? surfaceId : null;
     },
 

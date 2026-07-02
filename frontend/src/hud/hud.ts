@@ -2,7 +2,7 @@ import type { Catalog, ItemInstance, Position, Thought } from "../contract";
 import type { ClientSnapshot } from "../state/snapshot";
 import { findCraftable } from "../actions/available";
 import { createEmojiAssets } from "../render/assets";
-import type { CellDescriptor } from "./drag";
+import type { CellDescriptor, GridContext } from "./drag";
 
 export type HudHandlers = {
   onEquip: (itemInstanceId: string) => void;
@@ -12,6 +12,13 @@ export type HudHandlers = {
    * don't need to stub it; `game/game.ts` is the only real caller that sets
    * it, wired to `createDragController(...).bindCell`. */
   bindDrag?: (cellEl: HTMLElement, descriptor: CellDescriptor) => void;
+  /** Registers this render's coordinate->element map with the drag
+   * controller (design.md Decision 3, tasks.md T4) — called once per render,
+   * wired to `createDragController(...).bindGrid`. */
+  bindGrid?: (ctx: GridContext) => void;
+  /** Releases a previously-registered `GridContext` when its window closes
+   * (tasks.md T4) — wired to `createDragController(...).unbindGrid`. */
+  unbindGrid?: (gridKey: string) => void;
 };
 
 /** 4x4 player inventory grid dimensions (mirrors the backend's
@@ -279,9 +286,7 @@ export function renderInventoryGrid(catalog: Catalog, snapshot: ClientSnapshot, 
   // `elementFromPoint` always resolves to the `.cell` beneath.
   for (const item of multiCellItems.values()) grid.appendChild(buildItemOverlay(item, catalog));
 
-  // `cellMap` is handed to the drag controller via `handlers.bindGrid` once
-  // that wiring lands (tasks.md T4) — built here, in the same render loop,
-  // so it always reflects exactly what's on screen right now.
+  handlers.bindGrid?.({ kind: "inventory", dims: { width: INV_W, height: INV_H }, cells: cellMap });
 
   return grid;
 }
@@ -311,6 +316,9 @@ export type SurfaceGridHandlers = {
    * regression to the surface-inspect click) — `bindCell` only ADDS drag
    * capability alongside it, it never replaces the tap path here. */
   bindDrag?: (cellEl: HTMLElement, descriptor: CellDescriptor) => void;
+  /** Same grid registration as `HudHandlers.bindGrid` (tasks.md T4) — called
+   * once per surface render, wired to `createDragController(...).bindGrid`. */
+  bindGrid?: (ctx: GridContext) => void;
 };
 
 /** First-person cell-inspect line for the "Usar la mesa" window (mirrors
@@ -377,8 +385,7 @@ export function renderSurfaceGrid(
 
   for (const item of multiCellItems.values()) grid.appendChild(buildItemOverlay(item, catalog));
 
-  // `cellMap` is handed to the drag controller via `handlers.bindGrid` once
-  // that wiring lands (tasks.md T4), same as renderInventoryGrid above.
+  handlers.bindGrid?.({ kind: "surface", surfaceId, dims, cells: cellMap });
 
   return grid;
 }

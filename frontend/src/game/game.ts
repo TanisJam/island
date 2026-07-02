@@ -119,6 +119,8 @@ export function createGame(deps: GameDeps): Game {
         void sendCommand({ type: "DropItem", itemInstanceId, to: dropTargetTile(store.getState()) });
       },
       bindDrag: dragController.bindCell,
+      bindGrid: dragController.bindGrid,
+      unbindGrid: dragController.unbindGrid,
     };
 
     const input = createInputController({

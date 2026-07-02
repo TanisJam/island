@@ -189,12 +189,40 @@ export type DragControllerDeps = {
   showThought: (text: string) => void;
 };
 
+/** Everything `footprintValidity`/`updateHighlight` needs to know about a
+ * rendered grid, registered once per render by its renderer (design.md
+ * Decision 3, tasks.md T4). `cells` is the SAME per-render
+ * coordinate->element `Map<"x,y", HTMLElement>` the renderer builds while
+ * laying out cells (hud.ts) — used to look up EVERY covered cell's element
+ * during full-footprint highlight toggling (T7), not just the anchor. */
+export type GridContext =
+  | { kind: "inventory"; dims: { width: number; height: number }; cells: Map<string, HTMLElement> }
+  | { kind: "surface"; surfaceId: string; dims: { width: number; height: number }; cells: Map<string, HTMLElement> };
+
+/** Stable key a `GridContext` is stored under: `"inventory"` for the single
+ * player inventory grid, `"surface:"+surfaceId` for a mesa/table grid — one
+ * distinct key per open surface window, so closing one mesa never clobbers
+ * another's registered context (design.md Decision 3 lifecycle). */
+function gridKeyOf(ctx: GridContext): string {
+  return ctx.kind === "inventory" ? "inventory" : `surface:${ctx.surfaceId}`;
+}
+
 export interface DragController {
   /** Registers `cellEl` as BOTH a potential drop target and (when
    * `descriptor.occupant` is set) a drag source. Safe to call again for a
    * freshly-created element on every re-render — stale entries for removed
    * elements are garbage-collected automatically (WeakMap-keyed). */
   bindCell(cellEl: HTMLElement, descriptor: CellDescriptor): void;
+  /** Registers/replaces the `GridContext` for the grid it describes (latest
+   * render wins per key) — called once per render by `renderInventoryGrid`/
+   * `renderSurfaceGrid` (tasks.md T3/T4). */
+  bindGrid(ctx: GridContext): void;
+  /** Removes the `GridContext` stored under `gridKey`, so a subsequent
+   * highlight lookup for a CLOSED window's grid misses cleanly instead of
+   * holding onto detached DOM element refs indefinitely (design.md Decision 3
+   * "Lifecycle / retention" fix — wired through `window-manager`'s `close()`
+   * choke point, tasks.md T4). */
+  unbindGrid(gridKey: string): void;
   /** Tears down any in-flight drag state (ghost, highlight). Does not remove
    * any `bindCell`-registered listeners — those die with their elements. */
   destroy(): void;
@@ -213,6 +241,14 @@ export interface DragController {
 export function createDragController(deps: DragControllerDeps): DragController {
   const registry = new WeakMap<object, { el: HTMLElement; descriptor: CellDescriptor }>();
   const assets = createEmojiAssets();
+
+  // Latest-registered `GridContext` per grid key (design.md Decision 3). A
+  // single shared controller instance serves the inventory window AND every
+  // mesa/surface window (game.ts:99), so this map can hold one entry per
+  // DISTINCT surfaceId at once — `unbindGrid` (wired through window-manager
+  // `close()`, tasks.md T4) is what keeps it from growing unbounded with
+  // detached DOM refs for windows the player has since closed.
+  const grids = new Map<string, GridContext>();
 
   let ghost: HTMLElement | null = null;
   let dragging = false;
@@ -317,6 +353,14 @@ export function createDragController(deps: DragControllerDeps): DragController {
     timer = setTimeout(disarm, 0);
   }
 
+  function bindGrid(ctx: GridContext): void {
+    grids.set(gridKeyOf(ctx), ctx);
+  }
+
+  function unbindGrid(gridKey: string): void {
+    grids.delete(gridKey);
+  }
+
   function bindCell(cellEl: HTMLElement, descriptor: CellDescriptor): void {
     registry.set(cellEl as unknown as object, { el: cellEl, descriptor });
 
@@ -375,5 +419,5 @@ export function createDragController(deps: DragControllerDeps): DragController {
     endDrag();
   }
 
-  return { bindCell, destroy };
+  return { bindCell, bindGrid, unbindGrid, destroy };
 }

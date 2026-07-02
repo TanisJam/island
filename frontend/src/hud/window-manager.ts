@@ -28,6 +28,13 @@ export interface WindowSpec {
    * (see `shouldDismiss`). "window" (default) = a regular pinnable panel
    * (e.g. the inventory) that only dismisses on outside click if unpinned. */
   variant?: "window" | "menu";
+  /** Invoked right before this window's element is removed from the DOM —
+   * on the ✕ button, an outside-click dismiss, or `destroy()`'s close-all
+   * loop, since all three funnel through the single `close(id)` choke point
+   * below. Callers use this to release resources scoped to the window's
+   * lifetime (e.g. a mesa/inventory window's registered `GridContext` —
+   * design.md Decision 3 "Lifecycle / retention" fix, tasks.md T4). */
+  onClose?: () => void;
 }
 
 export interface WindowHandle {
@@ -82,7 +89,7 @@ export function shouldDismiss(win: { pinned: boolean; variant: "window" | "menu"
   return !win.pinned;
 }
 
-type Entry = { el: HTMLElement; bodyEl: HTMLElement; pinned: boolean; variant: "window" | "menu" };
+type Entry = { el: HTMLElement; bodyEl: HTMLElement; pinned: boolean; variant: "window" | "menu"; onClose?: () => void };
 
 /**
  * True when `target` sits inside a window's `.btns` cluster (the pin/close
@@ -128,6 +135,7 @@ export function createWindowManager(root: HTMLElement = document.body): WindowMa
   function close(id: WindowId): void {
     const entry = entries.get(id);
     if (!entry) return;
+    entry.onClose?.(); // single choke point for ✕ / outside-click / destroy()'s close-all loop
     entry.el.remove();
     entries.delete(id);
   }
@@ -276,7 +284,7 @@ export function createWindowManager(root: HTMLElement = document.body): WindowMa
     el.style.top = `${initial.y}px`;
 
     root.appendChild(el);
-    entries.set(spec.id, { el, bodyEl, pinned: spec.pinned ?? false, variant });
+    entries.set(spec.id, { el, bodyEl, pinned: spec.pinned ?? false, variant, onClose: spec.onClose });
 
     // Re-clamp using the now-measured size (offsetWidth/Height are 0 before
     // insertion) so windows opened near an edge never overflow the viewport.
