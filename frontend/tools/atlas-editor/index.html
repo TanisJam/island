@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Atlas Editor — Isla Misteriosa (dev tool)</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>Atlas Editor</h1>
+      <span class="subtitle">Dev-only tileset mapping tool — not part of the game build</span>
+    </header>
+
+    <main class="layout">
+      <section class="picking-pane">
+        <div class="toolbar">
+          <label class="file-label" for="file-input">
+            Load tileset PNG
+            <input id="file-input" type="file" accept="image/png" />
+          </label>
+          <label class="zoom-label" for="zoom-select">
+            Zoom
+            <select id="zoom-select"></select>
+          </label>
+          <div id="readout" class="readout">No selection</div>
+        </div>
+        <div id="canvas-wrap" class="canvas-wrap">
+          <canvas id="picking-canvas"></canvas>
+          <div id="empty-state" class="empty-state">Load a tileset PNG to begin</div>
+        </div>
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
