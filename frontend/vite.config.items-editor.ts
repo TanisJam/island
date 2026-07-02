@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import { itemsEditorAtlasSavePlugin } from "./tools/items-editor/server/atlas-write-middleware";
+import { itemsEditorCatalogReadPlugin } from "./tools/items-editor/server/catalog-read-middleware";
 import { itemsEditorSavePlugin } from "./tools/items-editor/server/write-middleware";
 
 /**
@@ -30,5 +31,15 @@ export default defineConfig({
     outDir: fileURLToPath(new URL("./dist-tool-items", import.meta.url)),
     emptyOutDir: true,
   },
-  plugins: [itemsEditorSavePlugin(), itemsEditorAtlasSavePlugin()],
+  // `itemsEditorCatalogReadPlugin` serves `catalog/*.json` + `schemas/*.json`
+  // LIVE from the repo-root source (`catalog-read-middleware.ts`), the same
+  // "zero staleness" approach as `publicDir` above. This is why
+  // `dev:tool:items` (frontend/package.json) no longer runs
+  // `sync:catalog:items` / `sync:schemas:items` — the dev server never
+  // needs the stale on-disk copies. `build:tool:items` STILL runs those
+  // `sync:*` steps: `vite build` has no dev-server to install middleware
+  // on, so the built HTML's relative `fetch('./catalog/...')` calls only
+  // resolve at runtime if the copied files exist on disk under
+  // `tools/items-editor/{catalog,schemas}`.
+  plugins: [itemsEditorSavePlugin(), itemsEditorAtlasSavePlugin(), itemsEditorCatalogReadPlugin()],
 });
