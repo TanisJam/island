@@ -15,7 +15,11 @@
     "sync:contract": "cp ../schemas/generated/*.ts src/contract/",
     "sync:catalog": "mkdir -p tools/atlas-editor/catalog && cp ../catalog/*.json tools/atlas-editor/catalog/",
     "dev:tool": "pnpm sync:catalog && vite --config vite.config.tool.ts",
-    "build:tool": "pnpm sync:catalog && vite build --config vite.config.tool.ts"
+    "build:tool": "pnpm sync:catalog && vite build --config vite.config.tool.ts",
+    "sync:catalog:items": "mkdir -p tools/items-editor/catalog && cp ../catalog/*.json tools/items-editor/catalog/",
+    "sync:schemas:items": "mkdir -p tools/items-editor/schemas && cp ../schemas/common.json ../schemas/catalog.json tools/items-editor/schemas/",
+    "dev:tool:items": "pnpm sync:catalog:items && pnpm sync:schemas:items && vite --config vite.config.items-editor.ts",
+    "build:tool:items": "pnpm sync:catalog:items && pnpm sync:schemas:items && vite build --config vite.config.items-editor.ts"
   },
   "devDependencies": {
     "@types/node": "^22.7.0",
