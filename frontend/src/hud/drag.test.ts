@@ -242,19 +242,60 @@ function fire(el: FakeElement, type: string, ev: Record<string, unknown>): void 
   for (const cb of el.listeners.get(type) ?? []) cb(ev);
 }
 
-function withFakeDom(elementFromPoint: (x: number, y: number) => FakeElement | null, run: (body: FakeElement) => void): void {
-  const original = (globalThis as { document?: unknown }).document;
-  const body = new FakeElement();
-  (globalThis as { document?: unknown }).document = {
-    createElement: () => new FakeElement(),
-    elementFromPoint,
-    body,
-  };
-  try {
-    run(body);
-  } finally {
-    (globalThis as { document?: unknown }).document = original;
+/** Minimal `document`-level listener registry — the real DOM object the
+ * drag controller's trailing-click suppressor talks to (`document.
+ * addEventListener`/`removeEventListener`). Tracks the `capture` flag
+ * per listener so tests can assert the suppressor registers capture-phase
+ * (spec: must intercept before the mesa cell's own `click` listener). */
+class FakeDocument {
+  createElement = (): FakeElement => new FakeElement();
+  body = new FakeElement();
+  elementFromPoint: (x: number, y: number) => FakeElement | null;
+  listeners: Array<{ type: string; cb: (ev: Record<string, unknown>) => void; capture: boolean }> = [];
+
+  constructor(elementFromPoint: (x: number, y: number) => FakeElement | null) {
+    this.elementFromPoint = elementFromPoint;
   }
+
+  addEventListener(type: string, cb: (ev: Record<string, unknown>) => void, capture = false): void {
+    this.listeners.push({ type, cb, capture });
+  }
+
+  removeEventListener(type: string, cb: (ev: Record<string, unknown>) => void): void {
+    this.listeners = this.listeners.filter((l) => !(l.type === type && l.cb === cb));
+  }
+
+  /** Test-only helper — dispatches to every registered listener of `type`,
+   * standing in for the fake DOM's lack of real event dispatch/bubbling. */
+  dispatch(type: string, ev: Record<string, unknown>): void {
+    for (const l of this.listeners.filter((x) => x.type === type)) l.cb(ev);
+  }
+}
+
+/** `run` may return a Promise — when it does, the fake `document` stays
+ * installed globally until it settles (required by the timeout-fallback
+ * suppressor test below, which awaits the real 0ms timer while the
+ * production code's `disarm()` still needs `document.removeEventListener`
+ * to resolve to THIS fake, not whatever `document` is restored to). */
+function withFakeDom(
+  elementFromPoint: (x: number, y: number) => FakeElement | null,
+  run: (body: FakeElement, doc: FakeDocument) => void | Promise<void>,
+): void | Promise<void> {
+  const original = (globalThis as { document?: unknown }).document;
+  const fakeDocument = new FakeDocument(elementFromPoint);
+  (globalThis as { document?: unknown }).document = fakeDocument;
+  const restore = (): void => {
+    (globalThis as { document?: unknown }).document = original;
+  };
+  const result = run(fakeDocument.body, fakeDocument);
+  if (result && typeof result.then === "function") {
+    return result.then(restore, (err) => {
+      restore();
+      throw err;
+    });
+  }
+  restore();
+  return undefined;
 }
 
 function invItemForDom(id: string, x: number, y: number): ItemInstance {
@@ -402,6 +443,128 @@ test("createDragController smoke: dropping over the canvas resolves the tile via
       assert.deepEqual(resolveMapTileCalledWith, [50, 60]);
       assert.equal(sent.length, 1);
       assert.deepEqual(sent[0], { type: "DropItem", itemInstanceId: "it1", to: resolvedTile });
+    },
+  );
+});
+
+// --- Trailing-click suppressor (browser QA @ d61e98f, mem #2745) ----------
+// Real Chromium fires a trailing compatibility `click` on the drag-origin
+// cell right after `pointerup`, for any gesture that crossed the drag
+// threshold. Mesa cells still carry a native `click` listener with an
+// `occupant` captured by closure at render time (hud.ts:247) — the STALE
+// trailing click fired a spurious inspect thought 4/4 real-browser repros.
+// The fake DOM below has no real capture/bubble phases or event dispatch —
+// it only invokes whatever this suite explicitly fires (`fire`/`dispatch`),
+// so these tests verify the ARMING logic only (registered/not-registered,
+// capture:true, one-shot disarm). Real-browser re-verification via the
+// Playwright QA harness is still required to confirm this actually
+// suppresses the compat click end-to-end.
+
+test("trailing-click suppressor: a threshold-crossed drag end arms a capture-phase click listener on document", () => {
+  let hovered: FakeElement | null = null;
+  withFakeDom(
+    () => hovered,
+    (_body, doc) => {
+      const item = invItemForDom("it1", 0, 0);
+      const { deps } = makeDeps({ getSnapshot: () => snapshotWith([item]) });
+      const controller = createDragController(deps);
+      const sourceCell = new FakeElement();
+      const targetCell = new FakeElement();
+      controller.bindCell(sourceCell as unknown as HTMLElement, { kind: "inventory", x: 0, y: 0, occupant: item });
+      controller.bindCell(targetCell as unknown as HTMLElement, { kind: "inventory", x: 3, y: 3 });
+
+      fire(sourceCell, "pointerdown", { clientX: 0, clientY: 0, pointerId: 1 });
+      hovered = targetCell;
+      fire(sourceCell, "pointermove", { clientX: 20, clientY: 0, pointerId: 1 }); // crosses the 6px threshold
+      fire(sourceCell, "pointerup", { clientX: 20, clientY: 0, pointerId: 1 });
+
+      const clickListeners = doc.listeners.filter((l) => l.type === "click");
+      assert.equal(clickListeners.length, 1, "exactly one trailing-click suppressor is armed");
+      assert.equal(clickListeners[0]?.capture, true, "must be capture-phase to intercept before the cell's own click listener");
+    },
+  );
+});
+
+test("trailing-click suppressor: a below-threshold tap does NOT arm the suppressor", () => {
+  withFakeDom(
+    () => null,
+    (_body, doc) => {
+      const item = invItemForDom("it1", 0, 0);
+      const { deps } = makeDeps({ getSnapshot: () => snapshotWith([item]) });
+      const controller = createDragController(deps);
+      const cell = new FakeElement();
+      controller.bindCell(cell as unknown as HTMLElement, { kind: "inventory", x: 0, y: 0, occupant: item });
+
+      fire(cell, "pointerdown", { clientX: 0, clientY: 0, pointerId: 1 });
+      fire(cell, "pointerup", { clientX: 1, clientY: 1, pointerId: 1 }); // 1px move — below the 6px threshold
+
+      assert.equal(doc.listeners.filter((l) => l.type === "click").length, 0, "a plain tap's own click IS the intended behavior, nothing to suppress");
+    },
+  );
+});
+
+test("trailing-click suppressor: fires once, stops propagation/default, then disarms itself", () => {
+  let hovered: FakeElement | null = null;
+  withFakeDom(
+    () => hovered,
+    (_body, doc) => {
+      const item = invItemForDom("it1", 0, 0);
+      const { deps } = makeDeps({ getSnapshot: () => snapshotWith([item]) });
+      const controller = createDragController(deps);
+      const sourceCell = new FakeElement();
+      const targetCell = new FakeElement();
+      controller.bindCell(sourceCell as unknown as HTMLElement, { kind: "inventory", x: 0, y: 0, occupant: item });
+      controller.bindCell(targetCell as unknown as HTMLElement, { kind: "inventory", x: 3, y: 3 });
+
+      fire(sourceCell, "pointerdown", { clientX: 0, clientY: 0, pointerId: 1 });
+      hovered = targetCell;
+      fire(sourceCell, "pointermove", { clientX: 20, clientY: 0, pointerId: 1 });
+      fire(sourceCell, "pointerup", { clientX: 20, clientY: 0, pointerId: 1 });
+
+      assert.equal(doc.listeners.filter((l) => l.type === "click").length, 1);
+
+      let stopped = false;
+      let prevented = false;
+      doc.dispatch("click", {
+        stopPropagation: () => {
+          stopped = true;
+        },
+        preventDefault: () => {
+          prevented = true;
+        },
+      });
+
+      assert.equal(stopped, true, "the trailing click's propagation is stopped");
+      assert.equal(prevented, true, "the trailing click's default action is prevented");
+      assert.equal(doc.listeners.filter((l) => l.type === "click").length, 0, "one-shot: disarms itself right after suppressing the trailing click");
+    },
+  );
+});
+
+test("trailing-click suppressor: disarms via the timeout fallback if no compat click ever arrives", async () => {
+  let hovered: FakeElement | null = null;
+  await withFakeDom(
+    () => hovered,
+    async (_body, doc) => {
+      const item = invItemForDom("it1", 0, 0);
+      const { deps } = makeDeps({ getSnapshot: () => snapshotWith([item]) });
+      const controller = createDragController(deps);
+      const sourceCell = new FakeElement();
+      const targetCell = new FakeElement();
+      controller.bindCell(sourceCell as unknown as HTMLElement, { kind: "inventory", x: 0, y: 0, occupant: item });
+      controller.bindCell(targetCell as unknown as HTMLElement, { kind: "inventory", x: 3, y: 3 });
+
+      fire(sourceCell, "pointerdown", { clientX: 0, clientY: 0, pointerId: 1 });
+      hovered = targetCell;
+      fire(sourceCell, "pointermove", { clientX: 20, clientY: 0, pointerId: 1 });
+      fire(sourceCell, "pointerup", { clientX: 20, clientY: 0, pointerId: 1 });
+
+      assert.equal(doc.listeners.filter((l) => l.type === "click").length, 1, "armed right after the threshold-crossed drop");
+
+      // No compat click ever dispatched — only the 0ms timer fallback can disarm it.
+      // Wait comfortably past that timer (still while the fake document is installed).
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+      assert.equal(doc.listeners.filter((l) => l.type === "click").length, 0, "timer fallback disarmed the suppressor with no click received");
     },
   );
 });

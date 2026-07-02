@@ -283,6 +283,40 @@ export function createDragController(deps: DragControllerDeps): DragController {
     source = null;
   }
 
+  /**
+   * Swallows the ONE trailing compatibility `click` a browser fires on the
+   * drag-ORIGIN element right after `pointerup`, for any gesture that
+   * crossed the drag threshold (browser QA on d61e98f confirmed 4/4 repros:
+   * a stale, closure-captured `occupant` in `hud.ts`'s mesa-cell `click`
+   * listener fired a spurious inspect thought, and the same trailing click
+   * could reach the document-level outside-click listener and dismiss an
+   * unrelated floating window).
+   *
+   * Registered capture-phase on `document` so it intercepts the click
+   * before it ever reaches the origin cell's own listener or bubbles to any
+   * document-level listener. Disarms itself the instant it fires (one-shot)
+   * — and ALSO via a 0ms timer fallback, so it can never survive to eat a
+   * later, unrelated click if no compatibility click ever arrives for this
+   * gesture. A 0ms timer is a macrotask: the browser's trailing click is
+   * dispatched synchronously as part of the same input sequence as
+   * `pointerup`, so it always runs before a freshly scheduled timer fires —
+   * making the timer a pure safety net, never the normal disarm path.
+   */
+  function armTrailingClickSuppressor(): void {
+    let timer: ReturnType<typeof setTimeout>;
+    const disarm = (): void => {
+      document.removeEventListener("click", suppressOnce, true);
+      clearTimeout(timer);
+    };
+    const suppressOnce = (ev: Event): void => {
+      ev.stopPropagation();
+      ev.preventDefault();
+      disarm();
+    };
+    document.addEventListener("click", suppressOnce, true);
+    timer = setTimeout(disarm, 0);
+  }
+
   function bindCell(cellEl: HTMLElement, descriptor: CellDescriptor): void {
     registry.set(cellEl as unknown as object, { el: cellEl, descriptor });
 
@@ -309,7 +343,9 @@ export function createDragController(deps: DragControllerDeps): DragController {
       if (!source) return;
       if (!dragging) {
         // Below-threshold pointerup: never a drag, resolve as the existing
-        // tap behavior (equip/drop/inspect) instead (spec R5).
+        // tap behavior (equip/drop/inspect) instead (spec R5). No trailing
+        // click suppressor is armed here — a below-threshold tap's own
+        // `click` IS the intended onTap/legacy behavior, not a duplicate.
         const tapped = source;
         source = null;
         start = null;
@@ -317,6 +353,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
         return;
       }
       cellEl.releasePointerCapture?.(ev.pointerId);
+      armTrailingClickSuppressor();
       const occupant = source.descriptor.occupant!;
       const target = resolveTarget(ev.clientX, ev.clientY);
       const snapshot = deps.getSnapshot();
