@@ -2,7 +2,7 @@
  * Editor-enforced id uniqueness (design.md "ADR-6 — Editor-enforced id
  * uniqueness"). Runs on add (new id must not collide) and rename (changed
  * id must not collide with a sibling), blocking Save before it happens.
- * Also enforced server-side inside `planSave` for defense in depth.
+ * Also enforced server-side inside `planSaveCollection` for defense in depth.
  */
 
 export interface IdUniqueCheckable {

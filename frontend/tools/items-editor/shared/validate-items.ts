@@ -7,6 +7,16 @@ import Ajv, { type ErrorObject } from "ajv";
  * gate before write), because both consumers pass in the SAME schema JSON
  * (browser: synced copy under `tools/items-editor/schemas/`; server: the
  * real `schemas/*.json` on disk).
+ *
+ * STATUS (Slice 5, items migration): `validateItems`/`compileItemsArrayValidator`
+ * are now DEAD in production — `items` validates through the generalized
+ * `shared/validate-collection.ts::validateCollection` like every other
+ * collection. They are intentionally left here, dead-but-harmless, rather
+ * than deleted: `findDuplicateIds` (below) and the `SchemaBundle`/
+ * `SchemaError` types are still ACTIVELY used by `validate-collection.ts`
+ * and `server/plan-save.ts`, so this file cannot be removed outright, and
+ * splitting it further wasn't worth the risk for code that is otherwise
+ * fully covered by its own existing tests.
  */
 
 export interface SchemaBundle {

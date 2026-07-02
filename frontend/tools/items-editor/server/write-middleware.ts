@@ -4,19 +4,24 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Plugin } from "vite";
 import { writeAtomic, writeFileDurable } from "./fs-atomic";
-import { planSave, planSaveCollection, type CatalogMeta } from "./plan-save";
-import { resolveCollectionTarget, resolveTargets } from "./targets";
+import { planSaveCollection, type CatalogMeta } from "./plan-save";
+import { resolveCollectionTarget } from "./targets";
 import { COLLECTIONS, isKnownCollection } from "../shared/collection-registry";
 import { getDescriptor } from "../shared/descriptors";
 
 export { writeAtomic, writeFileDurable };
 
 /**
- * Vite dev-server middleware exposing `POST /__save-items` (items, legacy
- * alias) AND the generalized `POST /__save/:collectionId` (design.md "3.
- * Server generalization — Route"). Registered ONLY under `dev:tool:items`
- * via `vite.config.items-editor.ts` — never present in `vite build`, never
- * in the game, never in the backend.
+ * Vite dev-server middleware exposing the generalized
+ * `POST /__save/:collectionId` (design.md "3. Server generalization —
+ * Route"). Registered ONLY under `dev:tool:items` via
+ * `vite.config.items-editor.ts` — never present in `vite build`, never in
+ * the game, never in the backend.
+ *
+ * The item-only `POST /__save-items` alias (`createItemsSaveHandler`) was
+ * retired in Slice 5 — `items` now saves through this SAME generalized
+ * route as every other collection (`POST /__save/items`), parameterized by
+ * `shared/descriptors/items.ts::ITEMS_DESCRIPTOR`.
  *
  * SECURITY: `repoRoot` is derived ONCE, at module-load time, purely from
  * `import.meta.url` — the exact pattern used by
@@ -30,7 +35,6 @@ const here = dirname(fileURLToPath(import.meta.url));
 // tools/items-editor/server -> tools/items-editor -> tools -> frontend -> repoRoot
 const repoRoot = join(here, "..", "..", "..", "..");
 
-const SAVE_ROUTE = "/__save-items";
 const COLLECTION_SAVE_MOUNT = "/__save";
 
 const readJson = (path: string): unknown => JSON.parse(readFileSync(path, "utf-8"));
@@ -56,47 +60,6 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json");
   res.end(payload);
-}
-
-/**
- * Builds the `/__save-items` request handler against an explicit
- * `repoRoot`, separated from the Vite `Plugin` wiring so it is directly
- * unit-testable (mirrors `atlas-write-middleware.ts::createAtlasSaveHandler`).
- * `itemsEditorSavePlugin` below is the ONLY production caller and always
- * supplies the hard-coded, compile-time-derived `repoRoot`.
- */
-export function createItemsSaveHandler(root: string) {
-  const targets = resolveTargets(root);
-  return (req: IncomingMessage, res: ServerResponse): void => {
-    if (req.method !== "POST") {
-      sendJson(res, 405, { ok: false, errors: [{ instancePath: "/", message: "method not allowed" }] });
-      return;
-    }
-    readRequestBody(req)
-      .then((rawBody) => {
-        const currentMeta = readJson(targets.metaPath) as CatalogMeta;
-        const schemas = {
-          common: readJson(targets.commonSchema),
-          catalog: readJson(targets.catalogSchema),
-        };
-        const result = planSave(rawBody, { currentMeta, schemas });
-        if (!result.ok) {
-          sendJson(res, 400, { ok: false, errors: result.errors });
-          return;
-        }
-        // Items-first ordering (design.md "ADR-3"): if the process
-        // dies between the two renames, the only possible degraded
-        // state is "catalogVersion not bumped" — never a corrupted
-        // items file.
-        writeAtomic(targets.itemsPath, result.itemsJson);
-        writeAtomic(targets.metaPath, result.metaJson);
-        sendJson(res, 200, { ok: true, catalogVersion: result.catalogVersion, count: result.count });
-      })
-      .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : "unexpected error";
-        sendJson(res, 500, { ok: false, errors: [{ instancePath: "/", message }] });
-      });
-  };
 }
 
 /**
@@ -170,7 +133,6 @@ export function itemsEditorSavePlugin(): Plugin {
   return {
     name: "items-editor-save-plugin",
     configureServer(server) {
-      server.middlewares.use(SAVE_ROUTE, createItemsSaveHandler(repoRoot));
       server.middlewares.use(COLLECTION_SAVE_MOUNT, createCollectionSaveHandler(repoRoot));
     },
   };

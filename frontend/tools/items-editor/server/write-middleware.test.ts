@@ -5,7 +5,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFile
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createCollectionSaveHandler, createItemsSaveHandler, writeAtomic, writeFileDurable } from "./write-middleware";
+import { createCollectionSaveHandler, writeAtomic, writeFileDurable } from "./write-middleware";
 
 function withTmpDir<T>(fn: (dir: string) => T): T {
   const dir = mkdtempSync(join(tmpdir(), "items-editor-write-test-"));
@@ -226,15 +226,18 @@ test("createCollectionSaveHandler: rejects a schema-invalid record with 400 and 
   });
 });
 
-test("createItemsSaveHandler: /__save-items still works unchanged — POST writes catalog/items.json and bumps catalogVersion (regression check)", async () => {
+test("createCollectionSaveHandler: POST /items writes catalog/items.json and bumps catalogVersion (Slice 5 — items migrated off the retired /__save-items alias onto this SAME generalized route, regression check)", async () => {
   await withRepoRootFixture(async (root) => {
-    await withServer(createItemsSaveHandler(root), async (baseUrl) => {
-      const { status, json } = await post(`${baseUrl}/__save-items`, { items: [validItem, { ...validItem, id: "dry_branch" }] });
+    await withServer(createCollectionSaveHandler(root), async (baseUrl) => {
+      const { status, json } = await post(`${baseUrl}/items`, { records: [validItem, { ...validItem, id: "dry_branch" }] });
       assert.equal(status, 200);
       assert.equal(json.ok, true);
       assert.equal(json.catalogVersion, "0.1.1");
       const onDisk = JSON.parse(readFileSync(join(root, "catalog", "items.json"), "utf-8"));
       assert.equal(onDisk.length, 2);
+      assert.deepEqual(onDisk[0], validItem);
+      const meta = JSON.parse(readFileSync(join(root, "catalog", "meta.json"), "utf-8"));
+      assert.equal(meta.catalogVersion, "0.1.1");
     });
   });
 });

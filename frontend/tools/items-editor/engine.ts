@@ -155,9 +155,21 @@ export function mountCollectionEngine(descriptor: CollectionDescriptor, els: Eng
   function fieldIdForInstancePath(instancePath: string, recordIndex: number): string | null {
     if (recordIndex !== selectedIndex) return null;
     const relative = instancePath.replace(/^\/\d+/, "");
-    const key = relative.replace(/^\//, "").split("/")[0];
+    const segments = relative.replace(/^\//, "").split("/");
+    const key = segments[0];
     const field = descriptor.fields.find((f) => f.key === key);
-    return field ? fieldDomId(collectionId, field.key) : null;
+    if (!field) return null;
+    const domId = fieldDomId(collectionId, field.key);
+    // `shape`-kind fields render two DISTINCT sub-inputs (`${domId}-w`,
+    // `${domId}-h` — `widgets/shape-field.ts`), not one element at
+    // `domId` itself. Preserves the pre-Slice-5 `/shape/w`/`/shape/h`
+    // ajv error-path -> field-focus linking `items` always had (and
+    // generalizes it for any other `shape`-kind field, e.g.
+    // `world-objects.surfaceGrid`).
+    if (field.kind === "shape" && (segments[1] === "w" || segments[1] === "h")) {
+      return `${domId}-${segments[1]}`;
+    }
+    return domId;
   }
 
   function renderErrorSummary(errors: SchemaError[]): void {
@@ -294,6 +306,10 @@ export function mountCollectionEngine(descriptor: CollectionDescriptor, els: Eng
       if (field.key === idField.key) continue;
       if (field.kind === "boolean") blank[field.key] = false;
       if (field.kind === "tags") blank[field.key] = [];
+      // A required `shape` field (e.g. `items.shape`) must start already
+      // valid, matching the pre-Slice-5 items behavior where a new item's
+      // width/height defaulted to `{w:1,h:1}` rather than blank.
+      if (field.kind === "shape" && field.required) blank[field.key] = { w: 1, h: 1 };
     }
     records.push(blank);
     renderList();

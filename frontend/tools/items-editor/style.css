@@ -365,15 +365,19 @@ textarea {
   color: var(--exito);
 }
 
-#fields {
+/* Generic, collection-agnostic 2-column field-grid layout (Slice 5 — was
+   scoped to `#fields` [items] only; now applied to every collection's
+   fields container via this shared class, so knowledge/research/terrains/
+   world-objects also get the 2-column layout items always had). */
+.fields-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
 }
 
-#fields .field-tags,
-#fields .field-props,
-#fields .field[data-full-width="true"] {
+.fields-grid .field-tags,
+.fields-grid .field-props,
+.fields-grid .field[data-full-width="true"] {
   grid-column: 1 / -1;
 }
 

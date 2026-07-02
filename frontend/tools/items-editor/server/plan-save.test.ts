@@ -3,11 +3,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { planSave, planSaveCollection, reconstructRecord, type PlanSaveInput } from "./plan-save";
+import { planSaveCollection, reconstructRecord, type CatalogMeta } from "./plan-save";
+import type { SchemaBundle } from "../shared/validate-items";
 import { KNOWLEDGE_DESCRIPTOR } from "../shared/descriptors/knowledge";
 import { RESEARCH_DESCRIPTOR } from "../shared/descriptors/research";
 import { TERRAINS_DESCRIPTOR } from "../shared/descriptors/terrains";
 import { WORLD_OBJECTS_DESCRIPTOR } from "../shared/descriptors/world-objects";
+import { ITEMS_DESCRIPTOR } from "../shared/descriptors/items";
 import { COLLECTIONS } from "../shared/collection-registry";
 
 /**
@@ -15,30 +17,38 @@ import { COLLECTIONS } from "../shared/collection-registry";
  * write middleware" + "Path traversal blocked", design.md "ADR-2" +
  * "Security-property test approach").
  *
- * `planSave` is pure and never touches `fs` — the write target is decided
- * exclusively by `server/targets.ts::resolveTargets(repoRoot)`, which this
- * module does not even import. These tests prove that NO client-supplied
- * field, however path-like or traversal-shaped, ever reaches the write
- * plan or influences it in any way.
+ * `planSaveCollection` is pure and never touches `fs` — the write target is
+ * decided exclusively by
+ * `server/targets.ts::resolveCollectionTarget(repoRoot, collectionId)`,
+ * which this module does not even import. These tests prove that NO
+ * client-supplied field, however path-like or traversal-shaped, ever
+ * reaches the write plan or influences it in any way.
+ *
+ * The item-only `planSave`/`reconstructItem` tests were retired in Slice 5
+ * along with the functions they covered — the "items" block below (using
+ * `planSaveCollection`/`ITEMS_DESCRIPTOR`, mirroring the
+ * knowledge/research/terrains/world-objects blocks) reproduces every one of
+ * those security/validation assertions against the generalized path items
+ * now runs through, so no coverage is lost.
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..", "..", "..");
 const readJson = (p: string): unknown => JSON.parse(readFileSync(p, "utf-8"));
 
-const schemas: PlanSaveInput["schemas"] = {
+const schemas: SchemaBundle = {
   common: readJson(join(repoRoot, "schemas", "common.json")),
   catalog: readJson(join(repoRoot, "schemas", "catalog.json")),
 };
 
-const currentMeta: PlanSaveInput["currentMeta"] = {
+const currentMeta: CatalogMeta = {
   catalogVersion: "0.1.0",
   game: "Isla Misteriosa",
   slice: "MVP 0.1 — Vertical Slice jugable",
   collections: ["terrains", "items", "world-objects", "knowledge", "actions", "research"],
 };
 
-const validItem = {
+const validItem: Record<string, unknown> = {
   id: "small_stone",
   name: "Piedra pequeña",
   description: "Una piedra dura.",
@@ -48,8 +58,8 @@ const validItem = {
   tags: ["stone"],
 };
 
-function input(): PlanSaveInput {
-  return { currentMeta, schemas };
+function itemsInput() {
+  return { descriptor: ITEMS_DESCRIPTOR, defName: COLLECTIONS.items?.defName ?? "ItemTypeDef", currentMeta, schemas };
 }
 
 // --- The load-bearing security proof --------------------------------------
@@ -64,19 +74,21 @@ test("plan-save.ts source: never imports fs or server/targets — it cannot writ
   assert.equal(/["']\.\/targets["']/.test(importLines), false, "must not import ./targets");
 });
 
-test("planSave: hostile path/file/target/traversal fields on the body are completely IGNORED", () => {
+// --- items (Slice 5) — proves planSaveCollection/reconstructRecord on the ---
+// migrated collection reproduces every security/validation property the
+// retired item-only planSave/reconstructItem had.
+
+test("planSaveCollection (items): hostile path/file/target/traversal fields on the body are completely IGNORED", () => {
   const hostileBody = {
-    items: [validItem],
+    records: [validItem],
     path: "../../etc/passwd",
     file: "/etc/passwd",
     target: "../../../root/.ssh/authorized_keys",
     filePath: "../../../../catalog/items.json",
     __proto__: { polluted: true },
   };
-  const result = planSave(hostileBody, input());
+  const result = planSaveCollection(hostileBody, itemsInput());
   assert.equal(result.ok, true);
-  // The write plan must contain no trace of any hostile string anywhere
-  // in its serialized output — proving those fields were never read.
   const serialized = JSON.stringify(result);
   for (const hostileValue of [
     "../../etc/passwd",
@@ -88,56 +100,51 @@ test("planSave: hostile path/file/target/traversal fields on the body are comple
   }
 });
 
-test("planSave: only rawBody.items is consumed — a body with hostile fields and NO items is rejected, not redirected", () => {
-  const result = planSave({ path: "../../etc/passwd", file: "/etc/passwd" }, input());
+test("planSaveCollection (items): only rawBody.records is consumed — a body with hostile fields and NO records is rejected, not redirected", () => {
+  const result = planSaveCollection({ path: "../../etc/passwd", file: "/etc/passwd" }, itemsInput());
   assert.equal(result.ok, false);
 });
 
-test("planSave: a non-object rawBody (string/number/null/array) is rejected safely", () => {
+test("planSaveCollection (items): a non-object rawBody (string/number/null/array) is rejected safely", () => {
   for (const bad of [null, "not-an-object", 42, ["array", "not", "object"]]) {
-    const result = planSave(bad, input());
+    const result = planSaveCollection(bad, itemsInput());
     assert.equal(result.ok, false);
   }
 });
 
-// --- Validation gate runs BEFORE any write plan is produced ---------------
-
-test("planSave: rejects a schema-invalid item (shape.w violates minimum:1) — no write plan is produced", () => {
-  const result = planSave({ items: [{ ...validItem, shape: { w: 0, h: 1 } }] }, input());
+test("planSaveCollection (items): rejects a schema-invalid item (shape.w violates minimum:1) — no write plan is produced", () => {
+  const result = planSaveCollection({ records: [{ ...validItem, shape: { w: 0, h: 1 } }] }, itemsInput());
   assert.equal(result.ok, false);
   if (!result.ok) {
     assert.ok(result.errors.length > 0);
     assert.ok(result.errors.some((e) => e.instancePath.includes("shape/w")));
   }
-  assert.equal("itemsJson" in result, false);
+  assert.equal("dataJson" in result, false);
   assert.equal("metaJson" in result, false);
 });
 
-test("planSave: rejects an item with an extra field (additionalProperties: false) — no write plan is produced", () => {
-  const result = planSave({ items: [{ ...validItem, path: "../../etc/passwd" }] }, input());
+test("planSaveCollection (items): rejects an item with an extra field (additionalProperties: false) — no write plan is produced", () => {
+  const result = planSaveCollection({ records: [{ ...validItem, path: "../../etc/passwd" }] }, itemsInput());
   assert.equal(result.ok, false);
 });
 
-test("planSave: rejects duplicate ids within the items array — no write plan is produced", () => {
-  const result = planSave({ items: [validItem, { ...validItem }] }, input());
+test("planSaveCollection (items): rejects duplicate ids within the records array — no write plan is produced", () => {
+  const result = planSaveCollection({ records: [validItem, { ...validItem }] }, itemsInput());
   assert.equal(result.ok, false);
   if (!result.ok) {
     assert.ok(result.errors.some((e) => e.message.includes("small_stone")));
   }
-  assert.equal("itemsJson" in result, false);
+  assert.equal("dataJson" in result, false);
 });
 
-test("planSave: a rejected save never bumps catalogVersion (spec 'Rejected save does not bump version')", () => {
-  const result = planSave({ items: [{ ...validItem, shape: { w: 0, h: 1 } }] }, input());
+test("planSaveCollection (items): a rejected save never bumps catalogVersion (spec 'Rejected save does not bump version')", () => {
+  const result = planSaveCollection({ records: [{ ...validItem, shape: { w: 0, h: 1 } }] }, itemsInput());
   assert.equal(result.ok, false);
-  // The only way a version bump could leak is via a metaJson field — confirm it is absent.
   assert.equal("metaJson" in result, false);
 });
 
-// --- Happy path -------------------------------------------------------------
-
-test("planSave: a valid save bumps catalogVersion and preserves other meta fields", () => {
-  const result = planSave({ items: [validItem] }, input());
+test("planSaveCollection (items): a valid save bumps catalogVersion and preserves other meta fields", () => {
+  const result = planSaveCollection({ records: [validItem] }, itemsInput());
   assert.equal(result.ok, true);
   if (result.ok) {
     assert.equal(result.catalogVersion, "0.1.1");
@@ -146,39 +153,43 @@ test("planSave: a valid save bumps catalogVersion and preserves other meta field
     assert.equal(meta.catalogVersion, "0.1.1");
     assert.equal(meta.game, "Isla Misteriosa");
     assert.deepEqual(meta.collections, currentMeta.collections);
-    const items = JSON.parse(result.itemsJson);
-    assert.equal(items.length, 1);
-    assert.equal(items[0].id, "small_stone");
+    const records = JSON.parse(result.dataJson);
+    assert.equal(records.length, 1);
+    assert.equal(records[0].id, "small_stone");
   }
 });
 
-test("planSave: written items never include a stray field, even if input carried one that passed no schema check by accident", () => {
-  // reconstructItem only ever copies known ItemTypeDef fields (defense in
-  // depth beyond ajv's additionalProperties: false).
-  const result = planSave({ items: [{ ...validItem, durability: 5 }] }, input());
-  assert.equal(result.ok, true);
-  if (result.ok) {
-    const items = JSON.parse(result.itemsJson);
-    assert.deepEqual(Object.keys(items[0]).sort(), [
-      "description",
-      "durability",
-      "id",
-      "name",
-      "properties",
-      "rotatable",
-      "shape",
-      "tags",
-    ]);
-  }
+test("reconstructRecord (items): copies ONLY descriptor keys — an extra/unknown field on the raw input is stripped", () => {
+  const raw = { ...validItem, durability: 5, path: "../../etc/passwd" };
+  const record = reconstructRecord(ITEMS_DESCRIPTOR, raw);
+  assert.deepEqual(Object.keys(record).sort(), ["description", "durability", "id", "name", "properties", "rotatable", "shape", "tags"]);
+  assert.equal(JSON.stringify(record).includes("etc/passwd"), false);
 });
 
-test("planSave: an absent optional (durability) is omitted from the written item, not null", () => {
-  const result = planSave({ items: [validItem] }, input());
-  assert.equal(result.ok, true);
-  if (result.ok) {
-    const items = JSON.parse(result.itemsJson);
-    assert.equal("durability" in items[0], false);
-  }
+test("reconstructRecord (items): an absent optional (durability) is omitted from the output, not null", () => {
+  const record = reconstructRecord(ITEMS_DESCRIPTOR, validItem);
+  assert.equal("durability" in record, false);
+});
+
+test("reconstructRecord (items): the `shape`-kind field is deep-cloned, not a shared reference", () => {
+  const shape = { w: 2, h: 3 };
+  const record = reconstructRecord(ITEMS_DESCRIPTOR, { ...validItem, shape });
+  assert.notEqual(record.shape, shape);
+  assert.deepEqual(record.shape, shape);
+});
+
+test("reconstructRecord (items): the `numberMap`-kind field (properties) is deep-cloned, not a shared reference", () => {
+  const properties = { hardness: 2 };
+  const record = reconstructRecord(ITEMS_DESCRIPTOR, { ...validItem, properties });
+  assert.notEqual(record.properties, properties);
+  assert.deepEqual(record.properties, properties);
+});
+
+test("reconstructRecord (items): the `tags`-kind field is deep-cloned, not a shared reference", () => {
+  const tags = ["stone"];
+  const record = reconstructRecord(ITEMS_DESCRIPTOR, { ...validItem, tags });
+  assert.notEqual(record.tags, tags);
+  assert.deepEqual(record.tags, tags);
 });
 
 // --- reconstructRecord / planSaveCollection (design.md "3. Server generalization") ---

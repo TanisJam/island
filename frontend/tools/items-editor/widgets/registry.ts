@@ -8,7 +8,14 @@ import { createEnumField } from "./enum-field";
 import { createStringMapField } from "./string-map-field";
 import { createRawJsonField } from "./raw-json-field";
 import { createShapeField } from "./shape-field";
-import { createBooleanFieldAdapter, createNumberFieldAdapter, createTagsFieldAdapter, createTextFieldAdapter } from "./adapters";
+import { createPropsField } from "./props-field";
+import {
+  createBooleanFieldAdapter,
+  createNumberFieldAdapter,
+  createNumberMapFieldAdapter,
+  createTagsFieldAdapter,
+  createTextFieldAdapter,
+} from "./adapters";
 
 /**
  * `FieldKind -> WidgetFactory` renderer registry (design.md "1. Chosen
@@ -16,12 +23,13 @@ import { createBooleanFieldAdapter, createNumberFieldAdapter, createTagsFieldAda
  * `createFieldWidget(descriptor, domId)` once per descriptor field — no
  * collection-specific branching anywhere in the engine.
  *
- * The 6 kinds from Slice 1-3 (`text`, `multiline`, `number`, `boolean`,
- * `tags`, `enum`) plus the 3 new Slice 4 widgets (`stringMap`, `rawJson`,
- * `shape`) are registered here. `numberMap` registers in Slice 5 when
- * `items` migrates onto the engine — a descriptor referencing an
- * unregistered kind throws loudly at mount time rather than silently
- * rendering nothing.
+ * All 10 `FieldKind`s are now registered: the 6 from Slice 1-3 (`text`,
+ * `multiline`, `number`, `boolean`, `tags`, `enum`), the 3 from Slice 4
+ * (`stringMap`, `rawJson`, `shape`), and `numberMap` (Slice 5, `items`
+ * migration) — a thin `createNumberMapFieldAdapter` wrapper over the
+ * EXISTING `props-field.ts` (built in Slice 1, unused as a registry entry
+ * until `items` needed it). A descriptor referencing an unregistered kind
+ * throws loudly at mount time rather than silently rendering nothing.
  */
 export type WidgetFactory = (descriptor: FieldDescriptor, domId: string) => FieldWidget;
 
@@ -41,6 +49,7 @@ export const WIDGET_REGISTRY: Partial<Record<FieldKind, WidgetFactory>> = {
   stringMap: (d, id) => createStringMapField({ id, label: d.label, required: d.required, helperText: d.helperText }),
   rawJson: (d, id) => createRawJsonField({ id, label: d.label, required: d.required, helperText: d.helperText }),
   shape: (d, id) => createShapeField({ id, label: d.label, required: d.required, optionalObject: d.optionalObject, helperText: d.helperText }),
+  numberMap: (d, id) => createNumberMapFieldAdapter(createPropsField({ id, label: d.label, required: d.required })),
 };
 
 export function createFieldWidget(descriptor: FieldDescriptor, domId: string): FieldWidget {

@@ -46,7 +46,7 @@
             <div id="texture-panel-mount"></div>
           </section>
 
-          <div id="fields"></div>
+          <div id="fields" class="fields-grid"></div>
 
           <div class="detail-actions">
             <button id="delete-item-btn" type="button" class="btn btn-danger">Delete item</button>
@@ -62,11 +62,13 @@
     <!--
       Generic descriptor-driven pane (design.md "1. Chosen architecture —
       Layer 4: Generic engine"). Mounted by `engine.ts` for any collection
-      with a registered descriptor — only `knowledge` this slice (Slice 1).
-      No texture-panel section here: `knowledge`'s atlasKind is null, so the
-      sprite panel never mounts for it (spec "Texture panel mounts by
-      atlasKind"). Ids are collection-agnostic ("record-*"), distinct from
-      the items-pane's item-specific ids above.
+      with a registered descriptor — `knowledge` was the first (Slice 1);
+      by Slice 5 ALL FIVE collections (including `items`, above) mount
+      through this same engine. No texture-panel section here:
+      `knowledge`'s atlasKind is null, so the sprite panel never mounts for
+      it (spec "Texture panel mounts by atlasKind"). Ids are
+      collection-agnostic ("record-*"), distinct from the items-pane's
+      original ids above.
     -->
     <main id="knowledge-pane" class="layout" hidden>
       <section class="master-pane" aria-label="Knowledge list">
@@ -89,7 +91,7 @@
             <ul id="generic-error-summary-list"></ul>
           </div>
 
-          <div id="generic-fields"></div>
+          <div id="generic-fields" class="fields-grid"></div>
 
           <div class="detail-actions">
             <button id="delete-record-btn" type="button" class="btn btn-danger">Delete entry</button>
@@ -131,7 +133,7 @@
             <ul id="research-error-summary-list"></ul>
           </div>
 
-          <div id="research-fields"></div>
+          <div id="research-fields" class="fields-grid"></div>
 
           <div class="detail-actions">
             <button id="delete-research-record-btn" type="button" class="btn btn-danger">Delete entry</button>
@@ -180,7 +182,7 @@
             <div id="terrains-texture-panel-mount"></div>
           </section>
 
-          <div id="terrains-fields"></div>
+          <div id="terrains-fields" class="fields-grid"></div>
 
           <div class="detail-actions">
             <button id="delete-terrains-record-btn" type="button" class="btn btn-danger">Delete entry</button>
@@ -229,7 +231,7 @@
             <div id="world-objects-texture-panel-mount"></div>
           </section>
 
-          <div id="world-objects-fields"></div>
+          <div id="world-objects-fields" class="fields-grid"></div>
 
           <div class="detail-actions">
             <button id="delete-world-objects-record-btn" type="button" class="btn btn-danger">Delete entry</button>
