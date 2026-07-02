@@ -225,3 +225,27 @@ const itemsEls: EngineElements = {
   texturePanelMountEl: mustEl<HTMLDivElement>("texture-panel-mount"),
 };
 void mountCollectionEngine(ITEMS_DESCRIPTOR, itemsEls).boot();
+
+/**
+ * Active-collection persistence. The switcher otherwise always reopens on
+ * `items` after a reload; this remembers the last tab the user was on
+ * (localStorage) and re-selects it on load. Restoring simply re-fires the
+ * existing tab handler via `.click()`, so pane visibility AND the lazy
+ * engine mount are reused with no duplicated logic. `items` is the eager
+ * default, so a stored `items` (or an unknown/removed id) needs no action.
+ */
+const ACTIVE_TAB_KEY = "items-editor:active-collection";
+const tabButtons: ReadonlyArray<readonly [string, HTMLButtonElement]> = [
+  ["items", itemsTabBtn],
+  ["knowledge", knowledgeTabBtn],
+  ["research", researchTabBtn],
+  ["terrains", terrainsTabBtn],
+  ["world-objects", worldObjectsTabBtn],
+];
+for (const [id, btn] of tabButtons) {
+  btn.addEventListener("click", () => localStorage.setItem(ACTIVE_TAB_KEY, id));
+}
+const storedTab = localStorage.getItem(ACTIVE_TAB_KEY);
+if (storedTab && storedTab !== "items") {
+  tabButtons.find(([id]) => id === storedTab)?.[1].click();
+}
