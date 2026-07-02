@@ -623,3 +623,137 @@ test("trailing-click suppressor: disarms via the timeout fallback if no compat c
     },
   );
 });
+
+// --- Full-footprint highlight + bindGrid/unbindGrid lifecycle (tasks.md T8c,
+// design.md Decision 3/4) ----------------------------------------------------
+
+test("full-footprint highlight: hovering a multi-cell footprint's anchor toggles drop-ok on EVERY covered cell, not just the anchor; clearHighlight clears ALL of them", () => {
+  let hovered: FakeElement | null = null;
+  withFakeDom(
+    () => hovered,
+    () => {
+      const draggedItem: ItemInstance = { id: "it1", itemTypeId: "pole", location: { type: "player_inventory", playerId: "p1", x: 0, y: 0, rotation: 0 } };
+      const { deps } = makeDeps({ getSnapshot: () => snapshotWith([draggedItem]), catalog: FIXTURE_CATALOG });
+      const controller = createDragController(deps);
+
+      const sourceCell = new FakeElement();
+      controller.bindCell(sourceCell as unknown as HTMLElement, { kind: "inventory", x: 0, y: 0, occupant: draggedItem });
+
+      // The footprint anchored at (2,0) for a 1x2 item covers (2,0) and (2,1).
+      const anchorCell = new FakeElement();
+      const secondCell = new FakeElement();
+      controller.bindCell(anchorCell as unknown as HTMLElement, { kind: "inventory", x: 2, y: 0 });
+      controller.bindCell(secondCell as unknown as HTMLElement, { kind: "inventory", x: 2, y: 1 });
+      const cells = new Map<string, HTMLElement>([
+        ["2,0", anchorCell as unknown as HTMLElement],
+        ["2,1", secondCell as unknown as HTMLElement],
+      ]);
+      controller.bindGrid({ kind: "inventory", dims: { width: 4, height: 4 }, cells });
+
+      fire(sourceCell, "pointerdown", { clientX: 0, clientY: 0, pointerId: 1 });
+      hovered = anchorCell;
+      fire(sourceCell, "pointermove", { clientX: 50, clientY: 0, pointerId: 1 }); // crosses the drag threshold
+
+      assert.ok(anchorCell.classes.has("drop-ok"), "the anchor cell is highlighted");
+      assert.ok(secondCell.classes.has("drop-ok"), "the SECOND footprint cell is ALSO highlighted, not just the anchor");
+
+      // pointercancel (not pointerup) ends the drag via the exact same
+      // `endDrag()`/`clearHighlight()` path, without arming the trailing-
+      // click suppressor — irrelevant to what this test asserts.
+      fire(sourceCell, "pointercancel", { pointerId: 1 });
+      assert.ok(!anchorCell.classes.has("drop-ok"), "clearHighlight removed the class from the anchor cell");
+      assert.ok(!secondCell.classes.has("drop-ok"), "clearHighlight removed the class from the SECOND cell too, not just the anchor");
+    },
+  );
+});
+
+test("full-footprint highlight: a near-edge anchor colors only the IN-BOUNDS covered cells (the rest have no DOM element to color)", () => {
+  let hovered: FakeElement | null = null;
+  withFakeDom(
+    () => hovered,
+    () => {
+      const draggedItem: ItemInstance = { id: "it1", itemTypeId: "pole", location: { type: "player_inventory", playerId: "p1", x: 0, y: 0, rotation: 0 } };
+      const { deps } = makeDeps({ getSnapshot: () => snapshotWith([draggedItem]), catalog: FIXTURE_CATALOG });
+      const controller = createDragController(deps);
+
+      const sourceCell = new FakeElement();
+      controller.bindCell(sourceCell as unknown as HTMLElement, { kind: "inventory", x: 0, y: 0, occupant: draggedItem });
+
+      // Anchored at (3,3) in a 4x4 grid, a 1x2 item's footprint is (3,3) and
+      // (3,4) — (3,4) is out of bounds, so the coordinate map only has an
+      // element for (3,3) (mirroring what a real render would produce).
+      const anchorCell = new FakeElement();
+      controller.bindCell(anchorCell as unknown as HTMLElement, { kind: "inventory", x: 3, y: 3 });
+      const cells = new Map<string, HTMLElement>([["3,3", anchorCell as unknown as HTMLElement]]);
+      controller.bindGrid({ kind: "inventory", dims: { width: 4, height: 4 }, cells });
+
+      fire(sourceCell, "pointerdown", { clientX: 0, clientY: 0, pointerId: 1 });
+      hovered = anchorCell;
+      fire(sourceCell, "pointermove", { clientX: 50, clientY: 50, pointerId: 1 });
+
+      assert.ok(anchorCell.classes.has("drop-bad"), "in-bounds portion of an out-of-bounds footprint paints red");
+      assert.ok(!anchorCell.classes.has("drop-ok"));
+    },
+  );
+});
+
+test("full-footprint highlight: a single-cell item still highlights correctly on its 1-cell footprint", () => {
+  let hovered: FakeElement | null = null;
+  withFakeDom(
+    () => hovered,
+    () => {
+      const draggedItem: ItemInstance = { id: "it1", itemTypeId: "stone", location: { type: "player_inventory", playerId: "p1", x: 0, y: 0, rotation: 0 } };
+      const { deps } = makeDeps({ getSnapshot: () => snapshotWith([draggedItem]), catalog: FIXTURE_CATALOG });
+      const controller = createDragController(deps);
+
+      const sourceCell = new FakeElement();
+      controller.bindCell(sourceCell as unknown as HTMLElement, { kind: "inventory", x: 0, y: 0, occupant: draggedItem });
+
+      const targetCell = new FakeElement();
+      controller.bindCell(targetCell as unknown as HTMLElement, { kind: "inventory", x: 1, y: 1 });
+      const cells = new Map<string, HTMLElement>([["1,1", targetCell as unknown as HTMLElement]]);
+      controller.bindGrid({ kind: "inventory", dims: { width: 4, height: 4 }, cells });
+
+      fire(sourceCell, "pointerdown", { clientX: 0, clientY: 0, pointerId: 1 });
+      hovered = targetCell;
+      fire(sourceCell, "pointermove", { clientX: 50, clientY: 50, pointerId: 1 });
+
+      assert.ok(targetCell.classes.has("drop-ok"), "a 1x1 dragged item still highlights its single covered cell");
+    },
+  );
+});
+
+test("unbindGrid: after unbinding a surface's GridContext, a subsequent highlight lookup for that key MISSES cleanly (no throw, no class applied)", () => {
+  let hovered: FakeElement | null = null;
+  withFakeDom(
+    () => hovered,
+    () => {
+      const draggedItem: ItemInstance = { id: "it1", itemTypeId: "stone", location: { type: "surface", surfaceId: "wo_x", x: 0, y: 0, rotation: 0 } };
+      const { deps } = makeDeps({ getSnapshot: () => snapshotWith([draggedItem]), catalog: FIXTURE_CATALOG });
+      const controller = createDragController(deps);
+
+      const sourceCell = new FakeElement();
+      controller.bindCell(sourceCell as unknown as HTMLElement, { kind: "surface", surfaceId: "wo_x", x: 0, y: 0, occupant: draggedItem });
+
+      const targetCell = new FakeElement();
+      controller.bindCell(targetCell as unknown as HTMLElement, { kind: "surface", surfaceId: "wo_x", x: 1, y: 0 });
+      const cells = new Map<string, HTMLElement>([["1,0", targetCell as unknown as HTMLElement]]);
+      controller.bindGrid({ kind: "surface", surfaceId: "wo_x", dims: { width: 3, height: 3 }, cells });
+
+      fire(sourceCell, "pointerdown", { clientX: 0, clientY: 0, pointerId: 1 });
+      hovered = targetCell;
+      fire(sourceCell, "pointermove", { clientX: 20, clientY: 0, pointerId: 1 }); // crosses the drag threshold
+      assert.ok(targetCell.classes.has("drop-ok"), "highlight applied while the GridContext is bound");
+      // pointercancel ends this drag via the same endDrag() path, without
+      // arming the trailing-click suppressor — irrelevant to this test.
+      fire(sourceCell, "pointercancel", { pointerId: 1 });
+
+      controller.unbindGrid("surface:wo_x");
+
+      fire(sourceCell, "pointerdown", { clientX: 0, clientY: 0, pointerId: 1 });
+      hovered = targetCell;
+      assert.doesNotThrow(() => fire(sourceCell, "pointermove", { clientX: 20, clientY: 0, pointerId: 1 }));
+      assert.ok(!targetCell.classes.has("drop-ok"), "no class applied — the grid Map no longer holds the key after unbindGrid");
+    },
+  );
+});
