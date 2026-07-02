@@ -1,5 +1,5 @@
 import type { Position } from "../contract";
-import type { AssetResolver } from "./assets";
+import type { AssetResolver, SpriteRegion } from "./assets";
 import type { Renderer } from "./renderer";
 import type { Frame, RenderEntity } from "../view/viewstate";
 import { cameraOffset } from "./camera";
@@ -35,6 +35,41 @@ function drawEmoji(ctx: CanvasRenderingContext2D, pos: Position, emoji: string, 
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(emoji, pos.x * PX + PX / 2, pos.y * PX + PX / 2 + 1);
+}
+
+/**
+ * Pure bottom-aligned draw-rect math for a sprite region (design.md
+ * "Consumer + draw math"). `dy` anchors the region's BOTTOM edge to the
+ * bottom of the logical tile `(tileX, tileY)`, extending upward for regions
+ * taller than one tile; `dx` always aligns to the tile's left edge, so wider
+ * regions extend rightward. A 16x16 (single-tile) region degenerates to
+ * `dy = tileY * px` (no offset) — same formula serves both cases, no
+ * special-casing needed (spec "Bottom-aligned anchor for multi-cell
+ * sprites").
+ */
+export function spriteDrawRect(
+  tileX: number,
+  tileY: number,
+  region: { sw: number; sh: number },
+  px: number,
+  scale: number,
+): { dx: number; dy: number; dw: number; dh: number } {
+  const dw = region.sw * scale;
+  const dh = region.sh * scale;
+  const dx = tileX * px;
+  const dy = tileY * px + px - dh;
+  return { dx, dy, dw, dh };
+}
+
+/** Thin drawImage shell (design.md "Testability hooks" — kept untested,
+ * `spriteDrawRect` carries all the logic worth unit-testing). Disables
+ * smoothing per-call so pixel art stays crisp regardless of any other
+ * context state (`#game`'s `image-rendering: pixelated` CSS already covers
+ * the common case — this is defense in depth). */
+function drawSprite(ctx: CanvasRenderingContext2D, pos: Position, region: SpriteRegion): void {
+  const rect = spriteDrawRect(pos.x, pos.y, region, PX, SCALE);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(region.image, region.sx, region.sy, region.sw, region.sh, rect.dx, rect.dy, rect.dw, rect.dh);
 }
 
 /** Small "×N" badge in the bottom-right of a tile, used to show how many items a pile
@@ -81,17 +116,19 @@ export function createCanvasRenderer(ctx: CanvasRenderingContext2D, assets: Asse
   function drawObjectOrItem(entity: RenderEntity): void {
     if (entity.visibility === "unseen") return;
     const visual = assets.resolve(entity.kind, entity.typeId, entity.state);
-    drawEmoji(ctx, entity.renderPos, visual.glyph ?? "", visual.scale);
+    if (visual.sprite) drawSprite(ctx, entity.renderPos, visual.sprite);
+    else drawEmoji(ctx, entity.renderPos, visual.glyph ?? "", visual.scale);
   }
 
   function drawPile(entity: RenderEntity): void {
     if (entity.visibility === "unseen") return;
     const visual = assets.resolve("pile", entity.typeId);
-    drawEmoji(ctx, entity.renderPos, visual.glyph ?? "", visual.scale);
+    if (visual.sprite) drawSprite(ctx, entity.renderPos, visual.sprite);
+    else drawEmoji(ctx, entity.renderPos, visual.glyph ?? "", visual.scale);
     if (entity.count !== undefined) drawCount(ctx, entity.renderPos, entity.count);
   }
 
-  // Jugador: un halo suave para que "vos" se distinga, y el emoji encima.
+  // Jugador: un halo suave para que "vos" se distinga, y el sprite/emoji encima.
   // Always drawn regardless of `visibility` — matches the previous behavior,
   // where the player's own position was never fog-culled.
   function drawPlayer(entity: RenderEntity): void {
@@ -101,7 +138,8 @@ export function createCanvasRenderer(ctx: CanvasRenderingContext2D, assets: Asse
     ctx.arc(p.x * PX + PX / 2, p.y * PX + PX / 2, PX * 0.44, 0, Math.PI * 2);
     ctx.fill();
     const visual = assets.resolve("player", entity.typeId);
-    drawEmoji(ctx, p, visual.glyph ?? "", visual.scale);
+    if (visual.sprite) drawSprite(ctx, p, visual.sprite);
+    else drawEmoji(ctx, p, visual.glyph ?? "", visual.scale);
   }
 
   return {
