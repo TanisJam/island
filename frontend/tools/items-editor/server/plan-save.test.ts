@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { planSave, planSaveCollection, reconstructRecord, type PlanSaveInput } from "./plan-save";
 import { KNOWLEDGE_DESCRIPTOR } from "../shared/descriptors/knowledge";
+import { RESEARCH_DESCRIPTOR } from "../shared/descriptors/research";
 import { COLLECTIONS } from "../shared/collection-registry";
 
 /**
@@ -263,5 +264,71 @@ test("planSaveCollection: rejects duplicate ids within the records array", () =>
   assert.equal(result.ok, false);
   if (!result.ok) {
     assert.ok(result.errors.some((e) => e.message.includes("idea_binding")));
+  }
+});
+
+// --- research (Slice 2) — proves reconstructRecord/planSaveCollection also ---
+// generalize to a SECOND non-item collection, not just knowledge (mirrors the
+// knowledge block above exactly).
+
+const validResearch: Record<string, unknown> = {
+  id: "heat_containment",
+  name: "Contención de calor",
+  status: "hidden",
+  revealedBy: ["discovery_fire_lit"],
+  teaserThought: "El fuego se escapa rápido.",
+};
+
+test("reconstructRecord (research): copies ONLY descriptor keys — an extra/unknown field on the raw input is stripped", () => {
+  const raw = { ...validResearch, path: "../../etc/passwd", file: "/etc/passwd" };
+  const record = reconstructRecord(RESEARCH_DESCRIPTOR, raw);
+  assert.deepEqual(Object.keys(record).sort(), ["id", "name", "revealedBy", "status", "teaserThought"]);
+  assert.equal(JSON.stringify(record).includes("etc/passwd"), false);
+});
+
+test("reconstructRecord (research): an absent optional field is omitted from the output, not null", () => {
+  const { revealedBy: _revealedBy, teaserThought: _teaserThought, ...withoutOptionals } = validResearch;
+  const record = reconstructRecord(RESEARCH_DESCRIPTOR, withoutOptionals);
+  assert.equal("revealedBy" in record, false);
+  assert.equal("teaserThought" in record, false);
+});
+
+test("reconstructRecord (research): the `tags`-kind field (revealedBy) is deep-cloned, not a shared reference", () => {
+  const revealedBy = ["discovery_fire_lit"];
+  const record = reconstructRecord(RESEARCH_DESCRIPTOR, { ...validResearch, revealedBy });
+  assert.notEqual(record.revealedBy, revealedBy);
+  assert.deepEqual(record.revealedBy, revealedBy);
+});
+
+test("planSaveCollection (research): a valid save bumps catalogVersion and writes only descriptor fields", () => {
+  const result = planSaveCollection(
+    { records: [validResearch] },
+    { descriptor: RESEARCH_DESCRIPTOR, defName: COLLECTIONS.research?.defName ?? "ResearchDef", currentMeta, schemas },
+  );
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.catalogVersion, "0.1.1");
+    const records = JSON.parse(result.dataJson);
+    assert.deepEqual(records[0], validResearch);
+  }
+});
+
+test("planSaveCollection (research): rejects a schema-invalid record (bad `status` enum) — no write plan is produced", () => {
+  const result = planSaveCollection(
+    { records: [{ ...validResearch, status: "not-a-real-status" }] },
+    { descriptor: RESEARCH_DESCRIPTOR, defName: COLLECTIONS.research?.defName ?? "ResearchDef", currentMeta, schemas },
+  );
+  assert.equal(result.ok, false);
+  assert.equal("dataJson" in result, false);
+});
+
+test("planSaveCollection (research): rejects duplicate ids within the records array", () => {
+  const result = planSaveCollection(
+    { records: [validResearch, { ...validResearch }] },
+    { descriptor: RESEARCH_DESCRIPTOR, defName: COLLECTIONS.research?.defName ?? "ResearchDef", currentMeta, schemas },
+  );
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.ok(result.errors.some((e) => e.message.includes("heat_containment")));
   }
 });

@@ -128,6 +128,22 @@ test("createCollectionSaveHandler: POST /knowledge writes catalog/knowledge.json
   });
 });
 
+test("createCollectionSaveHandler: POST /research writes catalog/research.json and bumps catalogVersion (Slice 2, second collection proving generalization)", async () => {
+  await withRepoRootFixture(async (root) => {
+    await withServer(createCollectionSaveHandler(root), async (baseUrl) => {
+      const validResearch = { id: "heat_containment", name: "Contención de calor", status: "hidden" };
+      const { status, json } = await post(`${baseUrl}/research`, { records: [validResearch, { ...validResearch, id: "idea_shelter" }] });
+      assert.equal(status, 200);
+      assert.equal(json.ok, true);
+      assert.equal(json.catalogVersion, "0.1.1");
+      const onDisk = JSON.parse(readFileSync(join(root, "catalog", "research.json"), "utf-8"));
+      assert.equal(onDisk.length, 2);
+      const meta = JSON.parse(readFileSync(join(root, "catalog", "meta.json"), "utf-8"));
+      assert.equal(meta.catalogVersion, "0.1.1");
+    });
+  });
+});
+
 test("createCollectionSaveHandler: POST /not-a-real-collection returns 404 and touches no file", async () => {
   await withRepoRootFixture(async (root) => {
     const before = readFileSync(join(root, "catalog", "meta.json"), "utf-8");

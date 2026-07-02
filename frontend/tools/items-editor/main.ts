@@ -10,6 +10,7 @@ import { createPropsField, type PropsFieldWidget } from "./widgets/props-field";
 import { createTexturePanel } from "./texture-panel";
 import { mountCollectionEngine, type EngineElements } from "./engine";
 import { KNOWLEDGE_DESCRIPTOR } from "./shared/descriptors/knowledge";
+import { RESEARCH_DESCRIPTOR } from "./shared/descriptors/research";
 
 /**
  * Master-detail wiring for the items editor (design.md "Components & Data
@@ -460,19 +461,22 @@ async function save(): Promise<void> {
 /**
  * Collection switcher (design.md "1. Chosen architecture — Layer 4",
  * spec "Descriptor-Driven Form Engine"). Toggles which top-level `<main>`
- * pane is visible; the `knowledge` engine mounts lazily on first switch
- * (not on page load) so items — the default/only view before this
- * slice — keeps booting exactly as it always has. `items` intentionally
+ * pane is visible; each generic collection's engine mounts lazily on first
+ * switch to it (not on page load) so items — the default/only view before
+ * Slice 1 — keeps booting exactly as it always has. `items` intentionally
  * stays on its own hand-written path above; only Slice 5 migrates it onto
  * `engine.ts`.
  */
 const collectionSwitcherEl = mustEl<HTMLElement>("collection-switcher");
 const itemsTabBtn = mustEl<HTMLButtonElement>("collection-tab-items");
 const knowledgeTabBtn = mustEl<HTMLButtonElement>("collection-tab-knowledge");
+const researchTabBtn = mustEl<HTMLButtonElement>("collection-tab-research");
 const itemsPaneEl = mustEl<HTMLElement>("items-pane");
 const knowledgePaneEl = mustEl<HTMLElement>("knowledge-pane");
+const researchPaneEl = mustEl<HTMLElement>("research-pane");
 
 let knowledgeEngineBooted = false;
+let researchEngineBooted = false;
 
 function activateTab(activeBtn: HTMLButtonElement, ...inactiveBtns: HTMLButtonElement[]): void {
   activeBtn.classList.add("active");
@@ -486,13 +490,15 @@ function activateTab(activeBtn: HTMLButtonElement, ...inactiveBtns: HTMLButtonEl
 itemsTabBtn.addEventListener("click", () => {
   itemsPaneEl.hidden = false;
   knowledgePaneEl.hidden = true;
-  activateTab(itemsTabBtn, knowledgeTabBtn);
+  researchPaneEl.hidden = true;
+  activateTab(itemsTabBtn, knowledgeTabBtn, researchTabBtn);
 });
 
 knowledgeTabBtn.addEventListener("click", () => {
   itemsPaneEl.hidden = true;
   knowledgePaneEl.hidden = false;
-  activateTab(knowledgeTabBtn, itemsTabBtn);
+  researchPaneEl.hidden = true;
+  activateTab(knowledgeTabBtn, itemsTabBtn, researchTabBtn);
   if (!knowledgeEngineBooted) {
     knowledgeEngineBooted = true;
     const knowledgeEls: EngineElements = {
@@ -512,6 +518,33 @@ knowledgeTabBtn.addEventListener("click", () => {
       saveStatusEl: mustEl<HTMLSpanElement>("generic-save-status"),
     };
     void mountCollectionEngine(KNOWLEDGE_DESCRIPTOR, knowledgeEls).boot();
+  }
+});
+
+researchTabBtn.addEventListener("click", () => {
+  itemsPaneEl.hidden = true;
+  knowledgePaneEl.hidden = true;
+  researchPaneEl.hidden = false;
+  activateTab(researchTabBtn, itemsTabBtn, knowledgeTabBtn);
+  if (!researchEngineBooted) {
+    researchEngineBooted = true;
+    const researchEls: EngineElements = {
+      catalogVersionEl,
+      addBtn: mustEl<HTMLButtonElement>("add-research-record-btn"),
+      listEl: mustEl<HTMLUListElement>("research-record-list"),
+      masterEmptyEl: mustEl<HTMLDivElement>("research-master-empty"),
+      masterLoadingEl: mustEl<HTMLDivElement>("research-master-loading"),
+      masterErrorEl: mustEl<HTMLDivElement>("research-master-error"),
+      detailEmptyEl: mustEl<HTMLDivElement>("research-detail-empty"),
+      detailFormEl: mustEl<HTMLFormElement>("research-detail-form"),
+      errorSummaryEl: mustEl<HTMLDivElement>("research-error-summary"),
+      errorSummaryListEl: mustEl<HTMLUListElement>("research-error-summary-list"),
+      fieldsEl: mustEl<HTMLDivElement>("research-fields"),
+      deleteBtn: mustEl<HTMLButtonElement>("delete-research-record-btn"),
+      saveBtn: mustEl<HTMLButtonElement>("research-save-btn"),
+      saveStatusEl: mustEl<HTMLSpanElement>("research-save-status"),
+    };
+    void mountCollectionEngine(RESEARCH_DESCRIPTOR, researchEls).boot();
   }
 });
 void collectionSwitcherEl; // referenced only to fail fast via mustEl if index.html's markup drifts
