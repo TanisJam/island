@@ -7,6 +7,7 @@ import { createNumberField, parseRequiredNumber, parseOptionalNumber, type Numbe
 import { createBooleanField, type BooleanFieldWidget } from "./widgets/boolean-field";
 import { createTagsField, type TagsFieldWidget } from "./widgets/tags-field";
 import { createPropsField, type PropsFieldWidget } from "./widgets/props-field";
+import { createTexturePanel } from "./texture-panel";
 
 /**
  * Master-detail wiring for the items editor (design.md "Components & Data
@@ -44,6 +45,15 @@ const fieldsEl = mustEl<HTMLDivElement>("fields");
 const deleteItemBtn = mustEl<HTMLButtonElement>("delete-item-btn");
 const saveBtn = mustEl<HTMLButtonElement>("save-btn");
 const saveStatusEl = mustEl<HTMLSpanElement>("save-status");
+const texturePanelMountEl = mustEl<HTMLDivElement>("texture-panel-mount");
+
+/**
+ * The texture panel (design.md "Slice C") writes atlas.json via its own
+ * `/__save-atlas` POST — fully decoupled from `items`/`isDirty()`/
+ * `savedSnapshot` and the `/__save-items` flow above. It is only told which
+ * item is selected/deselected.
+ */
+const texturePanel = createTexturePanel({ mountEl: texturePanelMountEl });
 
 interface Fields {
   id: TextFieldWidget;
@@ -287,6 +297,7 @@ function selectItem(index: number): void {
   detailFormEl.hidden = false;
   renderItemList();
   updateSaveEnabled();
+  texturePanel.selectItem(item.id);
 }
 
 function clearErrorSummary(): void {
@@ -395,6 +406,7 @@ deleteItemBtn.addEventListener("click", () => {
   detailEmptyEl.hidden = false;
   clearErrorSummary();
   renderItemList();
+  texturePanel.clearSelection();
 });
 
 detailFormEl.addEventListener("submit", (e) => {

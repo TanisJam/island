@@ -204,6 +204,138 @@ textarea {
   color: var(--peligro);
 }
 
+.texture-panel {
+  margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--linea);
+}
+
+.texture-panel-heading {
+  margin: 0 0 12px;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #b9ac8c;
+}
+
+.texture-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tp-state {
+  color: #8a8171;
+  font-size: 14px;
+  padding: 12px 0;
+}
+
+.tp-error {
+  color: var(--peligro);
+}
+
+.tp-error-message {
+  margin: 0 0 8px;
+}
+
+.tp-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tp-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.tp-preview-box {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: repeating-conic-gradient(#22201c 0% 25%, #1c1a16 0% 50%) 0 0 / 16px 16px;
+  border: 1px solid var(--linea);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.tp-preview-canvas {
+  image-rendering: pixelated;
+}
+
+.tp-preview-empty {
+  padding: 8px;
+  font-size: 12px;
+  text-align: center;
+  color: #8a8171;
+}
+
+.tp-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.tp-zoom-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  min-height: 44px;
+  background: var(--panel);
+  border: 1px solid var(--linea);
+  border-radius: 6px;
+}
+
+.tp-readout {
+  font-variant-numeric: tabular-nums;
+  padding: 6px 10px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--linea);
+  border-radius: 6px;
+  color: var(--brasa);
+}
+
+.tp-canvas-wrap {
+  position: relative;
+  border: 1px solid var(--linea);
+  border-radius: 8px;
+  background: repeating-conic-gradient(#22201c 0% 25%, #1c1a16 0% 50%) 0 0 / 24px 24px;
+  overflow: auto;
+  max-height: 45vh;
+  min-height: 160px;
+}
+
+.tp-picker-canvas {
+  display: block;
+  image-rendering: pixelated;
+  cursor: crosshair;
+}
+
+.tp-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.tp-status {
+  font-size: 13px;
+  color: var(--peligro);
+}
+
+.tp-status-success {
+  color: var(--exito);
+}
+
 #fields {
   display: grid;
   grid-template-columns: 1fr 1fr;
