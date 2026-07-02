@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
+import { itemsEditorAtlasSavePlugin } from "./tools/items-editor/server/atlas-write-middleware";
 import { itemsEditorSavePlugin } from "./tools/items-editor/server/write-middleware";
 
 /**
@@ -15,6 +16,13 @@ import { itemsEditorSavePlugin } from "./tools/items-editor/server/write-middlew
  */
 export default defineConfig({
   root: fileURLToPath(new URL("./tools/items-editor", import.meta.url)),
+  // Serves the live `frontend/public/` tree (atlas.json + tileset PNG) so
+  // the texture panel reads/renders the exact files the game loads and the
+  // atlas-write middleware targets — zero staleness/divergence (design.md
+  // Slice B "B1 — publicDir"). `import.meta.url` here is this config file's
+  // own path (`frontend/vite.config.items-editor.ts`), so `./public`
+  // resolves to `frontend/public`.
+  publicDir: fileURLToPath(new URL("./public", import.meta.url)),
   server: {
     port: 5175,
   },
@@ -22,5 +30,5 @@ export default defineConfig({
     outDir: fileURLToPath(new URL("./dist-tool-items", import.meta.url)),
     emptyOutDir: true,
   },
-  plugins: [itemsEditorSavePlugin()],
+  plugins: [itemsEditorSavePlugin(), itemsEditorAtlasSavePlugin()],
 });
