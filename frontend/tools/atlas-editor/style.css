@@ -67,7 +67,7 @@ select {
 
 .layout {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: 1fr 320px;
   gap: 24px;
   padding: 24px;
   align-items: start;
@@ -144,4 +144,126 @@ select {
   min-height: 20px;
   font-size: 13px;
   color: #b9ac8c;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--madera);
+  border: 1px solid var(--linea);
+  border-radius: 8px;
+  padding: 16px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+}
+
+.sidebar-header h2 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+.hint {
+  margin: 0;
+  font-size: 12px;
+  color: #b9ac8c;
+}
+
+.type-section h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #b9ac8c;
+}
+
+.type-list {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.type-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  background: var(--panel);
+  border: 1px solid var(--linea);
+  border-radius: 6px;
+  cursor: pointer;
+  min-height: 36px;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease;
+}
+
+.type-item:hover {
+  border-color: var(--brasa);
+}
+
+.type-item:active {
+  background: #241f1a;
+}
+
+.type-item.active {
+  border-color: var(--brasa);
+  background: #2a2119;
+}
+
+.type-item.mapped {
+  color: var(--arena);
+}
+
+.mapped-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--brasa);
+  flex-shrink: 0;
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--linea);
+}
+
+.btn {
+  min-height: 40px;
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--linea);
+  cursor: pointer;
+  font-weight: 600;
+  transition:
+    transform 100ms ease,
+    background 150ms ease;
+}
+
+.btn:active {
+  transform: scale(0.98);
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.btn-secondary {
+  background: var(--panel);
+  color: var(--arena);
+}
+
+.btn-primary {
+  background: var(--brasa);
+  color: #241505;
+  border-color: var(--brasa);
 }

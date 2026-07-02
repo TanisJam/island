@@ -31,6 +31,35 @@
         </div>
         <div id="status" class="status" role="status" aria-live="polite"></div>
       </section>
+
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <h2>Catalog typeIds</h2>
+          <p class="hint">Pick a typeId, draw a selection on the left, then Assign.</p>
+        </div>
+
+        <div class="type-section">
+          <h3>Terrain</h3>
+          <ul id="list-terrain" class="type-list"></ul>
+        </div>
+        <div class="type-section">
+          <h3>Object</h3>
+          <ul id="list-object" class="type-list"></ul>
+        </div>
+        <div class="type-section">
+          <h3>Item</h3>
+          <ul id="list-item" class="type-list"></ul>
+        </div>
+        <div class="type-section">
+          <h3>Player</h3>
+          <ul id="list-player" class="type-list"></ul>
+        </div>
+
+        <div class="actions">
+          <button id="assign-btn" type="button" class="btn btn-secondary" disabled>Assign selection</button>
+          <button id="export-btn" type="button" class="btn btn-primary">Export atlas.json</button>
+        </div>
+      </aside>
     </main>
 
     <script type="module" src="./main.ts"></script>

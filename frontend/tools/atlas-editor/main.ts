@@ -1,4 +1,7 @@
 import { footprintFromDrag, pastDragThreshold, type Footprint, type Point } from "./picking";
+import { catalogTypeIdsByKind, type CatalogEntry } from "./catalog";
+import { buildAtlasExport, type Mapping } from "./atlas-export";
+import type { AtlasKind } from "../../src/render/assets";
 
 /** Picking grid size, matches the frozen atlas schema's `tile` field
  * (design.md "Atlas JSON schema (frozen)"). */
@@ -17,7 +20,15 @@ const canvas = mustEl<HTMLCanvasElement>("picking-canvas");
 const emptyState = mustEl<HTMLDivElement>("empty-state");
 const zoomSelect = mustEl<HTMLSelectElement>("zoom-select");
 const readout = mustEl<HTMLDivElement>("readout");
+const assignBtn = mustEl<HTMLButtonElement>("assign-btn");
+const exportBtn = mustEl<HTMLButtonElement>("export-btn");
 const statusEl = mustEl<HTMLDivElement>("status");
+const lists: Record<AtlasKind, HTMLUListElement> = {
+  terrain: mustEl<HTMLUListElement>("list-terrain"),
+  object: mustEl<HTMLUListElement>("list-object"),
+  item: mustEl<HTMLUListElement>("list-item"),
+  player: mustEl<HTMLUListElement>("list-player"),
+};
 
 const ctx: CanvasRenderingContext2D = (() => {
   const c = canvas.getContext("2d");
@@ -26,11 +37,16 @@ const ctx: CanvasRenderingContext2D = (() => {
 })();
 
 let image: HTMLImageElement | null = null;
+let imageFilename = "tileset.png";
 let zoom: number = DEFAULT_ZOOM;
 let dragStart: Point | null = null;
 let dragCurrent: Point | null = null;
 let isDragging = false;
 let selection: Footprint | null = null;
+let currentTypeId: string | null = null;
+let currentKind: AtlasKind | null = null;
+let cachedTypeIdsByKind: Record<AtlasKind, string[]> | null = null;
+const mappings = new Map<string, Mapping>();
 
 for (const level of ZOOM_LEVELS) {
   const opt = document.createElement("option");
@@ -94,16 +110,79 @@ function updateReadout(): void {
   readout.textContent = selection ? `x:${selection.x} y:${selection.y} w:${selection.w} h:${selection.h}` : "No selection";
 }
 
+function updateAssignEnabled(): void {
+  assignBtn.disabled = !(image && selection && currentTypeId && currentKind);
+}
+
+/** Rebuilds the sidebar lists from the currently loaded catalog + the tool's
+ * in-memory mappings (spec "Catalog typeId enumeration in the mapping
+ * tool"). Re-run after every assignment so "mapped" badges stay in sync. */
+function renderSidebar(typeIdsByKind: Record<AtlasKind, string[]>): void {
+  (Object.keys(lists) as AtlasKind[]).forEach((kind) => {
+    const list = lists[kind];
+    list.innerHTML = "";
+    for (const typeId of typeIdsByKind[kind]) {
+      const li = document.createElement("li");
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "type-item";
+      btn.textContent = typeId;
+      const isMapped = mappings.has(typeId);
+      btn.classList.toggle("mapped", isMapped);
+      btn.classList.toggle("active", currentTypeId === typeId && currentKind === kind);
+      if (isMapped) {
+        const dot = document.createElement("span");
+        dot.className = "mapped-dot";
+        dot.setAttribute("aria-label", "assigned");
+        btn.appendChild(dot);
+      }
+      btn.addEventListener("click", () => {
+        currentTypeId = typeId;
+        currentKind = kind;
+        const existing = mappings.get(typeId);
+        if (existing) selection = { ...existing.region };
+        updateReadout();
+        updateAssignEnabled();
+        render();
+        renderSidebar(typeIdsByKind);
+      });
+      li.appendChild(btn);
+      list.appendChild(li);
+    }
+  });
+}
+
+async function fetchJsonArray(path: string): Promise<CatalogEntry[]> {
+  try {
+    const res = await fetch(path);
+    if (!res.ok) return [];
+    return (await res.json()) as CatalogEntry[];
+  } catch {
+    return [];
+  }
+}
+
+async function loadCatalog(): Promise<Record<AtlasKind, string[]>> {
+  const [terrains, worldObjects, items] = await Promise.all([
+    fetchJsonArray("./catalog/terrains.json"),
+    fetchJsonArray("./catalog/world-objects.json"),
+    fetchJsonArray("./catalog/items.json"),
+  ]);
+  return catalogTypeIdsByKind(terrains, worldObjects, items);
+}
+
 fileInput.addEventListener("change", () => {
   const file = fileInput.files?.[0];
   if (!file) return;
+  imageFilename = file.name;
   const url = URL.createObjectURL(file);
   const img = new Image();
   img.onload = () => {
     image = img;
     URL.revokeObjectURL(url);
-    setStatus(`Loaded ${file.name} (${img.width}x${img.height})`);
+    setStatus(`Loaded ${imageFilename} (${img.width}x${img.height})`);
     render();
+    updateAssignEnabled();
   };
   img.onerror = () => setStatus(`Failed to load ${file.name}`);
   img.src = url;
@@ -138,9 +217,42 @@ window.addEventListener("mouseup", (e) => {
   dragStart = null;
   dragCurrent = null;
   updateReadout();
+  updateAssignEnabled();
   render();
 });
 
-setStatus("Load a tileset PNG to begin.");
-render();
-updateReadout();
+assignBtn.addEventListener("click", () => {
+  if (!selection || !currentTypeId || !currentKind) return;
+  mappings.set(currentTypeId, { kind: currentKind, typeId: currentTypeId, region: { ...selection } });
+  setStatus(`Assigned ${currentTypeId} -> {x:${selection.x}, y:${selection.y}, w:${selection.w}, h:${selection.h}}`);
+  if (cachedTypeIdsByKind) renderSidebar(cachedTypeIdsByKind);
+});
+
+exportBtn.addEventListener("click", () => {
+  const atlas = buildAtlasExport(Array.from(mappings.values()), imageFilename, GRID);
+  const blob = new Blob([JSON.stringify(atlas, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "atlas.json";
+  a.click();
+  URL.revokeObjectURL(url);
+  setStatus(`Exported atlas.json (${mappings.size} typeId${mappings.size === 1 ? "" : "s"} mapped)`);
+});
+
+async function boot(): Promise<void> {
+  setStatus("Loading catalog...");
+  try {
+    cachedTypeIdsByKind = await loadCatalog();
+    renderSidebar(cachedTypeIdsByKind);
+    const total = Object.values(cachedTypeIdsByKind).reduce((sum, ids) => sum + ids.length, 0);
+    setStatus(`Catalog loaded: ${total} typeIds. Load a tileset PNG to begin.`);
+  } catch (e) {
+    setStatus(`Failed to load catalog — run "pnpm sync:catalog" first. (${e instanceof Error ? e.message : String(e)})`);
+  }
+  render();
+  updateReadout();
+  updateAssignEnabled();
+}
+
+void boot();

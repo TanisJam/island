@@ -13,8 +13,9 @@
     "typecheck:tool": "tsc -p tsconfig.tool.json --noEmit",
     "test": "node --import tsx --test src/**/*.test.ts tools/**/*.test.ts",
     "sync:contract": "cp ../schemas/generated/*.ts src/contract/",
-    "dev:tool": "vite --config vite.config.tool.ts",
-    "build:tool": "vite build --config vite.config.tool.ts"
+    "sync:catalog": "mkdir -p tools/atlas-editor/catalog && cp ../catalog/*.json tools/atlas-editor/catalog/",
+    "dev:tool": "pnpm sync:catalog && vite --config vite.config.tool.ts",
+    "build:tool": "pnpm sync:catalog && vite build --config vite.config.tool.ts"
   },
   "devDependencies": {
     "@types/node": "^22.7.0",
