@@ -527,6 +527,30 @@ textarea {
   border-radius: 6px;
 }
 
+/* Shape widget (design.md "2. The 3 new widgets — shape widget"): the
+ * optional present/absent checkbox row plus the two number sub-fields.
+ * Generic (not world-objects-specific) — reused by any `shape`-kind field. */
+.shape-present-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.shape-inputs-row {
+  display: flex;
+  gap: 8px;
+}
+
+.field-shape input[type="number"] {
+  width: 100px;
+}
+
+/* Raw-JSON widget textarea — monospace so JSON structure stays readable. */
+.field-raw-json textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+
 .detail-actions {
   display: flex;
   align-items: center;

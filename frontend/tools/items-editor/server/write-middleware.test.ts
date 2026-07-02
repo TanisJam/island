@@ -164,6 +164,34 @@ test("createCollectionSaveHandler: POST /terrains writes catalog/terrains.json a
   });
 });
 
+test("createCollectionSaveHandler: POST /world-objects writes catalog/world-objects.json and bumps catalogVersion (Slice 4 — proves the nested surfaceGrid/defaultState/observationByState fields round-trip end-to-end)", async () => {
+  await withRepoRootFixture(async (root) => {
+    await withServer(createCollectionSaveHandler(root), async (baseUrl) => {
+      const validWorldObject = {
+        id: "campfire",
+        name: "Campfire",
+        description: "A ring of stones with embers inside.",
+        tags: ["heat_source", "light_source"],
+        blocksMovement: false,
+        states: ["lit", "unlit"],
+        surfaceGrid: { w: 2, h: 2 },
+        observation: "Warm to the touch.",
+        defaultState: { lit: false, fuel: 0 },
+        observationByState: { lit: "Embers glow steadily.", unlit: "Cold ash." },
+      };
+      const { status, json } = await post(`${baseUrl}/world-objects`, { records: [validWorldObject] });
+      assert.equal(status, 200);
+      assert.equal(json.ok, true);
+      assert.equal(json.catalogVersion, "0.1.1");
+      const onDisk = JSON.parse(readFileSync(join(root, "catalog", "world-objects.json"), "utf-8"));
+      assert.equal(onDisk.length, 1);
+      assert.deepEqual(onDisk[0], validWorldObject);
+      const meta = JSON.parse(readFileSync(join(root, "catalog", "meta.json"), "utf-8"));
+      assert.equal(meta.catalogVersion, "0.1.1");
+    });
+  });
+});
+
 test("createCollectionSaveHandler: POST /not-a-real-collection returns 404 and touches no file", async () => {
   await withRepoRootFixture(async (root) => {
     const before = readFileSync(join(root, "catalog", "meta.json"), "utf-8");

@@ -5,6 +5,9 @@ import { createNumberField } from "./number-field";
 import { createBooleanField } from "./boolean-field";
 import { createTagsField } from "./tags-field";
 import { createEnumField } from "./enum-field";
+import { createStringMapField } from "./string-map-field";
+import { createRawJsonField } from "./raw-json-field";
+import { createShapeField } from "./shape-field";
 import { createBooleanFieldAdapter, createNumberFieldAdapter, createTagsFieldAdapter, createTextFieldAdapter } from "./adapters";
 
 /**
@@ -13,11 +16,12 @@ import { createBooleanFieldAdapter, createNumberFieldAdapter, createTagsFieldAda
  * `createFieldWidget(descriptor, domId)` once per descriptor field — no
  * collection-specific branching anywhere in the engine.
  *
- * Only the 6 kinds needed through Slice 3 are registered here (`text`,
- * `multiline`, `number`, `boolean`, `tags`, `enum`). `numberMap`,
- * `stringMap`, `shape`, and `rawJson` register in later slices as their
- * widgets are built (Slice 4/5) — a descriptor referencing an unregistered
- * kind throws loudly at mount time rather than silently rendering nothing.
+ * The 6 kinds from Slice 1-3 (`text`, `multiline`, `number`, `boolean`,
+ * `tags`, `enum`) plus the 3 new Slice 4 widgets (`stringMap`, `rawJson`,
+ * `shape`) are registered here. `numberMap` registers in Slice 5 when
+ * `items` migrates onto the engine — a descriptor referencing an
+ * unregistered kind throws loudly at mount time rather than silently
+ * rendering nothing.
  */
 export type WidgetFactory = (descriptor: FieldDescriptor, domId: string) => FieldWidget;
 
@@ -34,6 +38,9 @@ export const WIDGET_REGISTRY: Partial<Record<FieldKind, WidgetFactory>> = {
   boolean: (d, id) => createBooleanFieldAdapter(createBooleanField({ id, label: d.label })),
   tags: (d, id) => createTagsFieldAdapter(createTagsField({ id, label: d.label, required: d.required })),
   enum: (d, id) => createEnumField({ id, label: d.label, required: d.required, values: d.enumValues ?? [], helperText: d.helperText }),
+  stringMap: (d, id) => createStringMapField({ id, label: d.label, required: d.required, helperText: d.helperText }),
+  rawJson: (d, id) => createRawJsonField({ id, label: d.label, required: d.required, helperText: d.helperText }),
+  shape: (d, id) => createShapeField({ id, label: d.label, required: d.required, optionalObject: d.optionalObject, helperText: d.helperText }),
 };
 
 export function createFieldWidget(descriptor: FieldDescriptor, domId: string): FieldWidget {

@@ -7,6 +7,7 @@ import { planSave, planSaveCollection, reconstructRecord, type PlanSaveInput } f
 import { KNOWLEDGE_DESCRIPTOR } from "../shared/descriptors/knowledge";
 import { RESEARCH_DESCRIPTOR } from "../shared/descriptors/research";
 import { TERRAINS_DESCRIPTOR } from "../shared/descriptors/terrains";
+import { WORLD_OBJECTS_DESCRIPTOR } from "../shared/descriptors/world-objects";
 import { COLLECTIONS } from "../shared/collection-registry";
 
 /**
@@ -398,5 +399,138 @@ test("planSaveCollection (terrains): rejects duplicate ids within the records ar
   assert.equal(result.ok, false);
   if (!result.ok) {
     assert.ok(result.errors.some((e) => e.message.includes("swamp")));
+  }
+});
+
+// --- world-objects (Slice 4) — proves reconstructRecord/planSaveCollection ---
+// also generalize to a collection with NESTED (`surfaceGrid`, `shape`),
+// freeform-object (`defaultState`, `rawJson`), and map (`observationByState`,
+// `stringMap`) fields, not just scalars/tags like the earlier collections.
+
+const validWorldObject: Record<string, unknown> = {
+  id: "campfire",
+  name: "Campfire",
+  description: "A ring of stones with embers inside.",
+  tags: ["heat_source", "light_source"],
+  blocksMovement: false,
+  states: ["lit", "unlit"],
+  surfaceGrid: { w: 2, h: 2 },
+  observation: "Warm to the touch.",
+  defaultState: { lit: false, fuel: 0 },
+  observationByState: { lit: "Embers glow steadily.", unlit: "Cold ash." },
+};
+
+test("reconstructRecord (world-objects): copies ONLY descriptor keys — an extra/unknown field on the raw input is stripped", () => {
+  const raw = { ...validWorldObject, path: "../../etc/passwd", file: "/etc/passwd" };
+  const record = reconstructRecord(WORLD_OBJECTS_DESCRIPTOR, raw);
+  assert.deepEqual(Object.keys(record).sort(), [
+    "blocksMovement",
+    "defaultState",
+    "description",
+    "id",
+    "name",
+    "observation",
+    "observationByState",
+    "states",
+    "surfaceGrid",
+    "tags",
+  ]);
+  assert.equal(JSON.stringify(record).includes("etc/passwd"), false);
+});
+
+test("reconstructRecord (world-objects): all optional fields absent are omitted from the output, not null", () => {
+  const minimal: Record<string, unknown> = {
+    id: "campfire",
+    name: "Campfire",
+    description: "A ring of stones with embers inside.",
+    tags: ["heat_source"],
+    blocksMovement: false,
+  };
+  const record = reconstructRecord(WORLD_OBJECTS_DESCRIPTOR, minimal);
+  assert.equal("states" in record, false);
+  assert.equal("surfaceGrid" in record, false);
+  assert.equal("observation" in record, false);
+  assert.equal("defaultState" in record, false);
+  assert.equal("observationByState" in record, false);
+});
+
+test("reconstructRecord (world-objects): the `shape`-kind field (surfaceGrid) is deep-cloned, not a shared reference", () => {
+  const surfaceGrid = { w: 2, h: 2 };
+  const record = reconstructRecord(WORLD_OBJECTS_DESCRIPTOR, { ...validWorldObject, surfaceGrid });
+  assert.notEqual(record.surfaceGrid, surfaceGrid);
+  assert.deepEqual(record.surfaceGrid, surfaceGrid);
+});
+
+test("reconstructRecord (world-objects): the `rawJson`-kind field (defaultState) round-trips the freeform object", () => {
+  const defaultState = { lit: false, fuel: 0 };
+  const record = reconstructRecord(WORLD_OBJECTS_DESCRIPTOR, { ...validWorldObject, defaultState });
+  assert.deepEqual(record.defaultState, defaultState);
+});
+
+test("reconstructRecord (world-objects): the `stringMap`-kind field (observationByState) is deep-cloned, not a shared reference", () => {
+  const observationByState = { lit: "Embers glow steadily." };
+  const record = reconstructRecord(WORLD_OBJECTS_DESCRIPTOR, { ...validWorldObject, observationByState });
+  assert.notEqual(record.observationByState, observationByState);
+  assert.deepEqual(record.observationByState, observationByState);
+});
+
+test("planSaveCollection (world-objects): a valid save with ALL fields (incl. surfaceGrid/defaultState/observationByState) bumps catalogVersion and writes only descriptor fields", () => {
+  const result = planSaveCollection(
+    { records: [validWorldObject] },
+    { descriptor: WORLD_OBJECTS_DESCRIPTOR, defName: COLLECTIONS["world-objects"]?.defName ?? "WorldObjectTypeDef", currentMeta, schemas },
+  );
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.catalogVersion, "0.1.1");
+    const records = JSON.parse(result.dataJson);
+    assert.deepEqual(records[0], validWorldObject);
+  }
+});
+
+test("planSaveCollection (world-objects): a valid save with ONLY the required fields (all optionals omitted) round-trips", () => {
+  const minimal = {
+    id: "loose_rock",
+    name: "Loose rock",
+    description: "A fist-sized rock.",
+    tags: ["debris"],
+    blocksMovement: false,
+  };
+  const result = planSaveCollection(
+    { records: [minimal] },
+    { descriptor: WORLD_OBJECTS_DESCRIPTOR, defName: COLLECTIONS["world-objects"]?.defName ?? "WorldObjectTypeDef", currentMeta, schemas },
+  );
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    const records = JSON.parse(result.dataJson);
+    assert.deepEqual(records[0], minimal);
+  }
+});
+
+test("planSaveCollection (world-objects): rejects a schema-invalid record (surfaceGrid.w below minimum) — no write plan is produced", () => {
+  const result = planSaveCollection(
+    { records: [{ ...validWorldObject, surfaceGrid: { w: 0, h: 2 } }] },
+    { descriptor: WORLD_OBJECTS_DESCRIPTOR, defName: COLLECTIONS["world-objects"]?.defName ?? "WorldObjectTypeDef", currentMeta, schemas },
+  );
+  assert.equal(result.ok, false);
+  assert.equal("dataJson" in result, false);
+});
+
+test("planSaveCollection (world-objects): rejects a schema-invalid record (observationByState value not a string) — no write plan is produced", () => {
+  const result = planSaveCollection(
+    { records: [{ ...validWorldObject, observationByState: { lit: 5 } }] },
+    { descriptor: WORLD_OBJECTS_DESCRIPTOR, defName: COLLECTIONS["world-objects"]?.defName ?? "WorldObjectTypeDef", currentMeta, schemas },
+  );
+  assert.equal(result.ok, false);
+  assert.equal("dataJson" in result, false);
+});
+
+test("planSaveCollection (world-objects): rejects duplicate ids within the records array", () => {
+  const result = planSaveCollection(
+    { records: [validWorldObject, { ...validWorldObject }] },
+    { descriptor: WORLD_OBJECTS_DESCRIPTOR, defName: COLLECTIONS["world-objects"]?.defName ?? "WorldObjectTypeDef", currentMeta, schemas },
+  );
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.ok(result.errors.some((e) => e.message.includes("campfire")));
   }
 });

@@ -12,6 +12,7 @@ import { mountCollectionEngine, type EngineElements } from "./engine";
 import { KNOWLEDGE_DESCRIPTOR } from "./shared/descriptors/knowledge";
 import { RESEARCH_DESCRIPTOR } from "./shared/descriptors/research";
 import { TERRAINS_DESCRIPTOR } from "./shared/descriptors/terrains";
+import { WORLD_OBJECTS_DESCRIPTOR } from "./shared/descriptors/world-objects";
 
 /**
  * Master-detail wiring for the items editor (design.md "Components & Data
@@ -473,14 +474,17 @@ const itemsTabBtn = mustEl<HTMLButtonElement>("collection-tab-items");
 const knowledgeTabBtn = mustEl<HTMLButtonElement>("collection-tab-knowledge");
 const researchTabBtn = mustEl<HTMLButtonElement>("collection-tab-research");
 const terrainsTabBtn = mustEl<HTMLButtonElement>("collection-tab-terrains");
+const worldObjectsTabBtn = mustEl<HTMLButtonElement>("collection-tab-world-objects");
 const itemsPaneEl = mustEl<HTMLElement>("items-pane");
 const knowledgePaneEl = mustEl<HTMLElement>("knowledge-pane");
 const researchPaneEl = mustEl<HTMLElement>("research-pane");
 const terrainsPaneEl = mustEl<HTMLElement>("terrains-pane");
+const worldObjectsPaneEl = mustEl<HTMLElement>("world-objects-pane");
 
 let knowledgeEngineBooted = false;
 let researchEngineBooted = false;
 let terrainsEngineBooted = false;
+let worldObjectsEngineBooted = false;
 
 function activateTab(activeBtn: HTMLButtonElement, ...inactiveBtns: HTMLButtonElement[]): void {
   activeBtn.classList.add("active");
@@ -496,7 +500,8 @@ itemsTabBtn.addEventListener("click", () => {
   knowledgePaneEl.hidden = true;
   researchPaneEl.hidden = true;
   terrainsPaneEl.hidden = true;
-  activateTab(itemsTabBtn, knowledgeTabBtn, researchTabBtn, terrainsTabBtn);
+  worldObjectsPaneEl.hidden = true;
+  activateTab(itemsTabBtn, knowledgeTabBtn, researchTabBtn, terrainsTabBtn, worldObjectsTabBtn);
 });
 
 knowledgeTabBtn.addEventListener("click", () => {
@@ -504,7 +509,8 @@ knowledgeTabBtn.addEventListener("click", () => {
   knowledgePaneEl.hidden = false;
   researchPaneEl.hidden = true;
   terrainsPaneEl.hidden = true;
-  activateTab(knowledgeTabBtn, itemsTabBtn, researchTabBtn, terrainsTabBtn);
+  worldObjectsPaneEl.hidden = true;
+  activateTab(knowledgeTabBtn, itemsTabBtn, researchTabBtn, terrainsTabBtn, worldObjectsTabBtn);
   if (!knowledgeEngineBooted) {
     knowledgeEngineBooted = true;
     const knowledgeEls: EngineElements = {
@@ -532,7 +538,8 @@ researchTabBtn.addEventListener("click", () => {
   knowledgePaneEl.hidden = true;
   researchPaneEl.hidden = false;
   terrainsPaneEl.hidden = true;
-  activateTab(researchTabBtn, itemsTabBtn, knowledgeTabBtn, terrainsTabBtn);
+  worldObjectsPaneEl.hidden = true;
+  activateTab(researchTabBtn, itemsTabBtn, knowledgeTabBtn, terrainsTabBtn, worldObjectsTabBtn);
   if (!researchEngineBooted) {
     researchEngineBooted = true;
     const researchEls: EngineElements = {
@@ -560,7 +567,8 @@ terrainsTabBtn.addEventListener("click", () => {
   knowledgePaneEl.hidden = true;
   researchPaneEl.hidden = true;
   terrainsPaneEl.hidden = false;
-  activateTab(terrainsTabBtn, itemsTabBtn, knowledgeTabBtn, researchTabBtn);
+  worldObjectsPaneEl.hidden = true;
+  activateTab(terrainsTabBtn, itemsTabBtn, knowledgeTabBtn, researchTabBtn, worldObjectsTabBtn);
   if (!terrainsEngineBooted) {
     terrainsEngineBooted = true;
     const terrainsEls: EngineElements = {
@@ -584,6 +592,38 @@ terrainsTabBtn.addEventListener("click", () => {
       texturePanelMountEl: mustEl<HTMLDivElement>("terrains-texture-panel-mount"),
     };
     void mountCollectionEngine(TERRAINS_DESCRIPTOR, terrainsEls).boot();
+  }
+});
+
+worldObjectsTabBtn.addEventListener("click", () => {
+  itemsPaneEl.hidden = true;
+  knowledgePaneEl.hidden = true;
+  researchPaneEl.hidden = true;
+  terrainsPaneEl.hidden = true;
+  worldObjectsPaneEl.hidden = false;
+  activateTab(worldObjectsTabBtn, itemsTabBtn, knowledgeTabBtn, researchTabBtn, terrainsTabBtn);
+  if (!worldObjectsEngineBooted) {
+    worldObjectsEngineBooted = true;
+    const worldObjectsEls: EngineElements = {
+      catalogVersionEl,
+      addBtn: mustEl<HTMLButtonElement>("add-world-objects-record-btn"),
+      listEl: mustEl<HTMLUListElement>("world-objects-record-list"),
+      masterEmptyEl: mustEl<HTMLDivElement>("world-objects-master-empty"),
+      masterLoadingEl: mustEl<HTMLDivElement>("world-objects-master-loading"),
+      masterErrorEl: mustEl<HTMLDivElement>("world-objects-master-error"),
+      detailEmptyEl: mustEl<HTMLDivElement>("world-objects-detail-empty"),
+      detailFormEl: mustEl<HTMLFormElement>("world-objects-detail-form"),
+      errorSummaryEl: mustEl<HTMLDivElement>("world-objects-error-summary"),
+      errorSummaryListEl: mustEl<HTMLUListElement>("world-objects-error-summary-list"),
+      fieldsEl: mustEl<HTMLDivElement>("world-objects-fields"),
+      deleteBtn: mustEl<HTMLButtonElement>("delete-world-objects-record-btn"),
+      saveBtn: mustEl<HTMLButtonElement>("world-objects-save-btn"),
+      saveStatusEl: mustEl<HTMLSpanElement>("world-objects-save-status"),
+      // atlasKind:"object" (Slice 3b generalization, reused as-is) — the
+      // generic engine mounts its own texture panel into this element.
+      texturePanelMountEl: mustEl<HTMLDivElement>("world-objects-texture-panel-mount"),
+    };
+    void mountCollectionEngine(WORLD_OBJECTS_DESCRIPTOR, worldObjectsEls).boot();
   }
 });
 void collectionSwitcherEl; // referenced only to fail fast via mustEl if index.html's markup drifts
