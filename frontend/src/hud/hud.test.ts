@@ -175,6 +175,7 @@ class FakeCellElement {
   style: Record<string, string> = {};
   textContent = "";
   title = "";
+  attrs: Record<string, string> = {};
   listeners = new Map<string, Array<() => void>>();
 
   get className(): string {
@@ -187,6 +188,13 @@ class FakeCellElement {
   appendChild(child: FakeCellElement): FakeCellElement {
     this.children.push(child);
     return child;
+  }
+
+  // Only used by the multi-cell overlay (item-drag-drop, tasks.md T3), which
+  // marks itself `aria-hidden="true"` — decorative, the cell's own `title`
+  // stays the accessible name.
+  setAttribute(name: string, value: string): void {
+    this.attrs[name] = value;
   }
 
   addEventListener(type: string, cb: () => void): void {
@@ -294,7 +302,12 @@ test("renderInventoryGrid: a 1x2 item fills BOTH its coordinates as separate 'fi
     const item = inventoryItemAt("it1", "poor_wood", 1, 0);
     const snapshot = fullInventorySnapshot([item]);
     const grid = renderInventoryGrid(surfaceCatalog, snapshot, noopHandlers) as unknown as FakeCellElement;
-    assert.equal(grid.children.length, 16, "grid still contains exactly 16 cell elements");
+    // 16 per-coordinate cells + exactly ONE spanning overlay for this single
+    // multi-cell item (tasks.md T3/T8a: overlay count === multi-cell item
+    // count) — the per-coordinate cell-count invariant this test guards
+    // (every coordinate stays its own drop target) is asserted right below
+    // via the `filled` count, unaffected by the overlay's presence.
+    assert.equal(grid.children.length, 17, "grid contains 16 per-coordinate cells plus one spanning overlay for this 1x2 item");
     const filled = grid.children.filter((c) => c.classes.has("filled"));
     assert.equal(filled.length, 2, "both (1,0) and (1,1) render as their own filled cell");
   });

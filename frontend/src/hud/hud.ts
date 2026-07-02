@@ -72,6 +72,65 @@ export function footprintCells(anchor: Position, shape: { w: number; h: number }
   return cells;
 }
 
+/** Catalog-declared `(w,h)` for an item type, defaulting to 1x1 for an
+ * unknown id (same defensive default `inventoryCellsForItem`/
+ * `occupiedCellsForItem` already used before T1's refactor). */
+function itemShape(catalog: Catalog, itemTypeId: string): { w: number; h: number } {
+  const def = catalog.items.find((i) => i.id === itemTypeId);
+  return { w: def?.shape.w ?? 1, h: def?.shape.h ?? 1 };
+}
+
+/** Rotation for a currently-placed item, or `0` for any location that has no
+ * rotation concept (world/hand-via-inventory-cell reads its actual stored
+ * rotation, not a hardcoded 0 — a hand-equipped item's `player_inventory`
+ * location still carries whatever rotation it had before equip). */
+function placedRotation(item: ItemInstance): number {
+  return item.location.type === "player_inventory" || item.location.type === "surface" ? item.location.rotation : 0;
+}
+
+/** Anchor `(x,y)` for a currently-placed item, or the origin for any
+ * location without grid coordinates (never actually reached by the overlay
+ * gate below — only occupants of an inventory/surface cell are ever
+ * multi-cell-gated). */
+function placedAnchor(item: ItemInstance): Position {
+  return item.location.type === "player_inventory" || item.location.type === "surface" ? { x: item.location.x, y: item.location.y } : { x: 0, y: 0 };
+}
+
+/**
+ * Builds the SINGLE spanning glyph overlay for a multi-cell item (design.md
+ * Decision 1/2/5, spec "Spanning overlay render" + "Rotation-aware footprint
+ * visual"). Shared by `renderInventoryGrid` and `renderSurfaceGrid` — mesa
+ * parity, one code path. `pointer-events:none` is set INLINE (double-lock
+ * alongside the `.item-overlay` CSS class) so the invariant is unit-
+ * assertable even in the fake-DOM test harness, which has no CSS engine.
+ * Font-size scales toward the SMALLER footprint pixel dimension (never
+ * stretched on a long/thin footprint), sourced from the AssetResolver's
+ * `scale` — never a hardcoded literal (spec: "MUST be sourced from the
+ * AssetResolver's scale descriptor").
+ */
+function buildItemOverlay(item: ItemInstance, catalog: Catalog): HTMLElement {
+  const shape = itemShape(catalog, item.itemTypeId);
+  const rotation = placedRotation(item);
+  const anchor = placedAnchor(item);
+  const { w, h } = rotatedDims(shape, rotation);
+
+  const overlay = document.createElement("div");
+  overlay.className = "item-overlay";
+  overlay.textContent = itemGlyph(item.itemTypeId);
+  overlay.setAttribute("aria-hidden", "true");
+
+  const width = w * CELL_SIZE_PX + (w - 1) * CELL_GAP_PX;
+  const height = h * CELL_SIZE_PX + (h - 1) * CELL_GAP_PX;
+  overlay.style.left = `${anchor.x * (CELL_SIZE_PX + CELL_GAP_PX)}px`;
+  overlay.style.top = `${anchor.y * (CELL_SIZE_PX + CELL_GAP_PX)}px`;
+  overlay.style.width = `${width}px`;
+  overlay.style.height = `${height}px`;
+  const scale = assets.resolve("item", item.itemTypeId).scale ?? 0.58;
+  overlay.style.fontSize = `${Math.round(scale * Math.min(width, height))}px`;
+  overlay.style.pointerEvents = "none"; // double-lock alongside the CSS class (spec "No interaction regressions")
+  return overlay;
+}
+
 function renderHandSlot(catalog: Catalog, item: ItemInstance | undefined, slotId: string, nameId: string): void {
   const slotEl = document.getElementById(slotId);
   const nameEl = document.getElementById(nameId);
@@ -153,6 +212,16 @@ export function renderInventoryGrid(catalog: Catalog, snapshot: ClientSnapshot, 
   const occupantAt = (x: number, y: number): ItemInstance | undefined =>
     items.find((it) => inventoryCellsForItem(it, catalog).some((c) => c.x === x && c.y === y));
 
+  // Per-render coordinate->element map covering ALL 16 cells (single- and
+  // multi-cell alike) — the map `bindGrid` (tasks.md T4) hands to the drag
+  // controller so full-footprint highlight toggling (T7) can look up every
+  // covered cell's element by coordinate, not just the anchor.
+  const cellMap = new Map<string, HTMLElement>();
+  // Multi-cell occupants seen this render, deduped by id (an item's every
+  // covered cell resolves to the SAME occupant) — one overlay per item, not
+  // per covered cell.
+  const multiCellItems = new Map<string, ItemInstance>();
+
   for (let y = 0; y < INV_H; y++) {
     for (let x = 0; x < INV_W; x++) {
       const occupant = occupantAt(x, y);
@@ -171,7 +240,17 @@ export function renderInventoryGrid(catalog: Catalog, snapshot: ClientSnapshot, 
         classes.push("filled");
         if (isHandSlot) classes.push("equipped");
         const name = itemName(catalog, occupant.itemTypeId);
-        cell.textContent = itemGlyph(occupant.itemTypeId) || name;
+        const { w, h } = rotatedDims(itemShape(catalog, occupant.itemTypeId), placedRotation(occupant));
+        if (w > 1 || h > 1) {
+          // Multi-cell (POST-ROTATION footprint): the glyph moves to a
+          // single spanning overlay appended after the cell loop below —
+          // this cell renders glyph-empty (design.md Decision 2).
+          cell.textContent = "";
+          multiCellItems.set(occupant.id, occupant);
+        } else {
+          // Single-cell item: byte-for-byte the pre-overlay path, untouched.
+          cell.textContent = itemGlyph(occupant.itemTypeId) || name;
+        }
         cell.title = `${name} — ${isHandSlot ? "equipado, click para soltar" : "en la mochila, click para equipar"}`;
         const occupantId = occupant.id;
         onTap = isHandSlot ? () => handlers.onDrop(occupantId) : () => handlers.onEquip(occupantId);
@@ -189,9 +268,21 @@ export function renderInventoryGrid(catalog: Catalog, snapshot: ClientSnapshot, 
           : { kind: "inventory", x, y, occupant, onTap };
       handlers.bindDrag?.(cell, descriptor);
 
+      cellMap.set(`${x},${y}`, cell);
       grid.appendChild(cell);
     }
   }
+
+  // Overlays are appended AFTER every cell (source-order stacking paints
+  // them above) and are NEVER registered with `bindDrag`/the WeakMap
+  // registry — purely visual, `pointer-events:none` guarantees
+  // `elementFromPoint` always resolves to the `.cell` beneath.
+  for (const item of multiCellItems.values()) grid.appendChild(buildItemOverlay(item, catalog));
+
+  // `cellMap` is handed to the drag controller via `handlers.bindGrid` once
+  // that wiring lands (tasks.md T4) — built here, in the same render loop,
+  // so it always reflects exactly what's on screen right now.
+
   return grid;
 }
 
@@ -256,6 +347,11 @@ export function renderSurfaceGrid(
   const occupantAt = (x: number, y: number): ItemInstance | undefined =>
     placed.find((it) => occupiedCellsForItem(it, catalog).some((c) => c.x === x && c.y === y));
 
+  // Mesa parity with renderInventoryGrid above — same overlay gate, same
+  // coordinate-map plumbing (tasks.md T3/T4).
+  const cellMap = new Map<string, HTMLElement>();
+  const multiCellItems = new Map<string, ItemInstance>();
+
   for (let y = 0; y < dims.height; y++) {
     for (let x = 0; x < dims.width; x++) {
       const occupant = occupantAt(x, y);
@@ -263,14 +359,27 @@ export function renderSurfaceGrid(
       cell.className = occupant ? "cell filled" : "cell";
       if (occupant) {
         const name = itemName(catalog, occupant.itemTypeId);
-        cell.textContent = itemGlyph(occupant.itemTypeId) || name;
+        const { w, h } = rotatedDims(itemShape(catalog, occupant.itemTypeId), placedRotation(occupant));
+        if (w > 1 || h > 1) {
+          cell.textContent = "";
+          multiCellItems.set(occupant.id, occupant);
+        } else {
+          cell.textContent = itemGlyph(occupant.itemTypeId) || name;
+        }
         cell.title = name;
       }
       cell.addEventListener("click", () => handlers.onCellClick(occupant));
       handlers.bindDrag?.(cell, { kind: "surface", surfaceId, x, y, occupant });
+      cellMap.set(`${x},${y}`, cell);
       grid.appendChild(cell);
     }
   }
+
+  for (const item of multiCellItems.values()) grid.appendChild(buildItemOverlay(item, catalog));
+
+  // `cellMap` is handed to the drag controller via `handlers.bindGrid` once
+  // that wiring lands (tasks.md T4), same as renderInventoryGrid above.
+
   return grid;
 }
 
