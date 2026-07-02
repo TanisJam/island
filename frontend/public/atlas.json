@@ -1,0 +1,16 @@
+{
+  "image": "tileset.png",
+  "tile": 16,
+  "terrain": {
+    "sand": { "x": 0, "y": 0, "w": 16, "h": 16 }
+  },
+  "object": {
+    "tree": { "x": 0, "y": 0, "w": 16, "h": 32 }
+  },
+  "item": {
+    "simple_axe": { "x": 16, "y": 0, "w": 16, "h": 16 }
+  },
+  "player": {
+    "player": { "x": 32, "y": 0, "w": 16, "h": 16 }
+  }
+}

@@ -63,7 +63,7 @@ function loadTilesetImage(src: string): Promise<CanvasImageSource> {
  * `fallback` — never rejects, never throws (spec "Missing atlas or image
  * degrades to emoji, does not crash boot"; design.md "Boot failure").
  */
-async function loadSpriteAssets(fallback: AssetResolver): Promise<AssetResolver> {
+export async function loadSpriteAssets(fallback: AssetResolver): Promise<AssetResolver> {
   try {
     const res = await fetch("/atlas.json");
     if (!res.ok) return fallback;

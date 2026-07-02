@@ -59,12 +59,31 @@ export interface Atlas {
 
 const ATLAS_KINDS: AtlasKind[] = ["terrain", "object", "item", "player"];
 
+/** `true` when every entry in a per-kind bucket has numeric `x`/`y`/`w`/`h`
+ * (the atlas-editor tool is now a second producer of this file — batch-2
+ * gate review flagged that a merely-object-shaped-but-non-numeric entry,
+ * e.g. `{ sand: { x: "0", y: 0, w: 16, h: 16 } }`, previously passed
+ * validation silently and would only fail later, deep inside draw math). */
+function hasValidRegionShape(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null) return false;
+  const region = value as Record<string, unknown>;
+  return (
+    typeof region.x === "number" &&
+    typeof region.y === "number" &&
+    typeof region.w === "number" &&
+    typeof region.h === "number"
+  );
+}
+
 /**
  * Validates and returns the parsed `atlas.json` payload, or throws on any
  * malformed shape. The caller (game.ts boot) is responsible for catching
  * this and falling back to `createEmojiAssets()` — this function itself
  * never swallows errors (design.md "Boot failure" — soft-fallback lives at
- * the call site, not here).
+ * the call site, not here). Beyond the per-kind bucket shape, every entry
+ * inside a bucket must carry numeric `x`/`y`/`w`/`h` — a malformed single
+ * entry throws rather than silently producing a region that fails later at
+ * draw time.
  */
 export function parseAtlas(json: unknown): Atlas {
   if (typeof json !== "object" || json === null) throw new Error("Invalid atlas: root is not an object");
@@ -73,8 +92,14 @@ export function parseAtlas(json: unknown): Atlas {
   if (typeof obj.tile !== "number") throw new Error("Invalid atlas: 'tile' must be a number");
   for (const kind of ATLAS_KINDS) {
     const value = obj[kind];
-    if (value !== undefined && (typeof value !== "object" || value === null)) {
+    if (value === undefined) continue;
+    if (typeof value !== "object" || value === null) {
       throw new Error(`Invalid atlas: '${kind}' must be an object when present`);
+    }
+    for (const [typeId, region] of Object.entries(value as Record<string, unknown>)) {
+      if (!hasValidRegionShape(region)) {
+        throw new Error(`Invalid atlas: '${kind}.${typeId}' must have numeric x/y/w/h`);
+      }
     }
   }
   return obj as unknown as Atlas;

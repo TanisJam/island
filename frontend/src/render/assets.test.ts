@@ -80,6 +80,12 @@ test("parseAtlas: throws when a per-kind key is present but not an object", () =
   assert.throws(() => parseAtlas({ image: "tileset.png", tile: 16, terrain: "sand" }));
 });
 
+test("parseAtlas: throws when a region entry has a non-numeric x/y/w/h (batch-2 gate review fix)", () => {
+  assert.throws(() => parseAtlas({ image: "tileset.png", tile: 16, terrain: { sand: { x: "0", y: 0, w: 16, h: 16 } } }));
+  assert.throws(() => parseAtlas({ image: "tileset.png", tile: 16, object: { tree: { x: 0, y: 0, w: 16 } } }));
+  assert.throws(() => parseAtlas({ image: "tileset.png", tile: 16, item: { potion: null } }));
+});
+
 test("lookupRegion: resolves a mapped terrain typeId (sand)", () => {
   const atlas = fixtureAtlas();
   assert.deepEqual(lookupRegion(atlas, "terrain", "sand"), { x: 0, y: 0, w: 16, h: 16 });

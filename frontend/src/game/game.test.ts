@@ -4,7 +4,8 @@ import type { Catalog, CommandEnvelope, CommandResult, Event } from "../contract
 import type { PlayerStateResponse, ZoneSnapshotResponse } from "../net/api";
 import type { Transport } from "../net/transport";
 import type { Ui } from "../hud/ui";
-import { createGame } from "./game";
+import { createGame, loadSpriteAssets } from "./game";
+import { createEmojiAssets } from "../render/assets";
 
 const ORIGINAL_FETCH = globalThis.fetch;
 const ORIGINAL_RAF = globalThis.requestAnimationFrame;
@@ -124,6 +125,50 @@ function fakeUi(): Ui {
     closeContextMenu: () => {},
   };
 }
+
+// --- loadSpriteAssets degrade paths (spec "Missing atlas or image degrades
+// to emoji, does not crash boot" — explicit scenarios, not incidental
+// coverage via the boot test above; batch-2 apply requirement). ---
+
+test("loadSpriteAssets: atlas.json 404 degrades cleanly to a pure emoji resolver", async () => {
+  globalThis.fetch = (async () =>
+    ({ ok: false, status: 404, statusText: "Not Found", json: async () => ({}) }) as unknown as Response) as typeof fetch;
+  try {
+    const fallback = createEmojiAssets();
+    const resolver = await loadSpriteAssets(fallback);
+    assert.deepEqual(resolver.resolve("object", "tree"), fallback.resolve("object", "tree"));
+    assert.deepEqual(resolver.resolve("terrain", "sand"), fallback.resolve("terrain", "sand"));
+    assert.equal(resolver.resolve("object", "tree").sprite, undefined);
+  } finally {
+    globalThis.fetch = ORIGINAL_FETCH;
+  }
+});
+
+test("loadSpriteAssets: a malformed atlas.json (200 but fails parseAtlas) degrades cleanly to a pure emoji resolver", async () => {
+  globalThis.fetch = (async () =>
+    ({ ok: true, status: 200, statusText: "OK", json: async () => ({ not: "an atlas" }) }) as unknown as Response) as typeof fetch;
+  try {
+    const fallback = createEmojiAssets();
+    const resolver = await loadSpriteAssets(fallback);
+    assert.deepEqual(resolver.resolve("item", "small_stone"), fallback.resolve("item", "small_stone"));
+    assert.equal(resolver.resolve("item", "small_stone").sprite, undefined);
+  } finally {
+    globalThis.fetch = ORIGINAL_FETCH;
+  }
+});
+
+test("loadSpriteAssets: a fetch rejection (network failure) degrades cleanly to a pure emoji resolver", async () => {
+  globalThis.fetch = (async () => {
+    throw new Error("network down");
+  }) as unknown as typeof fetch;
+  try {
+    const fallback = createEmojiAssets();
+    const resolver = await loadSpriteAssets(fallback);
+    assert.deepEqual(resolver.resolve("player", "player"), fallback.resolve("player", "player"));
+  } finally {
+    globalThis.fetch = ORIGINAL_FETCH;
+  }
+});
 
 test("createGame().start(): boots, builds a store, and one loop tick renders without throwing", async () => {
   stubBootFetch();
