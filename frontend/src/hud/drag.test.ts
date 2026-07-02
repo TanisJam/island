@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Command, ItemInstance } from "../contract";
 import type { ClientSnapshot } from "../state/snapshot";
-import { buildDragOutcome, cellOccupant, createDragController, crossedThreshold, type DragControllerDeps } from "./drag";
+import { buildDragOutcome, createDragController, crossedThreshold, type DragControllerDeps } from "./drag";
 
 // --- crossedThreshold: pure ------------------------------------------------
 
@@ -144,7 +144,7 @@ test("buildDragOutcome REGRESSION: an unrotated surface-origin item forwards rot
   assert.equal(outcome.command.to.rotation, 0, "unrotated origin still forwards an explicit rotation, not undefined");
 });
 
-// --- cellOccupant: highlight validity (spec R7) ---------------------------
+// --- snapshotWith: shared fixture builder for the DOM smoke tests below ---
 
 function snapshotWith(items: ItemInstance[]): ClientSnapshot {
   return {
@@ -161,20 +161,6 @@ function snapshotWith(items: ItemInstance[]): ClientSnapshot {
     catalogVersion: "test",
   };
 }
-
-test("cellOccupant: an empty inventory cell is ok", () => {
-  assert.equal(cellOccupant(snapshotWith([]), { kind: "inventory", x: 1, y: 1 }, "it1"), "ok");
-});
-
-test("cellOccupant: a cell occupied by the DRAGGED item itself is ok (self-hover while dragging)", () => {
-  const item = invItem("it1", 1, 1);
-  assert.equal(cellOccupant(snapshotWith([item]), { kind: "inventory", x: 1, y: 1 }, "it1"), "ok");
-});
-
-test("cellOccupant: a cell occupied by a DIFFERENT item is bad", () => {
-  const other = invItem("it2", 1, 1);
-  assert.equal(cellOccupant(snapshotWith([other]), { kind: "inventory", x: 1, y: 1 }, "it1"), "bad");
-});
 
 // --- createDragController: DOM smoke coverage only ------------------------
 // (spec "Testing approach": DOM-heavy wiring gets smoke-test coverage, not

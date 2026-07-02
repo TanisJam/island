@@ -1,7 +1,7 @@
 import type { Catalog, Command, ItemInstance, Position } from "../contract";
 import type { ClientSnapshot } from "../state/snapshot";
 import { createEmojiAssets } from "../render/assets";
-import { INV_H, INV_W, inventoryCellsForItem, occupiedCellsForItem, rotatedDims } from "./hud";
+import { INV_H, INV_W, footprintCells, inventoryCellsForItem, occupiedCellsForItem, rotatedDims } from "./hud";
 
 export type ScreenPoint = { x: number; y: number };
 
@@ -120,31 +120,6 @@ export function buildDragOutcome(item: ItemInstance, target: DropTarget, playerI
     case "invalid":
       return { kind: "noop" };
   }
-}
-
-/** `"ok"` (brasa highlight) or `"bad"` (rejection highlight) for a hovered
- * drop-target cell while a drag is active — spec R7 "Drop-target feedback".
- * Deliberately CHEAP and PERMISSIVE (design.md decision 7): only the anchor
- * cell's occupancy is checked, never the dragged item's full multi-cell
- * footprint — the backend stays authoritative on the actual accept/reject.
- * `map`/`invalid` targets are never occupancy-checked here (map always reads
- * `"ok"`; `invalid` targets are simply never highlighted by the caller). */
-export function cellOccupant(snapshot: ClientSnapshot, target: DropTarget, exceptId: string): "ok" | "bad" {
-  let occupant: ItemInstance | undefined;
-  if (target.kind === "inventory") {
-    occupant = snapshot.items.find((it) => it.location.type === "player_inventory" && it.location.x === target.x && it.location.y === target.y);
-  } else if (target.kind === "hand") {
-    const slot = target.hand === "left" ? snapshot.handSlots.left : snapshot.handSlots.right;
-    occupant = snapshot.items.find((it) => it.location.type === "player_inventory" && it.location.x === slot.x && it.location.y === slot.y);
-  } else if (target.kind === "surface") {
-    occupant = snapshot.items.find(
-      (it) => it.location.type === "surface" && it.location.surfaceId === target.surfaceId && it.location.x === target.x && it.location.y === target.y,
-    );
-  } else {
-    return "ok"; // map / invalid: never flagged "bad" by this pure check
-  }
-  if (!occupant || occupant.id === exceptId) return "ok";
-  return "bad";
 }
 
 /** Verifies a `w x h` shape anchored at `(x,y)` both stays in-bounds of a
@@ -289,6 +264,24 @@ function gridKeyOf(ctx: GridContext): string {
   return ctx.kind === "inventory" ? "inventory" : `surface:${ctx.surfaceId}`;
 }
 
+/** Which registered `GridContext` a `DropTarget` belongs to — `"hand"`
+ * resolves to `"inventory"` because hand slots are rendered as ordinary
+ * cells WITHIN the same 4x4 inventory grid (design.md Decision 3). `"map"`/
+ * `"invalid"` have no grid context (canvas stays single-tile; invalid is
+ * never highlighted). */
+function gridKeyForTarget(target: DropTarget): string | null {
+  switch (target.kind) {
+    case "inventory":
+    case "hand":
+      return "inventory";
+    case "surface":
+      return `surface:${target.surfaceId}`;
+    case "map":
+    case "invalid":
+      return null;
+  }
+}
+
 export interface DragController {
   /** Registers `cellEl` as BOTH a potential drop target and (when
    * `descriptor.occupant` is set) a drag source. Safe to call again for a
@@ -336,7 +329,10 @@ export function createDragController(deps: DragControllerDeps): DragController {
   let dragging = false;
   let start: ScreenPoint | null = null;
   let source: { el: HTMLElement; descriptor: CellDescriptor } | null = null;
-  let highlighted: HTMLElement | null = null;
+  // Every cell element CURRENTLY carrying a `.drop-ok`/`.drop-bad` class —
+  // the full projected footprint, not just the anchor (design.md Decision 3/
+  // 4, spec R2 "retiring the anchor-only permissive check", tasks.md T7).
+  let highlighted: HTMLElement[] = [];
 
   function resolveTarget(clientX: number, clientY: number): DropTarget {
     const el = document.elementFromPoint(clientX, clientY) as unknown as HTMLElement | null;
@@ -373,24 +369,72 @@ export function createDragController(deps: DragControllerDeps): DragController {
   }
 
   function clearHighlight(): void {
-    highlighted?.classList.remove("drop-ok", "drop-bad");
-    highlighted = null;
+    for (const el of highlighted) el.classList.remove("drop-ok", "drop-bad");
+    highlighted = [];
   }
 
+  /**
+   * Toggles `.drop-ok`/`.drop-bad` across the dragged item's FULL projected
+   * footprint (design.md Decision 3/4, spec R2 "Footprint preview during
+   * drag" — retiring the old anchor-only `cellOccupant` check). Resolves the
+   * hovered element -> its `DropTarget` -> the `GridContext` bound for that
+   * grid (via `bindGrid`, tasks.md T4) -> `footprintValidity`'s verdict ->
+   * every covered cell's element, toggling the SAME verdict class on each
+   * (a placement is accepted/rejected atomically, never per-cell). A
+   * near-edge anchor colors only the covered cells that actually have a DOM
+   * element in the bound grid's coordinate map — the rest are simply out of
+   * bounds and have nothing to color.
+   */
   function updateHighlight(clientX: number, clientY: number): void {
+    clearHighlight();
     const el = document.elementFromPoint(clientX, clientY) as unknown as HTMLElement | null;
-    if (highlighted && highlighted !== el) clearHighlight();
-    if (!el || !source) return;
+    const draggedItem = source?.descriptor.occupant;
+    if (!el || !source || !draggedItem) return;
 
     const entry = registry.get(el as unknown as object);
     const isCanvas = !entry && el === deps.canvas;
     if (!entry && !isCanvas) return; // unregistered, non-canvas element: no highlight (spec R6 container/invalid rule)
 
     const target: DropTarget = entry ? descriptorToTarget(entry.descriptor) : { kind: "map", x: 0, y: 0 };
-    const exceptId = source.descriptor.occupant?.id ?? "";
-    const validity = cellOccupant(deps.getSnapshot(), target, exceptId);
-    el.classList.add(validity === "ok" ? "drop-ok" : "drop-bad");
-    highlighted = el;
+    const exceptId = draggedItem.id;
+    const snapshot = deps.getSnapshot();
+
+    if (target.kind === "map") {
+      // Canvas/world stays single-tile, no footprint preview (spec "Canvas unaffected").
+      const validity = footprintValidity(snapshot, deps.catalog, draggedItem, target, exceptId);
+      el.classList.add(validity === "ok" ? "drop-ok" : "drop-bad");
+      highlighted = [el];
+      return;
+    }
+    if (target.kind === "invalid") return; // never highlighted
+
+    const gridKey = gridKeyForTarget(target);
+    const ctx = gridKey ? grids.get(gridKey) : undefined;
+    if (!ctx) return; // no bound GridContext for this grid yet (defensive — bindGrid runs on every render)
+
+    const def = deps.catalog.items.find((i) => i.id === draggedItem.itemTypeId);
+    const shape = { w: def?.shape.w ?? 1, h: def?.shape.h ?? 1 };
+    const itemRotation = draggedItem.location.type === "player_inventory" || draggedItem.location.type === "surface" ? draggedItem.location.rotation : 0;
+
+    // Hand equips always anchor UNROTATED at the LIVE snapshot's hand-slot
+    // position (mirrors `footprintValidity`'s own hand branch) — every other
+    // target kind anchors at the hovered cell's coordinates with the item's
+    // stored rotation.
+    const anchor = target.kind === "hand" ? (target.hand === "left" ? snapshot.handSlots.left : snapshot.handSlots.right) : { x: target.x, y: target.y };
+    const rotation = target.kind === "hand" ? 0 : itemRotation;
+
+    const surfaceDims = target.kind === "surface" ? ctx.dims : undefined;
+    const validity = footprintValidity(snapshot, deps.catalog, draggedItem, target, exceptId, surfaceDims);
+    const cls = validity === "ok" ? "drop-ok" : "drop-bad";
+
+    const nextHighlighted: HTMLElement[] = [];
+    for (const cell of footprintCells(anchor, shape, rotation)) {
+      const cellEl = ctx.cells.get(`${cell.x},${cell.y}`);
+      if (!cellEl) continue; // out-of-bounds portion of the footprint: no element to color
+      cellEl.classList.add(cls);
+      nextHighlighted.push(cellEl);
+    }
+    highlighted = nextHighlighted;
   }
 
   function endDrag(): void {
