@@ -6,16 +6,22 @@ import { parseAtlas, type Atlas, type AtlasRegion } from "../../../src/render/as
  * and never touches `fs`; `atlas-write-middleware.ts` is the only caller
  * and only performs the actual write once this returns `ok: true`.
  *
- * SECURITY-CRITICAL: `rawBody` is read for its `.typeId` and `.region` (or
- * `.clear`) fields ONLY. Any other field on `rawBody` (a client-supplied
- * `atlas`, `path`, `file`, `target`, `image`, `tile`, or anything else) is
- * NEVER read here and therefore can never influence the output. The write
- * target always comes from `resolveAtlasTarget(repoRoot)`
+ * SECURITY-CRITICAL: `rawBody` is read for its `.typeId`, `.kind`, and
+ * `.region` (or `.clear`) fields ONLY. Any other field on `rawBody` (a
+ * client-supplied `atlas`, `path`, `file`, `target`, `image`, `tile`, or
+ * anything else) is NEVER read here and therefore can never influence the
+ * output. The write target always comes from `resolveAtlasTarget(repoRoot)`
  * (server/atlas-targets.ts), which this module does not even import. See
  * `plan-atlas-save.test.ts` for the load-bearing proof.
  *
+ * SECURITY-CRITICAL (bucket allow-list, Slice 3b atlasKind generalization):
+ * `kind` selects WHICH atlas bucket (`terrain`/`object`/`item`) is patched
+ * — it is checked against `ALLOWED_ATLAS_KINDS` and rejected outright if it
+ * is anything else (e.g. `"player"`, `"__proto__"`, an arbitrary string).
+ * It is a bucket-key selector, never a path or file target.
+ *
  * SECURITY-CRITICAL (prototype pollution): `typeId` is used as a dynamic
- * property key on the cloned atlas's `item` bucket. A `typeId` of
+ * property key on the cloned atlas's selected bucket. A `typeId` of
  * `"__proto__"` or `"constructor"` is REJECTED outright as invalid input —
  * never reaches a bracket assignment — so it can never reassign or corrupt
  * the object's prototype chain.
@@ -36,6 +42,16 @@ export type PlanAtlasSaveResult =
 /** Keys that would reassign/corrupt an object's prototype chain if used as
  * a bracket-assignment property key. Rejected outright as invalid typeIds. */
 const UNSAFE_TYPE_IDS = new Set(["__proto__", "constructor", "prototype"]);
+
+/** Atlas buckets a texture panel is allowed to write to (Slice 3b
+ * atlasKind generalization). `player` is deliberately excluded — no
+ * collection editor mounts a texture panel for it. */
+const ALLOWED_ATLAS_KINDS = new Set(["terrain", "object", "item"]);
+type AllowedAtlasKind = "terrain" | "object" | "item";
+
+function isAllowedAtlasKind(value: unknown): value is AllowedAtlasKind {
+  return typeof value === "string" && ALLOWED_ATLAS_KINDS.has(value);
+}
 
 function err(message: string, instancePath = "/typeId"): PlanAtlasSaveResult {
   return { ok: false, errors: [{ instancePath, message }] };
@@ -80,23 +96,29 @@ export function planAtlasSave(rawBody: unknown, input: PlanAtlasSaveInput): Plan
     return err(`typeId "${typeId}" is not allowed`);
   }
 
+  if (!isAllowedAtlasKind(body.kind)) {
+    return err(`kind must be one of ${[...ALLOWED_ATLAS_KINDS].join("|")}`, "/kind");
+  }
+  const kind = body.kind;
+
   const isClear = body.clear === true;
 
   // Deep-clone so `input.currentAtlas` (and everything except the target
-  // typeId's entry) is preserved byte-for-byte in the output.
+  // bucket's typeId entry) is preserved byte-for-byte in the output.
   const next: Atlas = structuredClone(input.currentAtlas);
-  next.item ??= {};
+  next[kind] ??= {};
+  const bucket = next[kind] as Record<string, AtlasRegion>;
 
   let region: AtlasRegion | null;
   if (isClear) {
-    delete next.item[typeId];
+    delete bucket[typeId];
     region = null;
   } else {
     const parsed = readRegion(body.region);
     if (!parsed.ok) {
       return { ok: false, errors: [parsed.error] };
     }
-    next.item[typeId] = parsed.region;
+    bucket[typeId] = parsed.region;
     region = parsed.region;
   }
 

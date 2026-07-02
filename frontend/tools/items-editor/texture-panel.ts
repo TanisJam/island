@@ -1,6 +1,6 @@
 import { footprintFromDrag, pastDragThreshold, type Footprint, type Point } from "../shared/picking";
 import { parseAtlas, type Atlas } from "../../src/render/assets";
-import { buildSavePayload, imagePxFromClientPoint, previewScale } from "./texture-panel-math";
+import { buildSavePayload, imagePxFromClientPoint, previewScale, type AtlasBucketKind } from "./texture-panel-math";
 
 /**
  * Self-contained texture panel controller for the items-editor detail view
@@ -17,8 +17,12 @@ import { buildSavePayload, imagePxFromClientPoint, previewScale } from "./textur
  * form's save.
  *
  * SECURITY (gate-review note 1): every POST to `/__save-atlas` is built via
- * `buildSavePayload`, which emits ONLY `{typeId, region}` or
- * `{typeId, clear:true}` — never a full atlas, never a path/file field.
+ * `buildSavePayload`, which emits ONLY `{typeId, kind, region}` or
+ * `{typeId, kind, clear:true}` — never a full atlas, never a path/file
+ * field. `kind` selects the atlas bucket (`terrain`/`object`/`item`) this
+ * panel instance was mounted for (Slice 3b atlasKind generalization,
+ * design.md "Texture panel mounts by atlasKind") — allow-listed
+ * server-side in `plan-atlas-save.ts`, never trusted as a path.
  *
  * FRESHNESS (gate-review note 2): `/atlas.json` is re-fetched fresh
  * (`cache: "no-store"`) on every `selectItem` call and again after a
@@ -36,6 +40,10 @@ const ATLAS_ROUTE = "/atlas.json";
 
 export interface TexturePanelOptions {
   mountEl: HTMLElement;
+  /** Which atlas bucket this panel instance reads/writes — `item` for the
+   * items pane, `terrain` for terrains, `object` for world-objects (once
+   * built). Mirrors the collection's `COLLECTIONS[id].atlasKind`. */
+  atlasKind: AtlasBucketKind;
 }
 
 export interface TexturePanelHandle {
@@ -53,7 +61,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   return node;
 }
 
-export function createTexturePanel({ mountEl }: TexturePanelOptions): TexturePanelHandle {
+export function createTexturePanel({ mountEl, atlasKind }: TexturePanelOptions): TexturePanelHandle {
   mountEl.innerHTML = "";
   mountEl.classList.add("texture-panel-body");
 
@@ -238,7 +246,7 @@ export function createTexturePanel({ mountEl }: TexturePanelOptions): TexturePan
         await ensureTileset(freshAtlas.image);
         if (token !== requestToken) return; // superseded by a newer selectItem/clearSelection
         atlas = freshAtlas;
-        const region = atlas.item?.[typeId] ?? null;
+        const region = atlas[atlasKind]?.[typeId] ?? null;
         selection = region ? { x: region.x, y: region.y, w: region.w, h: region.h } : null;
         setStatus("");
         setPanelState("ready");
@@ -266,9 +274,9 @@ export function createTexturePanel({ mountEl }: TexturePanelOptions): TexturePan
     const res = await fetch(SAVE_ROUTE, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // gate-review note 1: EXACTLY {typeId, region} or {typeId, clear:true}
-      // — never a full atlas, path, or file field.
-      body: JSON.stringify(buildSavePayload(typeId, region)),
+      // gate-review note 1: EXACTLY {typeId, kind, region} or {typeId, kind,
+      // clear:true} — never a full atlas, path, or file field.
+      body: JSON.stringify(buildSavePayload(typeId, atlasKind, region)),
     });
     return (await res.json()) as SaveAtlasResponse;
   }
@@ -288,7 +296,7 @@ export function createTexturePanel({ mountEl }: TexturePanelOptions): TexturePan
       // gate-review note 2: re-fetch fresh rather than trusting our own
       // in-memory copy after the write.
       atlas = await loadAtlasFresh();
-      const region = atlas.item?.[typeId] ?? null;
+      const region = atlas[atlasKind]?.[typeId] ?? null;
       selection = region ? { x: region.x, y: region.y, w: region.w, h: region.h } : null;
       setStatus("Saved.", "success");
       renderPreview();

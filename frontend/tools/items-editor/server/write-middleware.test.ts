@@ -77,6 +77,8 @@ const validItem = {
   tags: ["stone"],
 };
 
+const validTerrain = { id: "sand", name: "Sand", walkable: true, tags: ["ground"] };
+
 function withRepoRootFixture<T>(fn: (root: string) => Promise<T>): Promise<T> {
   const dir = mkdtempSync(join(tmpdir(), "items-editor-write-mw-test-"));
   mkdirSync(join(dir, "catalog"), { recursive: true });
@@ -84,6 +86,7 @@ function withRepoRootFixture<T>(fn: (root: string) => Promise<T>): Promise<T> {
   writeFileSync(join(dir, "catalog", "meta.json"), `${JSON.stringify(baseMeta, null, 2)}\n`);
   writeFileSync(join(dir, "catalog", "knowledge.json"), `${JSON.stringify([validKnowledge], null, 2)}\n`);
   writeFileSync(join(dir, "catalog", "items.json"), `${JSON.stringify([validItem], null, 2)}\n`);
+  writeFileSync(join(dir, "catalog", "terrains.json"), `${JSON.stringify([validTerrain], null, 2)}\n`);
   copyFileSync(join(realRepoRoot, "schemas", "common.json"), join(dir, "schemas", "common.json"));
   copyFileSync(join(realRepoRoot, "schemas", "catalog.json"), join(dir, "schemas", "catalog.json"));
   return (async () => {
@@ -138,6 +141,23 @@ test("createCollectionSaveHandler: POST /research writes catalog/research.json a
       assert.equal(json.catalogVersion, "0.1.1");
       const onDisk = JSON.parse(readFileSync(join(root, "catalog", "research.json"), "utf-8"));
       assert.equal(onDisk.length, 2);
+      const meta = JSON.parse(readFileSync(join(root, "catalog", "meta.json"), "utf-8"));
+      assert.equal(meta.catalogVersion, "0.1.1");
+    });
+  });
+});
+
+test("createCollectionSaveHandler: POST /terrains writes catalog/terrains.json and bumps catalogVersion (Slice 3b — proves a BRAND-NEW terrain id, not one of the 6 seed terrains, saves end-to-end)", async () => {
+  await withRepoRootFixture(async (root) => {
+    await withServer(createCollectionSaveHandler(root), async (baseUrl) => {
+      const newTerrain = { id: "swamp", name: "Swamp", walkable: false, tags: ["wet", "hazard"] };
+      const { status, json } = await post(`${baseUrl}/terrains`, { records: [validTerrain, newTerrain] });
+      assert.equal(status, 200);
+      assert.equal(json.ok, true);
+      assert.equal(json.catalogVersion, "0.1.1");
+      const onDisk = JSON.parse(readFileSync(join(root, "catalog", "terrains.json"), "utf-8"));
+      assert.equal(onDisk.length, 2);
+      assert.equal(onDisk[1].id, "swamp");
       const meta = JSON.parse(readFileSync(join(root, "catalog", "meta.json"), "utf-8"));
       assert.equal(meta.catalogVersion, "0.1.1");
     });

@@ -11,6 +11,7 @@ import { createTexturePanel } from "./texture-panel";
 import { mountCollectionEngine, type EngineElements } from "./engine";
 import { KNOWLEDGE_DESCRIPTOR } from "./shared/descriptors/knowledge";
 import { RESEARCH_DESCRIPTOR } from "./shared/descriptors/research";
+import { TERRAINS_DESCRIPTOR } from "./shared/descriptors/terrains";
 
 /**
  * Master-detail wiring for the items editor (design.md "Components & Data
@@ -56,7 +57,7 @@ const texturePanelMountEl = mustEl<HTMLDivElement>("texture-panel-mount");
  * `savedSnapshot` and the `/__save-items` flow above. It is only told which
  * item is selected/deselected.
  */
-const texturePanel = createTexturePanel({ mountEl: texturePanelMountEl });
+const texturePanel = createTexturePanel({ mountEl: texturePanelMountEl, atlasKind: "item" });
 
 interface Fields {
   id: TextFieldWidget;
@@ -471,12 +472,15 @@ const collectionSwitcherEl = mustEl<HTMLElement>("collection-switcher");
 const itemsTabBtn = mustEl<HTMLButtonElement>("collection-tab-items");
 const knowledgeTabBtn = mustEl<HTMLButtonElement>("collection-tab-knowledge");
 const researchTabBtn = mustEl<HTMLButtonElement>("collection-tab-research");
+const terrainsTabBtn = mustEl<HTMLButtonElement>("collection-tab-terrains");
 const itemsPaneEl = mustEl<HTMLElement>("items-pane");
 const knowledgePaneEl = mustEl<HTMLElement>("knowledge-pane");
 const researchPaneEl = mustEl<HTMLElement>("research-pane");
+const terrainsPaneEl = mustEl<HTMLElement>("terrains-pane");
 
 let knowledgeEngineBooted = false;
 let researchEngineBooted = false;
+let terrainsEngineBooted = false;
 
 function activateTab(activeBtn: HTMLButtonElement, ...inactiveBtns: HTMLButtonElement[]): void {
   activeBtn.classList.add("active");
@@ -491,14 +495,16 @@ itemsTabBtn.addEventListener("click", () => {
   itemsPaneEl.hidden = false;
   knowledgePaneEl.hidden = true;
   researchPaneEl.hidden = true;
-  activateTab(itemsTabBtn, knowledgeTabBtn, researchTabBtn);
+  terrainsPaneEl.hidden = true;
+  activateTab(itemsTabBtn, knowledgeTabBtn, researchTabBtn, terrainsTabBtn);
 });
 
 knowledgeTabBtn.addEventListener("click", () => {
   itemsPaneEl.hidden = true;
   knowledgePaneEl.hidden = false;
   researchPaneEl.hidden = true;
-  activateTab(knowledgeTabBtn, itemsTabBtn, researchTabBtn);
+  terrainsPaneEl.hidden = true;
+  activateTab(knowledgeTabBtn, itemsTabBtn, researchTabBtn, terrainsTabBtn);
   if (!knowledgeEngineBooted) {
     knowledgeEngineBooted = true;
     const knowledgeEls: EngineElements = {
@@ -525,7 +531,8 @@ researchTabBtn.addEventListener("click", () => {
   itemsPaneEl.hidden = true;
   knowledgePaneEl.hidden = true;
   researchPaneEl.hidden = false;
-  activateTab(researchTabBtn, itemsTabBtn, knowledgeTabBtn);
+  terrainsPaneEl.hidden = true;
+  activateTab(researchTabBtn, itemsTabBtn, knowledgeTabBtn, terrainsTabBtn);
   if (!researchEngineBooted) {
     researchEngineBooted = true;
     const researchEls: EngineElements = {
@@ -545,6 +552,38 @@ researchTabBtn.addEventListener("click", () => {
       saveStatusEl: mustEl<HTMLSpanElement>("research-save-status"),
     };
     void mountCollectionEngine(RESEARCH_DESCRIPTOR, researchEls).boot();
+  }
+});
+
+terrainsTabBtn.addEventListener("click", () => {
+  itemsPaneEl.hidden = true;
+  knowledgePaneEl.hidden = true;
+  researchPaneEl.hidden = true;
+  terrainsPaneEl.hidden = false;
+  activateTab(terrainsTabBtn, itemsTabBtn, knowledgeTabBtn, researchTabBtn);
+  if (!terrainsEngineBooted) {
+    terrainsEngineBooted = true;
+    const terrainsEls: EngineElements = {
+      catalogVersionEl,
+      addBtn: mustEl<HTMLButtonElement>("add-terrains-record-btn"),
+      listEl: mustEl<HTMLUListElement>("terrains-record-list"),
+      masterEmptyEl: mustEl<HTMLDivElement>("terrains-master-empty"),
+      masterLoadingEl: mustEl<HTMLDivElement>("terrains-master-loading"),
+      masterErrorEl: mustEl<HTMLDivElement>("terrains-master-error"),
+      detailEmptyEl: mustEl<HTMLDivElement>("terrains-detail-empty"),
+      detailFormEl: mustEl<HTMLFormElement>("terrains-detail-form"),
+      errorSummaryEl: mustEl<HTMLDivElement>("terrains-error-summary"),
+      errorSummaryListEl: mustEl<HTMLUListElement>("terrains-error-summary-list"),
+      fieldsEl: mustEl<HTMLDivElement>("terrains-fields"),
+      deleteBtn: mustEl<HTMLButtonElement>("delete-terrains-record-btn"),
+      saveBtn: mustEl<HTMLButtonElement>("terrains-save-btn"),
+      saveStatusEl: mustEl<HTMLSpanElement>("terrains-save-status"),
+      // atlasKind:"terrain" (Slice 3b) — the generic engine mounts its own
+      // texture panel into this element; `knowledge`/`research` never pass
+      // this field, so no panel mounts for them (atlasKind: null).
+      texturePanelMountEl: mustEl<HTMLDivElement>("terrains-texture-panel-mount"),
+    };
+    void mountCollectionEngine(TERRAINS_DESCRIPTOR, terrainsEls).boot();
   }
 });
 void collectionSwitcherEl; // referenced only to fail fast via mustEl if index.html's markup drifts

@@ -55,7 +55,7 @@ async function post(url: string, body: unknown): Promise<{ status: number; json:
 
 test("atlas-write-middleware: patches only the target typeId, preserving every other entry, on disk", async () => {
   await withServer(async ({ url, atlasPath }) => {
-    const { status, json } = await post(url, { typeId: "crude_tool", region: { x: 1, y: 1, w: 16, h: 16 } });
+    const { status, json } = await post(url, { typeId: "crude_tool", kind: "item", region: { x: 1, y: 1, w: 16, h: 16 } });
     assert.equal(status, 200);
     assert.equal(json.ok, true);
     const onDisk = JSON.parse(readFileSync(atlasPath, "utf-8")) as Atlas;
@@ -65,10 +65,33 @@ test("atlas-write-middleware: patches only the target typeId, preserving every o
   });
 });
 
+test("atlas-write-middleware: kind:\"terrain\" patches the terrain bucket on disk (Slice 3b atlasKind generalization)", async () => {
+  await withServer(async ({ url, atlasPath }) => {
+    const { status, json } = await post(url, { typeId: "swamp", kind: "terrain", region: { x: 5, y: 5, w: 16, h: 16 } });
+    assert.equal(status, 200);
+    assert.equal(json.ok, true);
+    const onDisk = JSON.parse(readFileSync(atlasPath, "utf-8")) as Atlas;
+    assert.deepEqual(onDisk.terrain?.swamp, { x: 5, y: 5, w: 16, h: 16 });
+    assert.deepEqual(onDisk.terrain?.sand, baseAtlas.terrain?.sand);
+    assert.deepEqual(onDisk.item?.simple_axe, baseAtlas.item?.simple_axe);
+  });
+});
+
+test("atlas-write-middleware: rejects an unknown/hostile kind with 400 and does not write to disk", async () => {
+  await withServer(async ({ url, atlasPath }) => {
+    const before = readFileSync(atlasPath, "utf-8");
+    const { status, json } = await post(url, { typeId: "crude_tool", kind: "player", region: { x: 1, y: 1, w: 16, h: 16 } });
+    assert.equal(status, 400);
+    assert.equal(json.ok, false);
+    assert.equal(readFileSync(atlasPath, "utf-8"), before);
+  });
+});
+
 test("atlas-write-middleware: SECURITY — client cannot redirect the write target; hostile path/file/target/full-atlas fields are ignored", async () => {
   await withServer(async ({ url, atlasPath }) => {
     const { status, json } = await post(url, {
       typeId: "crude_tool",
+      kind: "item",
       region: { x: 2, y: 2, w: 16, h: 16 },
       path: "../../etc/passwd",
       file: "/etc/passwd",
@@ -92,14 +115,14 @@ test("atlas-write-middleware: SECURITY — client cannot redirect the write targ
 
 test("atlas-write-middleware: fresh read-modify-write — a mapping written externally between requests survives a subsequent save", async () => {
   await withServer(async ({ url, atlasPath }) => {
-    await post(url, { typeId: "crude_tool", region: { x: 1, y: 1, w: 16, h: 16 } });
+    await post(url, { typeId: "crude_tool", kind: "item", region: { x: 1, y: 1, w: 16, h: 16 } });
     // Simulate another session/tool (e.g. atlas-editor) writing a new
     // mapping directly to disk between this client's saves.
     const midway = JSON.parse(readFileSync(atlasPath, "utf-8")) as Atlas;
     midway.item = { ...midway.item, external_item: { x: 99, y: 99, w: 16, h: 16 } };
     writeFileSync(atlasPath, JSON.stringify(midway, null, 2));
 
-    const { status, json } = await post(url, { typeId: "bark", region: { x: 3, y: 3, w: 16, h: 16 } });
+    const { status, json } = await post(url, { typeId: "bark", kind: "item", region: { x: 3, y: 3, w: 16, h: 16 } });
     assert.equal(status, 200);
     assert.equal(json.ok, true);
     const onDisk = JSON.parse(readFileSync(atlasPath, "utf-8")) as Atlas;
@@ -119,7 +142,7 @@ test("atlas-write-middleware: rejects non-POST with 405", async () => {
 test("atlas-write-middleware: rejects an invalid region with 400 and does not write to disk", async () => {
   await withServer(async ({ url, atlasPath }) => {
     const before = readFileSync(atlasPath, "utf-8");
-    const { status, json } = await post(url, { typeId: "crude_tool", region: { x: "bad", y: 1, w: 16, h: 16 } });
+    const { status, json } = await post(url, { typeId: "crude_tool", kind: "item", region: { x: "bad", y: 1, w: 16, h: 16 } });
     assert.equal(status, 400);
     assert.equal(json.ok, false);
     assert.equal(readFileSync(atlasPath, "utf-8"), before);
@@ -138,7 +161,7 @@ test("atlas-write-middleware: rejects a hostile __proto__ typeId with 400 and do
 
 test("atlas-write-middleware: clear removes a mapping on disk", async () => {
   await withServer(async ({ url, atlasPath }) => {
-    const { status, json } = await post(url, { typeId: "simple_axe", clear: true });
+    const { status, json } = await post(url, { typeId: "simple_axe", kind: "item", clear: true });
     assert.equal(status, 200);
     assert.equal(json.region, null);
     const onDisk = JSON.parse(readFileSync(atlasPath, "utf-8")) as Atlas;

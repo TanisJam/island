@@ -24,14 +24,19 @@ test("previewScale: degenerate maxPx falls back to scale 1", () => {
   assert.deepEqual(previewScale({ w: 16, h: 16 }, 0), { scale: 1, dw: 16, dh: 16 });
 });
 
-test("buildSavePayload: a picked footprint builds a {typeId, region} payload with exactly x/y/w/h", () => {
-  const payload = buildSavePayload("simple_axe", { x: 32, y: 1232, w: 16, h: 16 });
-  assert.deepEqual(payload, { typeId: "simple_axe", region: { x: 32, y: 1232, w: 16, h: 16 } });
+test("buildSavePayload: a picked footprint builds a {typeId, kind, region} payload with exactly x/y/w/h", () => {
+  const payload = buildSavePayload("simple_axe", "item", { x: 32, y: 1232, w: 16, h: 16 });
+  assert.deepEqual(payload, { typeId: "simple_axe", kind: "item", region: { x: 32, y: 1232, w: 16, h: 16 } });
 });
 
-test("buildSavePayload: a null region (cleared selection) builds a {typeId, clear:true} payload", () => {
-  const payload = buildSavePayload("simple_axe", null);
-  assert.deepEqual(payload, { typeId: "simple_axe", clear: true });
+test("buildSavePayload: a null region (cleared selection) builds a {typeId, kind, clear:true} payload", () => {
+  const payload = buildSavePayload("simple_axe", "item", null);
+  assert.deepEqual(payload, { typeId: "simple_axe", kind: "item", clear: true });
+});
+
+test("buildSavePayload: carries a non-item kind through unchanged (Slice 3b atlasKind generalization)", () => {
+  const payload = buildSavePayload("sand", "terrain", { x: 16, y: 112, w: 16, h: 16 });
+  assert.deepEqual(payload, { typeId: "sand", kind: "terrain", region: { x: 16, y: 112, w: 16, h: 16 } });
 });
 
 test("buildSavePayload: never leaks extra properties from a region-shaped object beyond x/y/w/h", () => {
@@ -41,8 +46,8 @@ test("buildSavePayload: never leaks extra properties from a region-shaped object
     w: number;
     h: number;
   };
-  const payload = buildSavePayload("t", hostile);
-  assert.deepEqual(payload, { typeId: "t", region: { x: 1, y: 2, w: 3, h: 4 } });
+  const payload = buildSavePayload("t", "item", hostile);
+  assert.deepEqual(payload, { typeId: "t", kind: "item", region: { x: 1, y: 2, w: 3, h: 4 } });
 });
 
 test("imagePxFromClientPoint: divides client coords by zoom relative to the canvas origin", () => {

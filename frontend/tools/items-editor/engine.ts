@@ -4,6 +4,7 @@ import { checkIdUnique } from "./shared/id-unique";
 import { COLLECTIONS } from "./shared/collection-registry";
 import { createFieldWidget } from "./widgets/registry";
 import type { FieldWidget } from "./widgets/field-widget";
+import { createTexturePanel, type TexturePanelHandle } from "./texture-panel";
 
 /**
  * Generic, descriptor-driven master-detail engine (design.md "1. Chosen
@@ -18,6 +19,15 @@ import type { FieldWidget } from "./widgets/field-widget";
  * `server/plan-save.ts::planSaveCollection` on the client side. Proven
  * end-to-end on `knowledge` this slice; `items` stays on its own
  * hand-written path in `main.ts` until Slice 5.
+ *
+ * Texture panel mounting (Slice 3b atlasKind generalization, design.md
+ * "Texture panel mounts by atlasKind"): when the collection's registry
+ * entry has a non-null `atlasKind` AND the caller supplied
+ * `els.texturePanelMountEl`, the generic engine mounts its OWN
+ * `createTexturePanel` instance parameterized by that atlasKind — no
+ * collection-specific branching. `knowledge`/`research` (`atlasKind: null`)
+ * never get a `texturePanelMountEl` from `main.ts`, so no panel mounts for
+ * them, matching pre-Slice-3b behavior exactly.
  */
 
 export interface EngineElements {
@@ -35,6 +45,10 @@ export interface EngineElements {
   deleteBtn: HTMLButtonElement;
   saveBtn: HTMLButtonElement;
   saveStatusEl: HTMLElement;
+  /** Only required when the collection's `atlasKind` is non-null (e.g.
+   * `terrains`); omit for `atlasKind: null` collections (`knowledge`,
+   * `research`). */
+  texturePanelMountEl?: HTMLElement;
 }
 
 export interface EngineHandle {
@@ -66,6 +80,9 @@ export function mountCollectionEngine(descriptor: CollectionDescriptor, els: Eng
   const defName = meta.defName;
   const idField = requiredIdField(descriptor);
   const secondaryField = labelField(descriptor, idField);
+
+  const texturePanel: TexturePanelHandle | null =
+    meta.atlasKind && els.texturePanelMountEl ? createTexturePanel({ mountEl: els.texturePanelMountEl, atlasKind: meta.atlasKind }) : null;
 
   let records: Record_[] = [];
   let schemas: SchemaBundle | null = null;
@@ -228,6 +245,7 @@ export function mountCollectionEngine(descriptor: CollectionDescriptor, els: Eng
     els.detailFormEl.hidden = false;
     renderList();
     updateSaveEnabled();
+    texturePanel?.selectItem(String(record[idField.key] ?? ""));
   }
 
   let savedSnapshot = "[]";
@@ -296,6 +314,7 @@ export function mountCollectionEngine(descriptor: CollectionDescriptor, els: Eng
     els.detailEmptyEl.hidden = false;
     clearErrorSummary();
     renderList();
+    texturePanel?.clearSelection();
   });
 
   els.detailFormEl.addEventListener("submit", (e) => {

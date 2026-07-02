@@ -14,6 +14,7 @@
         <button id="collection-tab-items" type="button" class="collection-tab active" aria-pressed="true">Items</button>
         <button id="collection-tab-knowledge" type="button" class="collection-tab" aria-pressed="false">Knowledge</button>
         <button id="collection-tab-research" type="button" class="collection-tab" aria-pressed="false">Research</button>
+        <button id="collection-tab-terrains" type="button" class="collection-tab" aria-pressed="false">Terrains</button>
       </nav>
       <div id="catalog-version" class="catalog-version"></div>
     </header>
@@ -136,6 +137,55 @@
             <div class="detail-actions-right">
               <span id="research-save-status" class="save-status" role="status" aria-live="polite"></span>
               <button id="research-save-btn" type="submit" class="btn btn-primary">Save</button>
+            </div>
+          </div>
+        </form>
+      </section>
+    </main>
+
+    <!--
+      Third generic descriptor-driven pane (Slice 3b) — `terrains` is the
+      FIRST generic-engine collection with a non-null `atlasKind`
+      ("terrain"), so it gets a `#terrains-texture-panel-mount` section,
+      mounted by `engine.ts` itself (design.md "Texture panel mounts by
+      atlasKind", Slice 3b atlasKind generalization). Same shape as
+      `#research-pane`; ids are prefixed `terrains-` per the Slice 2
+      convention. `id` is a plain, freely-addable text field here (Slice 3a
+      opened `TerrainType` to a string) — not an enum-select.
+    -->
+    <main id="terrains-pane" class="layout" hidden>
+      <section class="master-pane" aria-label="Terrains list">
+        <div class="master-header">
+          <h2>Terrains</h2>
+          <button id="add-terrains-record-btn" type="button" class="btn btn-primary" disabled>+ New entry</button>
+        </div>
+        <ul id="terrains-record-list" class="item-list"></ul>
+        <div id="terrains-master-empty" class="empty-state" hidden>No entries yet. Add one to get started.</div>
+        <div id="terrains-master-loading" class="loading-state">Loading catalog…</div>
+        <div id="terrains-master-error" class="error-state" role="alert" hidden></div>
+      </section>
+
+      <section class="detail-pane" aria-label="Entry detail form">
+        <div id="terrains-detail-empty" class="empty-state">Select an entry on the left, or add a new one.</div>
+
+        <form id="terrains-detail-form" novalidate hidden>
+          <div id="terrains-error-summary" class="error-summary" role="alert" hidden>
+            <p class="error-summary-title">Fix the following before saving:</p>
+            <ul id="terrains-error-summary-list"></ul>
+          </div>
+
+          <section class="texture-panel" aria-label="Terrain sprite">
+            <h3 class="texture-panel-heading">Sprite</h3>
+            <div id="terrains-texture-panel-mount"></div>
+          </section>
+
+          <div id="terrains-fields"></div>
+
+          <div class="detail-actions">
+            <button id="delete-terrains-record-btn" type="button" class="btn btn-danger">Delete entry</button>
+            <div class="detail-actions-right">
+              <span id="terrains-save-status" class="save-status" role="status" aria-live="polite"></span>
+              <button id="terrains-save-btn" type="submit" class="btn btn-primary">Save</button>
             </div>
           </div>
         </form>

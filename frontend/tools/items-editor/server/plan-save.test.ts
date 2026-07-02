@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { planSave, planSaveCollection, reconstructRecord, type PlanSaveInput } from "./plan-save";
 import { KNOWLEDGE_DESCRIPTOR } from "../shared/descriptors/knowledge";
 import { RESEARCH_DESCRIPTOR } from "../shared/descriptors/research";
+import { TERRAINS_DESCRIPTOR } from "../shared/descriptors/terrains";
 import { COLLECTIONS } from "../shared/collection-registry";
 
 /**
@@ -330,5 +331,72 @@ test("planSaveCollection (research): rejects duplicate ids within the records ar
   assert.equal(result.ok, false);
   if (!result.ok) {
     assert.ok(result.errors.some((e) => e.message.includes("heat_containment")));
+  }
+});
+
+// --- terrains (Slice 3b) — proves reconstructRecord/planSaveCollection also ---
+// generalize to a freely-addable-id collection: `id` has no schema enum
+// anymore (Slice 3a opened TerrainType to a plain string), so a BRAND-NEW
+// terrain id (not one of the 6 seed terrains) must save successfully.
+
+const validTerrain: Record<string, unknown> = {
+  id: "swamp",
+  name: "Swamp",
+  walkable: false,
+  tags: ["wet", "hazard"],
+  observation: "Ground squelches underfoot.",
+};
+
+test("reconstructRecord (terrains): copies ONLY descriptor keys — an extra/unknown field on the raw input is stripped", () => {
+  const raw = { ...validTerrain, path: "../../etc/passwd", file: "/etc/passwd" };
+  const record = reconstructRecord(TERRAINS_DESCRIPTOR, raw);
+  assert.deepEqual(Object.keys(record).sort(), ["id", "name", "observation", "tags", "walkable"]);
+  assert.equal(JSON.stringify(record).includes("etc/passwd"), false);
+});
+
+test("reconstructRecord (terrains): an absent optional field (observation) is omitted from the output, not null", () => {
+  const { observation: _observation, ...withoutObservation } = validTerrain;
+  const record = reconstructRecord(TERRAINS_DESCRIPTOR, withoutObservation);
+  assert.equal("observation" in record, false);
+});
+
+test("reconstructRecord (terrains): the `tags`-kind field is deep-cloned, not a shared reference", () => {
+  const tags = ["wet", "hazard"];
+  const record = reconstructRecord(TERRAINS_DESCRIPTOR, { ...validTerrain, tags });
+  assert.notEqual(record.tags, tags);
+  assert.deepEqual(record.tags, tags);
+});
+
+test("planSaveCollection (terrains): a BRAND-NEW terrain id (not one of the 6 seed terrains) saves successfully — proves terrain-add works end-to-end (Slice 3a+3b)", () => {
+  const result = planSaveCollection(
+    { records: [validTerrain] },
+    { descriptor: TERRAINS_DESCRIPTOR, defName: COLLECTIONS.terrains?.defName ?? "TerrainTypeDef", currentMeta, schemas },
+  );
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.catalogVersion, "0.1.1");
+    const records = JSON.parse(result.dataJson);
+    assert.deepEqual(records[0], validTerrain);
+  }
+});
+
+test("planSaveCollection (terrains): rejects a schema-invalid record (missing required `walkable`) — no write plan is produced", () => {
+  const { walkable: _walkable, ...withoutWalkable } = validTerrain;
+  const result = planSaveCollection(
+    { records: [withoutWalkable] },
+    { descriptor: TERRAINS_DESCRIPTOR, defName: COLLECTIONS.terrains?.defName ?? "TerrainTypeDef", currentMeta, schemas },
+  );
+  assert.equal(result.ok, false);
+  assert.equal("dataJson" in result, false);
+});
+
+test("planSaveCollection (terrains): rejects duplicate ids within the records array", () => {
+  const result = planSaveCollection(
+    { records: [validTerrain, { ...validTerrain }] },
+    { descriptor: TERRAINS_DESCRIPTOR, defName: COLLECTIONS.terrains?.defName ?? "TerrainTypeDef", currentMeta, schemas },
+  );
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.ok(result.errors.some((e) => e.message.includes("swamp")));
   }
 });

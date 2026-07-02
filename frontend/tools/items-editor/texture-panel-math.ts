@@ -1,4 +1,5 @@
 import type { Footprint, Point } from "../shared/picking";
+import type { AtlasKind } from "./shared/collection-registry";
 
 /**
  * Pure math for the items-editor texture panel (design.md "Slice C — Texture
@@ -7,6 +8,14 @@ import type { Footprint, Point } from "../shared/picking";
  * from `../shared/picking` (footprint/drag picking itself is already
  * covered by that module's own tests — nothing is duplicated here).
  */
+
+/**
+ * The subset of `collection-registry.ts`'s `AtlasKind` that can actually
+ * back a texture panel — `null` (no atlas) never reaches this module
+ * because `engine.ts` only mounts the panel when `atlasKind` is set
+ * (design.md "Texture panel mounts by atlasKind", Slice 3b generalization).
+ */
+export type AtlasBucketKind = Exclude<AtlasKind, null>;
 
 export interface PreviewScale {
   scale: number;
@@ -31,21 +40,24 @@ export function previewScale(region: { w: number; h: number }, maxPx: number): P
 }
 
 export type SaveAtlasPayload =
-  | { typeId: string; region: { x: number; y: number; w: number; h: number } }
-  | { typeId: string; clear: true };
+  | { typeId: string; kind: AtlasBucketKind; region: { x: number; y: number; w: number; h: number } }
+  | { typeId: string; kind: AtlasBucketKind; clear: true };
 
 /**
  * Builds the exact `POST /__save-atlas` body (spec "Save writes only the
  * selected item's atlas entry" / "Clear an item's texture mapping"; gate
  * review note 1). `region` is reconstructed field-by-field so no stray
  * property on a `Footprint`-shaped value can ever leak into the payload —
- * the server only ever sees `{typeId, region}` or `{typeId, clear:true}`,
- * NEVER a full atlas, path, or file field.
+ * the server only ever sees `{typeId, kind, region}` or `{typeId, kind,
+ * clear:true}`, NEVER a full atlas, path, or file field. `kind` selects the
+ * atlas bucket (`terrain`/`object`/`item`) the panel is mounted for (Slice
+ * 3b atlasKind generalization) — it is NOT a path, just a bucket-key
+ * selector the server allow-lists in `plan-atlas-save.ts`.
  */
-export function buildSavePayload(typeId: string, region: Footprint | null): SaveAtlasPayload {
-  if (!region) return { typeId, clear: true };
+export function buildSavePayload(typeId: string, kind: AtlasBucketKind, region: Footprint | null): SaveAtlasPayload {
+  if (!region) return { typeId, kind, clear: true };
   const { x, y, w, h } = region;
-  return { typeId, region: { x, y, w, h } };
+  return { typeId, kind, region: { x, y, w, h } };
 }
 
 /**

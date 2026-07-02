@@ -34,7 +34,7 @@ function input(atlas: Atlas = baseAtlas): PlanAtlasSaveInput {
 // --- Patch / preserve --------------------------------------------------
 
 test("planAtlasSave: patch sets item[typeId] and preserves every other kind/entry", () => {
-  const result = planAtlasSave({ typeId: "crude_tool", region: { x: 64, y: 64, w: 16, h: 16 } }, input());
+  const result = planAtlasSave({ typeId: "crude_tool", kind: "item", region: { x: 64, y: 64, w: 16, h: 16 } }, input());
   assert.equal(result.ok, true);
   if (result.ok) {
     const atlas = JSON.parse(result.atlasJson) as Atlas;
@@ -51,7 +51,7 @@ test("planAtlasSave: patch sets item[typeId] and preserves every other kind/entr
 });
 
 test("planAtlasSave: patch on a previously unmapped typeId creates the entry", () => {
-  const result = planAtlasSave({ typeId: "new_item", region: { x: 1, y: 2, w: 16, h: 16 } }, input());
+  const result = planAtlasSave({ typeId: "new_item", kind: "item", region: { x: 1, y: 2, w: 16, h: 16 } }, input());
   assert.equal(result.ok, true);
   if (result.ok) {
     const atlas = JSON.parse(result.atlasJson) as Atlas;
@@ -62,7 +62,7 @@ test("planAtlasSave: patch on a previously unmapped typeId creates the entry", (
 // --- Clear ---------------------------------------------------------------
 
 test("planAtlasSave: clear removes item[typeId], preserves the rest", () => {
-  const result = planAtlasSave({ typeId: "bark", clear: true }, input());
+  const result = planAtlasSave({ typeId: "bark", kind: "item", clear: true }, input());
   assert.equal(result.ok, true);
   if (result.ok) {
     assert.equal(result.region, null);
@@ -73,7 +73,7 @@ test("planAtlasSave: clear removes item[typeId], preserves the rest", () => {
 });
 
 test("planAtlasSave: clearing an absent key is a safe no-op (still ok:true)", () => {
-  const result = planAtlasSave({ typeId: "never_mapped", clear: true }, input());
+  const result = planAtlasSave({ typeId: "never_mapped", kind: "item", clear: true }, input());
   assert.equal(result.ok, true);
   if (result.ok) {
     const atlas = JSON.parse(result.atlasJson) as Atlas;
@@ -81,11 +81,53 @@ test("planAtlasSave: clearing an absent key is a safe no-op (still ok:true)", ()
   }
 });
 
+// --- kind (Slice 3b atlasKind generalization) -----------------------------
+
+test("planAtlasSave: kind:\"terrain\" patches the terrain bucket, leaves item/object/player untouched", () => {
+  const result = planAtlasSave({ typeId: "swamp", kind: "terrain", region: { x: 5, y: 5, w: 16, h: 16 } }, input());
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    const atlas = JSON.parse(result.atlasJson) as Atlas;
+    assert.deepEqual(atlas.terrain?.swamp, { x: 5, y: 5, w: 16, h: 16 });
+    assert.deepEqual(atlas.terrain?.sand, baseAtlas.terrain?.sand);
+    assert.deepEqual(atlas.item, baseAtlas.item);
+    assert.deepEqual(atlas.object, baseAtlas.object);
+  }
+});
+
+test("planAtlasSave: kind:\"object\" patches the object bucket, leaves the rest untouched", () => {
+  const result = planAtlasSave({ typeId: "campfire", kind: "object", region: { x: 7, y: 7, w: 16, h: 16 } }, input());
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    const atlas = JSON.parse(result.atlasJson) as Atlas;
+    assert.deepEqual(atlas.object?.campfire, { x: 7, y: 7, w: 16, h: 16 });
+    assert.deepEqual(atlas.object?.tree, baseAtlas.object?.tree);
+    assert.deepEqual(atlas.item, baseAtlas.item);
+    assert.deepEqual(atlas.terrain, baseAtlas.terrain);
+  }
+});
+
+test("planAtlasSave: rejects a missing kind", () => {
+  const result = planAtlasSave({ typeId: "crude_tool", region: { x: 1, y: 1, w: 16, h: 16 } }, input());
+  assert.equal(result.ok, false);
+});
+
+test("planAtlasSave: rejects kind:\"player\" — no editor mounts a texture panel for it", () => {
+  const result = planAtlasSave({ typeId: "crude_tool", kind: "player", region: { x: 1, y: 1, w: 16, h: 16 } }, input());
+  assert.equal(result.ok, false);
+});
+
+test("planAtlasSave: rejects an arbitrary/hostile kind string", () => {
+  const result = planAtlasSave({ typeId: "crude_tool", kind: "__proto__", region: { x: 1, y: 1, w: 16, h: 16 } }, input());
+  assert.equal(result.ok, false);
+});
+
 // --- SECURITY A: full-atlas injection ignored -----------------------------
 
 test("planAtlasSave: SECURITY A — a client-sent full atlas payload is completely ignored", () => {
   const hostileBody = {
     typeId: "crude_tool",
+    kind: "item",
     region: { x: 1, y: 1, w: 16, h: 16 },
     atlas: { image: "EVIL.png", tile: 999, item: { simple_axe: { x: 0, y: 0, w: 1, h: 1 } } },
   };
@@ -105,6 +147,7 @@ test("planAtlasSave: SECURITY A — a client-sent full atlas payload is complete
 test("planAtlasSave: SECURITY B — hostile path/file/target fields are ignored, never leak into output", () => {
   const hostileBody = {
     typeId: "crude_tool",
+    kind: "item",
     region: { x: 1, y: 1, w: 16, h: 16 },
     path: "../../etc/passwd",
     file: "/etc/passwd",
@@ -123,7 +166,7 @@ test("planAtlasSave: SECURITY B — hostile path/file/target fields are ignored,
 
 test("planAtlasSave: SECURITY C — extra/injected keys inside region are dropped, only x/y/w/h survive", () => {
   const hostileRegion = { x: 1, y: 2, w: 16, h: 16, evil: "payload", __proto__: { polluted: true } };
-  const result = planAtlasSave({ typeId: "crude_tool", region: hostileRegion }, input());
+  const result = planAtlasSave({ typeId: "crude_tool", kind: "item", region: hostileRegion }, input());
   assert.equal(result.ok, true);
   if (result.ok) {
     const atlas = JSON.parse(result.atlasJson) as Atlas;
@@ -174,18 +217,18 @@ test("planAtlasSave: rejects non-numeric/NaN/Infinity/negative region fields", (
     { x: 1, y: 1, w: 16, h: -5 },
   ];
   for (const region of cases) {
-    const result = planAtlasSave({ typeId: "crude_tool", region }, input());
+    const result = planAtlasSave({ typeId: "crude_tool", kind: "item", region }, input());
     assert.equal(result.ok, false, `should reject region: ${JSON.stringify(region)}`);
   }
 });
 
 test("planAtlasSave: rejects a missing region when not clearing", () => {
-  const result = planAtlasSave({ typeId: "crude_tool" }, input());
+  const result = planAtlasSave({ typeId: "crude_tool", kind: "item" }, input());
   assert.equal(result.ok, false);
 });
 
 test("planAtlasSave: NO version field is ever invented in the output", () => {
-  const result = planAtlasSave({ typeId: "crude_tool", region: { x: 1, y: 1, w: 16, h: 16 } }, input());
+  const result = planAtlasSave({ typeId: "crude_tool", kind: "item", region: { x: 1, y: 1, w: 16, h: 16 } }, input());
   assert.equal(result.ok, true);
   if (result.ok) {
     assert.equal("version" in JSON.parse(result.atlasJson), false);

@@ -114,6 +114,14 @@ export function lookupRegion(atlas: Atlas, kind: AtlasKind, typeId: string): Atl
 
 // MVP sin sprites: los emojis funcionan como stand-in de arte. Moved verbatim
 // from render/canvas.ts (design.md File Changes — "emoji/color maps removed").
+//
+// Terrain ids are freely addable via the collections editor (collections-editor
+// Slice 3a opened TerrainType to a plain string; Slice 3b added the `terrains`
+// collection UI, including a texture-panel sprite mapping keyed by atlasKind
+// "terrain"). A newly authored terrain with no entry here renders with
+// FALLBACK_TERRAIN_COLOR (flat gray) until either a color is added below or a
+// sprite region is picked in the editor's texture panel — this is expected,
+// not a bug.
 const TERRAIN_COLORS: Record<string, string> = {
   sand: "#d9c089",
   grass: "#6a9a4f",
