@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, fsyncSync, openSync, readFileSync, renameSync, unlinkSync, writeSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,13 +53,31 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 }
 
 /**
- * Atomic write: write to a sibling tmp file, then `renameSync` over the
- * target (rename is atomic within one filesystem, design.md "ADR-3") so
- * the target is never left half-written.
+ * Writes `contents` to `path` and `fsync`s the file descriptor before
+ * closing it, so the data is durable on disk (not just buffered in the
+ * page cache) by the time this returns. Pure side-effect wrapper, kept
+ * standalone so it stays unit-testable independent of the rename step.
  */
-function writeAtomic(targetPath: string, contents: string): void {
+export function writeFileDurable(path: string, contents: string): void {
+  const fd = openSync(path, "w");
+  try {
+    writeSync(fd, contents, null, "utf-8");
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Atomic + durable write: write to a sibling tmp file, `fsync` it so the
+ * data is flushed to disk, THEN `renameSync` over the target (rename is
+ * atomic within one filesystem, design.md "ADR-3": "write tmp -> fsync ->
+ * rename") so the target is never left half-written and never points at
+ * not-yet-durable data.
+ */
+export function writeAtomic(targetPath: string, contents: string): void {
   const tmpPath = `${targetPath}.tmp-${randomBytes(6).toString("hex")}`;
-  writeFileSync(tmpPath, contents, "utf-8");
+  writeFileDurable(tmpPath, contents);
   try {
     renameSync(tmpPath, targetPath);
   } catch (error) {
