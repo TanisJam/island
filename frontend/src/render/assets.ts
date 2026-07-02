@@ -1,21 +1,90 @@
 export type VisualKind = "object" | "item" | "pile" | "player" | "terrain";
 
 /**
+ * A drawable region inside a loaded tileset image. Self-contained (carries
+ * its own `image`) so the `Renderer` can draw a sprite without ever knowing
+ * about an atlas (design.md "Load-bearing seam decision").
+ */
+export interface SpriteRegion {
+  image: CanvasImageSource;
+  sx: number;
+  sy: number;
+  sw: number;
+  sh: number;
+}
+
+/**
  * Everything the renderer needs to draw one visual, regardless of art
- * technology: today only `glyph`/`color` (emoji + flat fill) are populated;
- * `sprite`/`frames`/`scale` are reserved for a future sprite-atlas resolver
- * with zero `Renderer` changes (design.md SEAM 6).
+ * technology: `glyph`/`color` (emoji + flat fill) or `sprite` (tileset
+ * region) — mutually exclusive per draw call (design.md SEAM 6).
  */
 export interface VisualDescriptor {
   glyph?: string;
   color?: string;
-  sprite?: string;
+  sprite?: SpriteRegion;
   frames?: number;
   scale?: number;
 }
 
 export interface AssetResolver {
   resolve(kind: VisualKind, typeId: string, state?: Record<string, unknown>): VisualDescriptor;
+}
+
+/** One mapped region inside `atlas.json`, in tileset pixel coordinates.
+ * `frames` is reserved for future animation support and ignored by this
+ * v1 consumer (spec "Out of Scope"). */
+export interface AtlasRegion {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  frames?: number;
+}
+
+/** `pile` has no atlas entry (design.md Atlas JSON schema) — it always
+ * resolves through the emoji fallback. */
+export type AtlasKind = Exclude<VisualKind, "pile">;
+
+/** Frozen per-kind nested atlas schema (design.md "Atlas JSON schema
+ * (frozen)"). `image` is the tileset filename, `tile` is the tool's picking
+ * grid size in px (not used by this consumer). */
+export interface Atlas {
+  image: string;
+  tile: number;
+  terrain?: Record<string, AtlasRegion>;
+  object?: Record<string, AtlasRegion>;
+  item?: Record<string, AtlasRegion>;
+  player?: Record<string, AtlasRegion>;
+}
+
+const ATLAS_KINDS: AtlasKind[] = ["terrain", "object", "item", "player"];
+
+/**
+ * Validates and returns the parsed `atlas.json` payload, or throws on any
+ * malformed shape. The caller (game.ts boot) is responsible for catching
+ * this and falling back to `createEmojiAssets()` — this function itself
+ * never swallows errors (design.md "Boot failure" — soft-fallback lives at
+ * the call site, not here).
+ */
+export function parseAtlas(json: unknown): Atlas {
+  if (typeof json !== "object" || json === null) throw new Error("Invalid atlas: root is not an object");
+  const obj = json as Record<string, unknown>;
+  if (typeof obj.image !== "string") throw new Error("Invalid atlas: 'image' must be a string");
+  if (typeof obj.tile !== "number") throw new Error("Invalid atlas: 'tile' must be a number");
+  for (const kind of ATLAS_KINDS) {
+    const value = obj[kind];
+    if (value !== undefined && (typeof value !== "object" || value === null)) {
+      throw new Error(`Invalid atlas: '${kind}' must be an object when present`);
+    }
+  }
+  return obj as unknown as Atlas;
+}
+
+/** Pure lookup (design.md "Consumer + draw math"): `atlas[kind]?.[typeId]`,
+ * `null` when unmapped. `kind: "pile"` is excluded at the type level — piles
+ * never have an atlas entry. */
+export function lookupRegion(atlas: Atlas, kind: AtlasKind, typeId: string): AtlasRegion | null {
+  return atlas[kind]?.[typeId] ?? null;
 }
 
 // MVP sin sprites: los emojis funcionan como stand-in de arte. Moved verbatim
@@ -86,6 +155,25 @@ export function createEmojiAssets(): AssetResolver {
         case "player":
           return { glyph: PLAYER_EMOJI, scale: PLAYER_SCALE };
       }
+    },
+  };
+}
+
+/**
+ * Decorates `createEmojiAssets()`: a mapped `typeId` resolves to a `.sprite`
+ * region; anything unmapped (including all `pile`s, which never have an
+ * atlas entry) delegates verbatim to the wrapped emoji resolver — no
+ * duplicated glyph/color logic (spec "createSpriteAssets implements
+ * AssetResolver unchanged").
+ */
+export function createSpriteAssets(atlas: Atlas, image: CanvasImageSource): AssetResolver {
+  const fallback = createEmojiAssets();
+  return {
+    resolve(kind: VisualKind, typeId: string, state: Record<string, unknown> = {}): VisualDescriptor {
+      if (kind === "pile") return fallback.resolve(kind, typeId, state);
+      const region = lookupRegion(atlas, kind, typeId);
+      if (!region) return fallback.resolve(kind, typeId, state);
+      return { sprite: { image, sx: region.x, sy: region.y, sw: region.w, sh: region.h } };
     },
   };
 }
