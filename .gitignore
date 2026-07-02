@@ -31,5 +31,8 @@ Thumbs.db
 # Tooling caches
 .atl/*.cache.json
 
+# Playwright CLI verification artifacts (logs, snapshots, screenshots)
+.playwright-cli/
+
 # Regenerable codegen output (run `pnpm gen` in schemas/ to rebuild)
 schemas/generated/
