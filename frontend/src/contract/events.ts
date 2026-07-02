@@ -184,7 +184,10 @@ export interface WorldObjectRemoved {
 export interface TileChanged {
   type: "TileChanged";
   position: Position;
-  terrain: "sand" | "grass" | "shallow_water" | "dense_jungle" | "dirt" | "rocky_ground";
+  /**
+   * Terrain id, freely addable via the collections editor. Canonical seed ids: sand, grass, shallow_water, dense_jungle, dirt, rocky_ground.
+   */
+  terrain: string;
   walkable: boolean;
 }
 export interface TilesRevealed {
@@ -194,7 +197,10 @@ export interface TilesRevealed {
 export interface Tile {
   x: number;
   y: number;
-  terrain: "sand" | "grass" | "shallow_water" | "dense_jungle" | "dirt" | "rocky_ground";
+  /**
+   * Terrain id, freely addable via the collections editor. Canonical seed ids: sand, grass, shallow_water, dense_jungle, dirt, rocky_ground.
+   */
+  terrain: string;
   walkable: boolean;
   tags: string[];
   visibility: "unseen" | "explored" | "visible";

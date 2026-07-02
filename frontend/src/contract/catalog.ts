@@ -7,7 +7,7 @@ export type TargetSelector =
     }
   | {
       kind: "tile";
-      anyTerrain?: ("sand" | "grass" | "shallow_water" | "dense_jungle" | "dirt" | "rocky_ground")[];
+      anyTerrain?: string[];
       anyTags?: string[];
     }
   | {
@@ -74,7 +74,10 @@ export type Effect =
     }
   | {
       type: "change_tile";
-      terrain: "sand" | "grass" | "shallow_water" | "dense_jungle" | "dirt" | "rocky_ground";
+      /**
+       * Terrain id, freely addable via the collections editor. Canonical seed ids: sand, grass, shallow_water, dense_jungle, dirt, rocky_ground.
+       */
+      terrain: string;
     }
   | {
       type: "reveal_around_target";
@@ -110,7 +113,10 @@ export interface Catalog {
   research: ResearchDef[];
 }
 export interface TerrainTypeDef {
-  id: "sand" | "grass" | "shallow_water" | "dense_jungle" | "dirt" | "rocky_ground";
+  /**
+   * Terrain id, freely addable via the collections editor. Canonical seed ids: sand, grass, shallow_water, dense_jungle, dirt, rocky_ground.
+   */
+  id: string;
   name: string;
   walkable: boolean;
   tags: string[];

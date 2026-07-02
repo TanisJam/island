@@ -1,7 +1,7 @@
 import type { ItemInstance, Pile, Thought, WorldObject } from "../contract/events";
 import type { CatalogIndex } from "./catalog";
 
-export type TerrainId = "sand" | "grass" | "shallow_water" | "dense_jungle" | "dirt" | "rocky_ground";
+export type TerrainId = string;
 export type Position = { x: number; y: number };
 
 export type RuntimeTile = {

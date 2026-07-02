@@ -9,7 +9,8 @@
       "properties": { "x": { "type": "integer" }, "y": { "type": "integer" } }
     },
     "TerrainType": {
-      "enum": ["sand", "grass", "shallow_water", "dense_jungle", "dirt", "rocky_ground"]
+      "type": "string",
+      "description": "Terrain id, freely addable via the collections editor. Canonical seed ids: sand, grass, shallow_water, dense_jungle, dirt, rocky_ground."
     },
     "VisibilityState": { "enum": ["unseen", "explored", "visible"] },
     "ThoughtKind": {
