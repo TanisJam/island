@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { Command, ItemInstance } from "../contract";
+import type { Catalog, Command, ItemInstance } from "../contract";
 import type { ClientSnapshot } from "../state/snapshot";
-import { buildDragOutcome, createDragController, crossedThreshold, type DragControllerDeps } from "./drag";
+import { buildDragOutcome, createDragController, crossedThreshold, footprintValidity, type DragControllerDeps, type DropTarget } from "./drag";
+import { footprintCases, type FootprintCase } from "./footprint-fixtures";
 
 // --- crossedThreshold: pure ------------------------------------------------
 
@@ -143,6 +144,74 @@ test("buildDragOutcome REGRESSION: an unrotated surface-origin item forwards rot
   }
   assert.equal(outcome.command.to.rotation, 0, "unrotated origin still forwards an explicit rotation, not undefined");
 });
+
+// --- footprintValidity: shared verdict-fixture table (tasks.md T8b) -------
+// Consumes `footprint-fixtures.ts`'s table (T6): builds a snapshot+catalog
+// per case and asserts footprintValidity's verdict matches the documented
+// backend rule. Includes the 3 cases migrated from the retired
+// `cellOccupant` (T7) plus every other documented parity case.
+
+const FIXTURE_CATALOG: Catalog = {
+  catalogVersion: "test",
+  terrains: [],
+  items: [
+    { id: "stone", name: "Piedra", description: "", shape: { w: 1, h: 1 }, rotatable: false, properties: {}, tags: [] },
+    { id: "pole", name: "Palo", description: "", shape: { w: 1, h: 2 }, rotatable: true, properties: {}, tags: [] },
+  ],
+  worldObjects: [],
+  knowledge: [],
+  actions: [],
+  research: [],
+};
+
+const FIXTURE_SURFACE_ID = "fixture-surface";
+
+function fixtureDraggedItem(fixture: FootprintCase): ItemInstance {
+  return fixture.kind === "hand"
+    ? { id: fixture.dragged.id, itemTypeId: fixture.dragged.itemTypeId, location: { type: "player_inventory", playerId: "p1", x: 0, y: 0, rotation: fixture.rotation } }
+    : { id: fixture.dragged.id, itemTypeId: fixture.dragged.itemTypeId, location: { type: "surface", surfaceId: FIXTURE_SURFACE_ID, x: 0, y: 0, rotation: fixture.rotation } };
+}
+
+function fixtureOccupiedItems(fixture: FootprintCase): ItemInstance[] {
+  return fixture.occupied.map((occ) =>
+    fixture.kind === "hand"
+      ? { id: occ.id, itemTypeId: occ.itemTypeId, location: { type: "player_inventory", playerId: "p1", x: occ.x, y: occ.y, rotation: occ.rotation } }
+      : { id: occ.id, itemTypeId: occ.itemTypeId, location: { type: "surface", surfaceId: FIXTURE_SURFACE_ID, x: occ.x, y: occ.y, rotation: occ.rotation } },
+  );
+}
+
+function fixtureSnapshot(fixture: FootprintCase): ClientSnapshot {
+  return {
+    zone: { id: "z1", width: 10, height: 10 },
+    visionRadius: 5,
+    tiles: [],
+    objects: [],
+    piles: [],
+    items: fixtureOccupiedItems(fixture),
+    player: { id: "p1", name: "Náufrago", position: { x: 0, y: 0 }, energy: 100, maxEnergy: 100, health: 100, maxHealth: 100, knowledge: [] },
+    handSlots: { left: { x: 0, y: 0 }, right: { x: 3, y: 0 } },
+    thoughtLog: [],
+    discovered: new Set<string>(),
+    catalogVersion: "test",
+  };
+}
+
+function fixtureTarget(fixture: FootprintCase): DropTarget {
+  return fixture.kind === "hand"
+    ? { kind: "hand", hand: fixture.hand ?? "left" }
+    : { kind: "surface", surfaceId: FIXTURE_SURFACE_ID, x: fixture.anchor.x, y: fixture.anchor.y };
+}
+
+for (const fixture of footprintCases) {
+  test(`footprintValidity fixture: ${fixture.name}`, () => {
+    const snapshot = fixtureSnapshot(fixture);
+    const item = fixtureDraggedItem(fixture);
+    const target = fixtureTarget(fixture);
+    const surfaceDims = fixture.kind === "surface" ? fixture.grid : undefined;
+    const verdict = footprintValidity(snapshot, FIXTURE_CATALOG, item, target, fixture.exceptId, surfaceDims);
+    assert.equal(verdict, fixture.expected, fixture.name);
+  });
+}
 
 // --- snapshotWith: shared fixture builder for the DOM smoke tests below ---
 
