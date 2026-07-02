@@ -375,6 +375,10 @@ body {
   grid-template-columns: repeat(4, var(--cell-size));
   grid-auto-rows: var(--cell-size);
   gap: var(--cell-gap);
+  /* Pointer drags must never start a native text/image selection (or a
+     browser navigation drag in Firefox) — grids are drag surfaces. */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* Spanning glyph overlay for MULTI-CELL items only (design.md Decision 1/2):
