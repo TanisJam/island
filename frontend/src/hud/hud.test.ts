@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import type { Catalog, ItemInstance, Thought } from "../contract";
 import type { ClientSnapshot } from "../state/snapshot";
 import {
+  CELL_GAP_PX,
+  CELL_SIZE_PX,
   hasDiscoveryThought,
   inventoryAddedMessage,
   inventoryCellsForItem,
@@ -360,5 +362,100 @@ test("renderInventoryGrid: a non-hand occupied cell's onTap calls onEquip; an oc
 
     assert.deepEqual(equipped, ["bag1"]);
     assert.deepEqual(dropped, ["hand1"]);
+  });
+});
+
+// --- Multi-cell overlay rendering (item-drag-drop / diablo-inventory,
+// tasks.md T8a) — ADDITIVE new tests. NOTHING above this comment was
+// rewritten/migrated: the pre-existing "1x2 fills BOTH coordinates" test
+// above already got its `grid.children.length` invariant corrected (16
+// per-coordinate cells + 1 overlay for that single multi-cell item = 17),
+// but carries NO glyph assertion to migrate — confirmed against source, per
+// design.md Decision 8. -----------------------------------------------------
+
+function overlaysOf(grid: FakeCellElement): FakeCellElement[] {
+  return grid.children.filter((c) => c.classes.has("item-overlay"));
+}
+
+test("renderInventoryGrid: a single-cell item renders NO overlay and keeps its glyph on the cell (unchanged path)", () => {
+  withFakeDocument(() => {
+    const item = inventoryItemAt("it1", "small_stone", 2, 2);
+    const snapshot = fullInventorySnapshot([item]);
+    const grid = renderInventoryGrid(surfaceCatalog, snapshot, noopHandlers) as unknown as FakeCellElement;
+
+    assert.equal(overlaysOf(grid).length, 0, "a grid holding only single-cell items has ZERO overlays");
+    assert.equal(grid.children.length, 16, "no overlay appended: still exactly 16 cells");
+    const cell = grid.children[2 * 4 + 2]!; // row-major (y*width + x) for (2,2)
+    assert.equal(cell.textContent, "🪨", "the single-cell item keeps its glyph directly on the cell");
+  });
+});
+
+test("renderInventoryGrid: a multi-cell item appends exactly ONE overlay carrying the glyph; its covered cells render glyph-empty", () => {
+  withFakeDocument(() => {
+    const item = inventoryItemAt("it1", "poor_wood", 1, 0); // unrotated 1x2, vertical
+    const snapshot = fullInventorySnapshot([item]);
+    const grid = renderInventoryGrid(surfaceCatalog, snapshot, noopHandlers) as unknown as FakeCellElement;
+
+    const overlays = overlaysOf(grid);
+    assert.equal(overlays.length, 1, "exactly one overlay for the one multi-cell item");
+    assert.equal(overlays[0]?.textContent, "🪵", "the overlay carries the item's glyph");
+    assert.equal(overlays[0]?.attrs["aria-hidden"], "true", "the overlay is decorative — the cell's title stays the accessible name");
+    assert.equal(overlays[0]?.style.pointerEvents, "none", "pointer-events:none set INLINE, double-locking the CSS class");
+
+    const coveredCells = [grid.children[0 * 4 + 1]!, grid.children[1 * 4 + 1]!]; // (1,0) and (1,1), row-major
+    for (const cell of coveredCells) {
+      assert.equal(cell.textContent, "", "the glyph moved off the covered cells onto the overlay");
+      assert.ok(cell.classes.has("filled"), "covered cells still keep their 'filled' class (occupancy/drop-target semantics unchanged)");
+    }
+  });
+});
+
+test("renderInventoryGrid: the overlay's inline geometry is computed from CELL_SIZE_PX/CELL_GAP_PX at the item's anchor", () => {
+  withFakeDocument(() => {
+    const item = inventoryItemAt("it1", "poor_wood", 1, 0); // unrotated 1x2: w=1, h=2
+    const snapshot = fullInventorySnapshot([item]);
+    const grid = renderInventoryGrid(surfaceCatalog, snapshot, noopHandlers) as unknown as FakeCellElement;
+    const overlay = overlaysOf(grid)[0]!;
+
+    const step = CELL_SIZE_PX + CELL_GAP_PX;
+    const expectedWidth = 1 * CELL_SIZE_PX; // w=1: no inner gap to add
+    const expectedHeight = 2 * CELL_SIZE_PX + 1 * CELL_GAP_PX; // h=2: one inner gap
+
+    assert.equal(overlay.style.left, `${1 * step}px`);
+    assert.equal(overlay.style.top, `${0 * step}px`);
+    assert.equal(overlay.style.width, `${expectedWidth}px`);
+    assert.equal(overlay.style.height, `${expectedHeight}px`);
+    assert.equal(overlay.style.fontSize, `${Math.round(0.58 * Math.min(expectedWidth, expectedHeight))}px`, "font-size scales toward the SMALLER footprint dimension, sourced from AssetResolver.scale");
+  });
+});
+
+test("renderInventoryGrid: a ROTATED multi-cell item's overlay spans the ROTATED bounding box (vertical 1x2 -> horizontal 2x1)", () => {
+  withFakeDocument(() => {
+    const item = inventoryItemAt("it1", "poor_wood", 0, 0, 90); // rotated: now 2 wide, 1 tall
+    const snapshot = fullInventorySnapshot([item]);
+    const grid = renderInventoryGrid(surfaceCatalog, snapshot, noopHandlers) as unknown as FakeCellElement;
+    const overlay = overlaysOf(grid)[0]!;
+
+    const expectedWidth = 2 * CELL_SIZE_PX + 1 * CELL_GAP_PX;
+    const expectedHeight = 1 * CELL_SIZE_PX;
+    assert.equal(overlay.style.width, `${expectedWidth}px`, "rotated footprint spans horizontally, not vertically");
+    assert.equal(overlay.style.height, `${expectedHeight}px`);
+  });
+});
+
+test("renderSurfaceGrid: mesa parity — multi-cell items get exactly one overlay, single-cell items render unchanged", () => {
+  withFakeDocument(() => {
+    const single = surfaceItem("single1", "small_stone", "wo_table", 0, 0);
+    const multi = surfaceItem("multi1", "poor_wood", "wo_table", 1, 0);
+    const snapshot = snapshotWithItems([single, multi]);
+    const grid = renderSurfaceGrid(surfaceCatalog, snapshot, "wo_table", { width: 3, height: 2 }, { onCellClick: () => {} }) as unknown as FakeCellElement;
+
+    assert.equal(grid.children.length, 3 * 2 + 1, "6 per-coordinate cells + exactly 1 overlay for the one multi-cell item");
+    const overlays = overlaysOf(grid);
+    assert.equal(overlays.length, 1);
+    assert.equal(overlays[0]?.textContent, "🪵");
+
+    const singleCell = grid.children[0 * 3 + 0]!; // (0,0)
+    assert.equal(singleCell.textContent, "🪨", "single-cell item keeps its glyph directly on the cell — no overlay");
   });
 });
