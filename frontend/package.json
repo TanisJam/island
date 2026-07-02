@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:tool": "tsc -p tsconfig.tool.json --noEmit",
-    "test": "node --import tsx --test src/**/*.test.ts tools/**/*.test.ts",
+    "test": "node --import tsx --test \"src/**/*.test.ts\" \"tools/**/*.test.ts\"",
     "sync:contract": "cp ../schemas/generated/*.ts src/contract/",
     "sync:catalog": "mkdir -p tools/atlas-editor/catalog && cp ../catalog/*.json tools/atlas-editor/catalog/",
     "dev:tool": "pnpm sync:catalog && vite --config vite.config.tool.ts",
