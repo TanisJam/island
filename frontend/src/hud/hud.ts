@@ -23,9 +23,10 @@ export type HudHandlers = {
 
 /** 4x4 player inventory grid dimensions (mirrors the backend's
  * `INV_W`/`INV_H` in `backend/src/domain/inventory.ts` — never hardcode
- * these two numbers anywhere else in this module). */
-const INV_W = 4;
-const INV_H = 4;
+ * these two numbers anywhere else in this module, or in `drag.ts`'s
+ * `footprintValidity`, which imports them from here). */
+export const INV_W = 4;
+export const INV_H = 4;
 
 /** Pixel layout constants for the multi-cell overlay's inline geometry math
  * (design.md Decision 1) — dual-sourced with `.grid`'s `--cell-size`/

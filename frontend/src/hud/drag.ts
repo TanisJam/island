@@ -1,6 +1,7 @@
 import type { Catalog, Command, ItemInstance, Position } from "../contract";
 import type { ClientSnapshot } from "../state/snapshot";
 import { createEmojiAssets } from "../render/assets";
+import { INV_H, INV_W, inventoryCellsForItem, occupiedCellsForItem, rotatedDims } from "./hud";
 
 export type ScreenPoint = { x: number; y: number };
 
@@ -144,6 +145,87 @@ export function cellOccupant(snapshot: ClientSnapshot, target: DropTarget, excep
   }
   if (!occupant || occupant.id === exceptId) return "ok";
   return "bad";
+}
+
+/** Verifies a `w x h` shape anchored at `(x,y)` both stays in-bounds of a
+ * `gw x gh` grid AND doesn't collide with any cell in `occupied` — a
+ * verbatim replica of the backend's `fitsOnGrid`
+ * (`backend/src/domain/inventory.ts:79-83`), restated client-side (spec R3
+ * "Preview-backend verdict parity"). */
+function fitsOnGrid(occupied: Set<string>, x: number, y: number, w: number, h: number, gw: number, gh: number): boolean {
+  if (x < 0 || y < 0 || x + w > gw || y + h > gh) return false;
+  for (let dy = 0; dy < h; dy++) for (let dx = 0; dx < w; dx++) if (occupied.has(`${x + dx},${y + dy}`)) return false;
+  return true;
+}
+
+/** Cells occupied by every item in `items` (via `cellsFor`), EXCLUDING
+ * `exceptId` — a verbatim replica of the backend's `occupiedSetOnGrid`
+ * (`backend/src/domain/inventory.ts:64-71`). */
+function occupiedSet(items: ItemInstance[], cellsFor: (item: ItemInstance) => Position[], exceptId: string): Set<string> {
+  const set = new Set<string>();
+  for (const it of items) {
+    if (it.id === exceptId) continue;
+    for (const c of cellsFor(it)) set.add(`${c.x},${c.y}`);
+  }
+  return set;
+}
+
+/**
+ * Full-footprint drag-validity verdict (design.md Decision 3, spec R2/R3/R4)
+ * — the REPLACEMENT for `cellOccupant`'s anchor-only permissive check.
+ * Mirrors the backend's `fitsOnGrid`/`occupiedSetOnGrid`/`handEquipFits`
+ * (`backend/src/domain/inventory.ts:79-83`, `:64-71`, `:149-162`) verbatim,
+ * restated client-side so the drag preview can render a verdict without a
+ * backend round trip — the backend stays the actual accept/reject authority
+ * (`cellOccupant`'s docstring risk note still applies to this replacement).
+ *
+ * `surfaceDims` is required (and only meaningful) for a `"surface"` target:
+ * `DropTarget`'s surface variant carries only `surfaceId`/`x`/`y`, never
+ * dimensions, so the caller (drag.ts's `updateHighlight`, tasks.md T7) reads
+ * them from the `GridContext` bound for that surface via `bindGrid` (T4) and
+ * passes them through here — `footprintValidity` itself stays pure/DOM-free.
+ */
+export function footprintValidity(
+  snapshot: ClientSnapshot,
+  catalog: Catalog,
+  item: ItemInstance,
+  target: DropTarget,
+  exceptId: string,
+  surfaceDims?: { width: number; height: number },
+): "ok" | "bad" {
+  const def = catalog.items.find((i) => i.id === item.itemTypeId);
+  const shape = { w: def?.shape.w ?? 1, h: def?.shape.h ?? 1 };
+  const itemRotation = item.location.type === "player_inventory" || item.location.type === "surface" ? item.location.rotation : 0;
+
+  switch (target.kind) {
+    case "inventory": {
+      const { w, h } = rotatedDims(shape, itemRotation);
+      const items = snapshot.items.filter((it) => it.location.type === "player_inventory");
+      const occupied = occupiedSet(items, (it) => inventoryCellsForItem(it, catalog), exceptId);
+      return fitsOnGrid(occupied, target.x, target.y, w, h, INV_W, INV_H) ? "ok" : "bad";
+    }
+    case "surface": {
+      if (!surfaceDims) return "bad"; // no bound GridContext for this grid yet — defensive, never reached once T4's bindGrid wiring is live
+      const { w, h } = rotatedDims(shape, itemRotation);
+      const items = snapshot.items.filter((it) => it.location.type === "surface" && it.location.surfaceId === target.surfaceId);
+      const occupied = occupiedSet(items, (it) => occupiedCellsForItem(it, catalog), exceptId);
+      return fitsOnGrid(occupied, target.x, target.y, w, h, surfaceDims.width, surfaceDims.height) ? "ok" : "bad";
+    }
+    case "hand": {
+      // Hand equips ALWAYS anchor the shape UNROTATED (mirrors the backend's
+      // `handEquipFits`, which forces rotation 0 regardless of the item's
+      // stored rotation), and the anchor is the LIVE snapshot's hand-slot
+      // position — never a hardcoded coordinate (same convention
+      // `cellOccupant` already uses at drag.ts:135-137).
+      const slot = target.hand === "left" ? snapshot.handSlots.left : snapshot.handSlots.right;
+      const items = snapshot.items.filter((it) => it.location.type === "player_inventory");
+      const occupied = occupiedSet(items, (it) => inventoryCellsForItem(it, catalog), exceptId);
+      return fitsOnGrid(occupied, slot.x, slot.y, shape.w, shape.h, INV_W, INV_H) ? "ok" : "bad";
+    }
+    case "map":
+    case "invalid":
+      return "ok"; // map always ok; invalid is never highlighted by the caller
+  }
 }
 
 /**
