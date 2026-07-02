@@ -1,11 +1,13 @@
-import { randomBytes } from "node:crypto";
-import { closeSync, fsyncSync, openSync, readFileSync, renameSync, unlinkSync, writeSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Plugin } from "vite";
+import { writeAtomic, writeFileDurable } from "./fs-atomic";
 import { planSave, type CatalogMeta } from "./plan-save";
 import { resolveTargets } from "./targets";
+
+export { writeAtomic, writeFileDurable };
 
 /**
  * Vite dev-server middleware exposing `POST /__save-items` (design.md
@@ -50,44 +52,6 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json");
   res.end(payload);
-}
-
-/**
- * Writes `contents` to `path` and `fsync`s the file descriptor before
- * closing it, so the data is durable on disk (not just buffered in the
- * page cache) by the time this returns. Pure side-effect wrapper, kept
- * standalone so it stays unit-testable independent of the rename step.
- */
-export function writeFileDurable(path: string, contents: string): void {
-  const fd = openSync(path, "w");
-  try {
-    writeSync(fd, contents, null, "utf-8");
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-}
-
-/**
- * Atomic + durable write: write to a sibling tmp file, `fsync` it so the
- * data is flushed to disk, THEN `renameSync` over the target (rename is
- * atomic within one filesystem, design.md "ADR-3": "write tmp -> fsync ->
- * rename") so the target is never left half-written and never points at
- * not-yet-durable data.
- */
-export function writeAtomic(targetPath: string, contents: string): void {
-  const tmpPath = `${targetPath}.tmp-${randomBytes(6).toString("hex")}`;
-  writeFileDurable(tmpPath, contents);
-  try {
-    renameSync(tmpPath, targetPath);
-  } catch (error) {
-    try {
-      unlinkSync(tmpPath);
-    } catch {
-      // best-effort cleanup of the tmp file; the rename error is what matters
-    }
-    throw error;
-  }
 }
 
 export function itemsEditorSavePlugin(): Plugin {

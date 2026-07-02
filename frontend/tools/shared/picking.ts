@@ -1,7 +1,9 @@
 /**
- * Pure pixel<->grid math for the atlas-editor picking canvas (design.md
- * "Dev tool architecture", tasks.md T11). No DOM here — `main.ts` is the
- * only place that reads mouse events and calls into this module.
+ * Pure pixel<->grid math shared by the dev tools' picking canvases
+ * (originally `atlas-editor/picking.ts`; extracted so items-editor's
+ * texture panel can reuse the same footprint math). No DOM here — each
+ * tool's `main.ts`/controller is the only place that reads mouse events
+ * and calls into this module.
  */
 
 export interface Point {

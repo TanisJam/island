@@ -1,4 +1,4 @@
-import { footprintFromDrag, pastDragThreshold, type Footprint, type Point } from "./picking";
+import { footprintFromDrag, pastDragThreshold, type Footprint, type Point } from "../shared/picking";
 import { catalogTypeIdsByKind, type CatalogEntry } from "./catalog";
 import { buildAtlasExport, type Mapping } from "./atlas-export";
 import type { AtlasKind } from "../../src/render/assets";
