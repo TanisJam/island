@@ -4,7 +4,8 @@ import type { Transport } from "../net/transport";
 import { buildSnapshot, type ClientSnapshot } from "../state/snapshot";
 import { createStore } from "../state/store";
 import { createViewState } from "../view/viewstate";
-import { createEmojiAssets } from "../render/assets";
+import { createEmojiAssets, createSpriteAssets, parseAtlas } from "../render/assets";
+import type { AssetResolver } from "../render/assets";
 import { createCanvasRenderer } from "../render/canvas";
 import { canvasToTile, createInputController } from "../input/mouse";
 import type { Ui } from "../hud/ui";
@@ -38,6 +39,42 @@ function handsOccupied(snapshot: ClientSnapshot): { left: boolean; right: boolea
   return { left: occupied(snapshot.handSlots.left), right: occupied(snapshot.handSlots.right) };
 }
 
+/** Loads the tileset image from the given URL. Rejects (never throws
+ * synchronously) on a missing `Image` global — e.g. under `node --test`,
+ * which has no DOM — so `loadSpriteAssets` below can catch it uniformly
+ * alongside a real image-load failure. */
+function loadTilesetImage(src: string): Promise<CanvasImageSource> {
+  return new Promise((resolve, reject) => {
+    if (typeof Image !== "function") {
+      reject(new Error("Image is not available in this environment"));
+      return;
+    }
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`Failed to load tileset image: ${src}`));
+    img.src = src;
+  });
+}
+
+/**
+ * Fetches `atlas.json` + the tileset image it references and builds a
+ * `createSpriteAssets` resolver. ANY failure along the way (404, malformed
+ * JSON, image load error, missing `Image` global) soft-falls back to
+ * `fallback` — never rejects, never throws (spec "Missing atlas or image
+ * degrades to emoji, does not crash boot"; design.md "Boot failure").
+ */
+async function loadSpriteAssets(fallback: AssetResolver): Promise<AssetResolver> {
+  try {
+    const res = await fetch("/atlas.json");
+    if (!res.ok) return fallback;
+    const atlas = parseAtlas(await res.json());
+    const image = await loadTilesetImage(`/${atlas.image}`);
+    return createSpriteAssets(atlas, image);
+  } catch {
+    return fallback;
+  }
+}
+
 /** Tile donde soltar: el primer adyacente caminable (queda visible al lado del jugador
  *  y dentro del rango de crafting); si no hay, el tile propio. */
 function dropTargetTile(snapshot: ClientSnapshot): Position {
@@ -56,12 +93,16 @@ export function createGame(deps: GameDeps): Game {
     const ctx = deps.canvas.getContext("2d");
     if (!ctx) throw new Error("No se pudo obtener el contexto 2D del canvas");
 
-    const [catalog, zone, player] = await Promise.all([fetchCatalog(), fetchZone(ZONE_ID), fetchPlayerState(PLAYER_ID)]);
+    const [catalog, zone, player, assets] = await Promise.all([
+      fetchCatalog(),
+      fetchZone(ZONE_ID),
+      fetchPlayerState(PLAYER_ID),
+      loadSpriteAssets(createEmojiAssets()),
+    ]);
     const snapshot = buildSnapshot(zone, player);
 
     const store = createStore(snapshot);
     const viewState = createViewState(store);
-    const assets = createEmojiAssets();
     const renderer = createCanvasRenderer(ctx, assets);
 
     // Fullscreen map (spec "Fullscreen Map with Player-Centered Camera"):
