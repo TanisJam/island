@@ -1,0 +1,446 @@
+import type { ItemTypeDef } from "../../src/contract/catalog";
+import { validateItems, type SchemaBundle, type SchemaError } from "./shared/validate-items";
+import { normalizeItem, itemToFormState, type ItemFormState } from "./shared/normalize";
+import { checkIdUnique } from "./shared/id-unique";
+import { createTextField, emptyToUndefined, type TextFieldWidget } from "./widgets/text-field";
+import { createNumberField, parseRequiredNumber, parseOptionalNumber, type NumberFieldWidget } from "./widgets/number-field";
+import { createBooleanField, type BooleanFieldWidget } from "./widgets/boolean-field";
+import { createTagsField, type TagsFieldWidget } from "./widgets/tags-field";
+import { createPropsField, type PropsFieldWidget } from "./widgets/props-field";
+
+/**
+ * Master-detail wiring for the items editor (design.md "Components & Data
+ * Flow" + "ADR-5 — Field-widget toolkit + master-detail form"). Thin
+ * impure shell: DOM orchestration + fetch/POST only. All parsing,
+ * normalization, validation, and id-uniqueness logic lives in the pure
+ * `shared/*` and `widgets/*` modules this file wires together.
+ *
+ * SECURITY (gate-review note 1): the browser POSTs ONLY `{ items }` to
+ * `/__save-items` — never a path/file/filename/target field, even for
+ * convenience. The server resolves its own write targets
+ * (server/targets.ts); adding a path-like field here would be misleading
+ * at best and is explicitly forbidden by the design's security model.
+ */
+
+const SAVE_ROUTE = "/__save-items";
+
+function mustEl<T extends Element>(id: string): T {
+  const el = document.getElementById(id);
+  if (!el) throw new Error(`items-editor: missing #${id} in index.html`);
+  return el as unknown as T;
+}
+
+const catalogVersionEl = mustEl<HTMLDivElement>("catalog-version");
+const addItemBtn = mustEl<HTMLButtonElement>("add-item-btn");
+const itemListEl = mustEl<HTMLUListElement>("item-list");
+const masterEmptyEl = mustEl<HTMLDivElement>("master-empty");
+const masterLoadingEl = mustEl<HTMLDivElement>("master-loading");
+const masterErrorEl = mustEl<HTMLDivElement>("master-error");
+const detailEmptyEl = mustEl<HTMLDivElement>("detail-empty");
+const detailFormEl = mustEl<HTMLFormElement>("detail-form");
+const errorSummaryEl = mustEl<HTMLDivElement>("error-summary");
+const errorSummaryListEl = mustEl<HTMLUListElement>("error-summary-list");
+const fieldsEl = mustEl<HTMLDivElement>("fields");
+const deleteItemBtn = mustEl<HTMLButtonElement>("delete-item-btn");
+const saveBtn = mustEl<HTMLButtonElement>("save-btn");
+const saveStatusEl = mustEl<HTMLSpanElement>("save-status");
+
+interface Fields {
+  id: TextFieldWidget;
+  name: TextFieldWidget;
+  description: TextFieldWidget;
+  width: NumberFieldWidget;
+  height: NumberFieldWidget;
+  rotatable: BooleanFieldWidget;
+  properties: PropsFieldWidget;
+  tags: TagsFieldWidget;
+  durability: NumberFieldWidget;
+  observation: TextFieldWidget;
+}
+
+let items: ItemTypeDef[] = [];
+let schemas: SchemaBundle | null = null;
+let selectedIndex: number | null = null;
+let savedSnapshot = "[]";
+let fields: Fields | null = null;
+
+function isDirty(): boolean {
+  return JSON.stringify(items) !== savedSnapshot;
+}
+
+window.addEventListener("beforeunload", (e) => {
+  if (!isDirty()) return;
+  e.preventDefault();
+  e.returnValue = "";
+});
+
+/** Generates a default id guaranteed unique among `items` for a new item. */
+function nextDefaultId(existing: readonly ItemTypeDef[]): string {
+  let n = existing.length + 1;
+  let candidate = `new_item_${n}`;
+  while (existing.some((item) => item.id === candidate)) {
+    n += 1;
+    candidate = `new_item_${n}`;
+  }
+  return candidate;
+}
+
+function buildFields(): Fields {
+  fieldsEl.innerHTML = "";
+  const built: Fields = {
+    id: createTextField({ id: "field-id", label: "Id", required: true }),
+    name: createTextField({ id: "field-name", label: "Name", required: true }),
+    description: createTextField({ id: "field-description", label: "Description", required: true, multiline: true }),
+    width: createNumberField({ id: "field-width", label: "Shape width", required: true, min: 1, integer: true }),
+    height: createNumberField({ id: "field-height", label: "Shape height", required: true, min: 1, integer: true }),
+    rotatable: createBooleanField({ id: "field-rotatable", label: "Rotatable" }),
+    properties: createPropsField({ id: "field-properties", label: "Properties", required: true }),
+    tags: createTagsField({ id: "field-tags", label: "Tags", required: true }),
+    durability: createNumberField({ id: "field-durability", label: "Durability", min: 0, helperText: "Optional — leave empty to omit." }),
+    observation: createTextField({ id: "field-observation", label: "Observation", multiline: true, helperText: "Optional — leave empty to omit." }),
+  };
+  const order: Array<[TextFieldWidget | NumberFieldWidget | BooleanFieldWidget | TagsFieldWidget | PropsFieldWidget, boolean]> = [
+    [built.id, false],
+    [built.name, false],
+    [built.description, true],
+    [built.width, false],
+    [built.height, false],
+    [built.rotatable, false],
+    [built.properties, true],
+    [built.tags, true],
+    [built.durability, false],
+    [built.observation, true],
+  ];
+  for (const [widget, fullWidth] of order) {
+    if (fullWidth) widget.root.dataset.fullWidth = "true";
+    fieldsEl.appendChild(widget.root);
+  }
+
+  const syncAndValidate = () => syncFormIntoSelectedItem();
+  built.id.onChange(syncAndValidate);
+  built.name.onChange(syncAndValidate);
+  built.description.onChange(syncAndValidate);
+  built.width.onChange(syncAndValidate);
+  built.height.onChange(syncAndValidate);
+  built.rotatable.onChange(syncAndValidate);
+  built.properties.onChange(syncAndValidate);
+  built.tags.onChange(syncAndValidate);
+  built.durability.onChange(syncAndValidate);
+  built.observation.onChange(syncAndValidate);
+
+  return built;
+}
+
+function setSaveStatus(message: string, tone: "success" | "info" = "info"): void {
+  saveStatusEl.textContent = message;
+  saveStatusEl.classList.toggle("save-status-error", tone !== "success");
+}
+
+/**
+ * Reads the current form's raw values, parses each field with the pure
+ * widget helpers, and — only if every required field parses successfully
+ * AND the id is unique — writes a normalized `ItemTypeDef` back into
+ * `items[selectedIndex]` (spec "Edit and view a required field", "Item id
+ * uniqueness"). Clears/sets per-field errors as it goes (inline-validate
+ * on blur, per ui-ux-pro-max).
+ */
+function syncFormIntoSelectedItem(): void {
+  if (selectedIndex === null || !fields) return;
+  const f = fields;
+  let hasFieldError = false;
+
+  const idRaw = f.id.getValue().trim();
+  if (idRaw === "") {
+    f.id.setError("Id is required");
+    hasFieldError = true;
+  } else {
+    const idCheck = checkIdUnique(items, idRaw, selectedIndex);
+    if (!idCheck.ok) {
+      f.id.setError(`Id "${idRaw}" is already used by another item`);
+      hasFieldError = true;
+    } else {
+      f.id.setError(null);
+    }
+  }
+
+  const nameRaw = f.name.getValue().trim();
+  if (nameRaw === "") {
+    f.name.setError("Name is required");
+    hasFieldError = true;
+  } else {
+    f.name.setError(null);
+  }
+
+  const descriptionRaw = f.description.getValue().trim();
+  if (descriptionRaw === "") {
+    f.description.setError("Description is required");
+    hasFieldError = true;
+  } else {
+    f.description.setError(null);
+  }
+
+  const width = parseRequiredNumber(f.width.getRawValue(), { min: 1, integer: true });
+  if (!width.ok) {
+    f.width.setError("Must be a whole number >= 1");
+    hasFieldError = true;
+  } else {
+    f.width.setError(null);
+  }
+
+  const height = parseRequiredNumber(f.height.getRawValue(), { min: 1, integer: true });
+  if (!height.ok) {
+    f.height.setError("Must be a whole number >= 1");
+    hasFieldError = true;
+  } else {
+    f.height.setError(null);
+  }
+
+  const durability = parseOptionalNumber(f.durability.getRawValue());
+  if (!durability.ok) {
+    f.durability.setError("Must be a number, or left empty");
+    hasFieldError = true;
+  } else {
+    f.durability.setError(null);
+  }
+
+  if (hasFieldError || !width.ok || !height.ok || !durability.ok) {
+    updateSaveEnabled();
+    return;
+  }
+
+  const form: ItemFormState = {
+    id: idRaw,
+    name: f.name.getValue(),
+    description: f.description.getValue(),
+    width: width.value,
+    height: height.value,
+    rotatable: f.rotatable.getValue(),
+    properties: f.properties.getValue(),
+    tags: f.tags.getValue(),
+  };
+  const observation = emptyToUndefined(f.observation.getValue());
+  if (observation !== undefined) form.observation = observation;
+  if (durability.value !== undefined) form.durability = durability.value;
+
+  items[selectedIndex] = normalizeItem(form);
+  renderItemList();
+  updateSaveEnabled();
+}
+
+function updateSaveEnabled(): void {
+  const hasFieldError = fieldsEl.querySelector('[aria-invalid="true"]') !== null;
+  saveBtn.disabled = hasFieldError || items.length === 0;
+}
+
+function renderItemList(): void {
+  itemListEl.innerHTML = "";
+  masterEmptyEl.hidden = items.length > 0;
+  items.forEach((item, index) => {
+    const li = document.createElement("li");
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "item-row";
+    row.classList.toggle("active", index === selectedIndex);
+    const idEl = document.createElement("span");
+    idEl.className = "item-id";
+    idEl.textContent = item.id || "(no id)";
+    const nameEl = document.createElement("span");
+    nameEl.className = "item-name";
+    nameEl.textContent = item.name || "(untitled)";
+    row.appendChild(idEl);
+    row.appendChild(nameEl);
+    row.addEventListener("click", () => selectItem(index));
+    li.appendChild(row);
+    itemListEl.appendChild(li);
+  });
+}
+
+function selectItem(index: number): void {
+  const item = items[index];
+  if (!item) return;
+  selectedIndex = index;
+  if (!fields) fields = buildFields();
+  const form = itemToFormState(item);
+  fields.id.setValue(form.id);
+  fields.id.setError(null);
+  fields.name.setValue(form.name);
+  fields.name.setError(null);
+  fields.description.setValue(form.description);
+  fields.description.setError(null);
+  fields.width.setValue(form.width);
+  fields.width.setError(null);
+  fields.height.setValue(form.height);
+  fields.height.setError(null);
+  fields.rotatable.setValue(form.rotatable);
+  fields.properties.setValue(form.properties);
+  fields.properties.setError(null);
+  fields.tags.setValue(form.tags);
+  fields.tags.setError(null);
+  fields.durability.setValue(form.durability);
+  fields.durability.setError(null);
+  fields.observation.setValue(form.observation ?? "");
+  fields.observation.setError(null);
+
+  clearErrorSummary();
+  setSaveStatus("");
+  detailEmptyEl.hidden = true;
+  detailFormEl.hidden = false;
+  renderItemList();
+  updateSaveEnabled();
+}
+
+function clearErrorSummary(): void {
+  errorSummaryEl.hidden = true;
+  errorSummaryListEl.innerHTML = "";
+}
+
+function fieldIdForInstancePath(instancePath: string, itemIndex: number): string | null {
+  if (itemIndex !== selectedIndex) return null;
+  const map: Record<string, string> = {
+    "/id": "field-id",
+    "/name": "field-name",
+    "/description": "field-description",
+    "/shape/w": "field-width",
+    "/shape/h": "field-height",
+    "/rotatable": "field-rotatable",
+    "/properties": "field-properties",
+    "/tags": "field-tags",
+    "/durability": "field-durability",
+    "/observation": "field-observation",
+  };
+  const relative = instancePath.replace(/^\/\d+/, "");
+  return map[relative] ?? null;
+}
+
+function renderErrorSummary(errors: SchemaError[]): void {
+  errorSummaryListEl.innerHTML = "";
+  for (const error of errors) {
+    const match = /^\/(\d+)(.*)$/.exec(error.instancePath);
+    const itemIndex = match ? Number(match[1]) : (selectedIndex ?? 0);
+    const rest = match ? match[2] : error.instancePath;
+    const item = items[itemIndex];
+    const li = document.createElement("li");
+    const link = document.createElement("a");
+    const fieldId = fieldIdForInstancePath(match ? error.instancePath : `/${rest}`, itemIndex);
+    link.href = fieldId ? `#${fieldId}` : "#";
+    link.textContent = `${item ? item.id || `item ${itemIndex}` : `item ${itemIndex}`} ${rest || "/"}: ${error.message}`;
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (itemIndex !== selectedIndex) selectItem(itemIndex);
+      const target = fieldId ? document.getElementById(fieldId) : null;
+      target?.focus();
+    });
+    li.appendChild(link);
+    errorSummaryListEl.appendChild(li);
+  }
+  errorSummaryEl.hidden = errors.length === 0;
+}
+
+async function fetchJson(path: string): Promise<unknown> {
+  const res = await fetch(path);
+  if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
+  return res.json();
+}
+
+async function boot(): Promise<void> {
+  masterLoadingEl.hidden = false;
+  masterErrorEl.hidden = true;
+  try {
+    const [loadedItems, common, catalog, meta] = await Promise.all([
+      fetchJson("./catalog/items.json") as Promise<ItemTypeDef[]>,
+      fetchJson("./schemas/common.json"),
+      fetchJson("./schemas/catalog.json"),
+      fetchJson("./catalog/meta.json") as Promise<{ catalogVersion: string }>,
+    ]);
+    items = loadedItems;
+    schemas = { common, catalog };
+    savedSnapshot = JSON.stringify(items);
+    catalogVersionEl.textContent = `catalogVersion ${meta.catalogVersion}`;
+    masterLoadingEl.hidden = true;
+    addItemBtn.disabled = false;
+    renderItemList();
+  } catch (e) {
+    masterLoadingEl.hidden = true;
+    masterErrorEl.hidden = false;
+    masterErrorEl.textContent = `Failed to load catalog — run "pnpm sync:catalog:items && pnpm sync:schemas:items" first. (${e instanceof Error ? e.message : String(e)})`;
+  }
+}
+
+addItemBtn.addEventListener("click", () => {
+  const id = nextDefaultId(items);
+  const blank: ItemTypeDef = {
+    id,
+    name: "",
+    description: "",
+    shape: { w: 1, h: 1 },
+    rotatable: false,
+    properties: {},
+    tags: [],
+  };
+  items.push(blank);
+  renderItemList();
+  selectItem(items.length - 1);
+  fields?.name.focus();
+});
+
+deleteItemBtn.addEventListener("click", () => {
+  if (selectedIndex === null) return;
+  const item = items[selectedIndex];
+  if (!item) return;
+  const confirmed = window.confirm(`Delete "${item.name || item.id}"? This cannot be undone once saved.`);
+  if (!confirmed) return;
+  items.splice(selectedIndex, 1);
+  selectedIndex = null;
+  detailFormEl.hidden = true;
+  detailEmptyEl.hidden = false;
+  clearErrorSummary();
+  renderItemList();
+});
+
+detailFormEl.addEventListener("submit", (e) => {
+  e.preventDefault();
+  void save();
+});
+
+async function save(): Promise<void> {
+  if (!schemas) return;
+  syncFormIntoSelectedItem();
+  const { schemaErrors, idErrors } = validateItems(schemas, items);
+  const idFieldErrors: SchemaError[] = idErrors.map((message) => ({ instancePath: "/items", message }));
+  const allErrors = [...schemaErrors, ...idFieldErrors];
+  if (allErrors.length > 0) {
+    renderErrorSummary(allErrors);
+    const firstFieldId = allErrors.map((err) => fieldIdForInstancePath(err.instancePath, selectedIndex ?? 0)).find((id) => id !== null);
+    if (firstFieldId) document.getElementById(firstFieldId)?.focus();
+    setSaveStatus("Save blocked — fix the errors above.", "info");
+    return;
+  }
+  clearErrorSummary();
+  saveBtn.disabled = true;
+  setSaveStatus("Saving…");
+  try {
+    // gate-review note 1: the body is EXACTLY { items } — no path/file/
+    // filename/target field is ever added, by design (server/targets.ts
+    // resolves the write location on its own).
+    const res = await fetch(SAVE_ROUTE, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items }),
+    });
+    const body = (await res.json()) as { ok: boolean; catalogVersion?: string; errors?: SchemaError[] };
+    if (!res.ok || !body.ok) {
+      renderErrorSummary(body.errors ?? [{ instancePath: "/", message: `save failed (HTTP ${res.status})` }]);
+      setSaveStatus("Save failed.", "info");
+      return;
+    }
+    savedSnapshot = JSON.stringify(items);
+    catalogVersionEl.textContent = `catalogVersion ${body.catalogVersion}`;
+    setSaveStatus(`Saved — catalogVersion ${body.catalogVersion}`, "success");
+  } catch (e) {
+    setSaveStatus(`Save failed: ${e instanceof Error ? e.message : String(e)}`, "info");
+  } finally {
+    updateSaveEnabled();
+  }
+}
+
+void boot();
