@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Isla Misteriosa — esquema de zona (GET /zones/zone-{id}.json)",
+  "definitions": {
+    "ZoneObjectPlacement": {
+      "type": "object",
+      "required": ["objectTypeId", "x", "y"],
+      "additionalProperties": false,
+      "properties": {
+        "objectTypeId": { "type": "string" },
+        "x": { "type": "integer", "minimum": 0 },
+        "y": { "type": "integer", "minimum": 0 },
+        "state": { "type": "object" }
+      }
+    },
+    "ZoneTemplate": {
+      "type": "object",
+      "required": ["width", "height", "tiles", "objects"],
+      "additionalProperties": false,
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "tiles": { "type": "array", "items": { "type": "string" } },
+        "objects": { "type": "array", "items": { "$ref": "#/definitions/ZoneObjectPlacement" } }
+      }
+    }
+  },
+  "$ref": "#/definitions/ZoneTemplate"
+}

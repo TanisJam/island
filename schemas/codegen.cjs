@@ -22,6 +22,7 @@ const ROOTS = [
   { file: "catalog.json", fallback: "Catalog" },
   { file: "commands.json", fallback: "CommandEnvelope" },
   { file: "events.json", fallback: "CommandResult" },
+  { file: "zone.json", fallback: "ZoneTemplate" },
 ];
 
 (async () => {

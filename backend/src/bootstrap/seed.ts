@@ -1,70 +1,50 @@
 import type { ItemInstance, WorldObject } from "../contract/events";
+import type { ZoneTemplate } from "../contract/zone";
 import type { CatalogIndex } from "../domain/catalog";
-import type { GameState, RuntimeTile, TerrainId } from "../domain/state";
+import type { GameState, RuntimeTile } from "../domain/state";
 import { newId } from "../domain/ids";
 import { derivePiles } from "../domain/piles";
 import { rebuildInventories } from "../domain/state";
 import { markVisibleAround } from "../domain/visibility";
 
-const W = 16;
-const H = 12;
-
-function terrainAt(x: number, y: number): TerrainId {
-  if (y === 11 && (x < 2 || x > 13)) return "shallow_water";
-  if (y <= 2) return "dense_jungle";
-  if (y >= 10) return "sand";
-  return "grass";
-}
-
-function tagsFor(t: TerrainId): string[] {
-  switch (t) {
-    case "dense_jungle": return ["blocker", "progression_gate", "plant"];
-    case "sand": return ["ground", "searchable"];
-    case "shallow_water": return ["water", "wet", "resource"];
-    case "dirt": return ["ground", "diggable"];
-    case "rocky_ground": return ["ground", "hard"];
-    default: return ["ground"];
-  }
-}
-
-const walkable = (t: TerrainId): boolean => t !== "dense_jungle" && t !== "shallow_water";
-
 /**
- * Mundo inicial del MVP: playa abajo, claro de pasto en el medio, muro de jungla
- * espesa arriba (el bloqueo orgánico), recursos repartidos. Mapa chico (16x12) para
- * el esqueleto; el spec sugiere 32x24.
+ * Compone el GameState inicial a partir de una `ZoneTemplate` (placement data
+ * cargada por `loadZone`, ver `infrastructure/zone/loader.ts`). Tags/walkable de
+ * cada terreno se resuelven contra el catálogo (`index.terrainById`) — nunca se
+ * duplican acá, así el catálogo queda como única fuente de verdad. Spawn del
+ * jugador y el ítem suelto siguen hardcodeados (fuera del template por ahora).
  */
-export function seedState(index: CatalogIndex, playerId = "p1", zoneId = "z1"): GameState {
-  const tiles: RuntimeTile[] = [];
-  for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) {
-      const terrain = terrainAt(x, y);
-      tiles.push({ x, y, terrain, walkable: walkable(terrain), tags: tagsFor(terrain) });
-    }
+export function seedState(index: CatalogIndex, template: ZoneTemplate, playerId = "p1", zoneId = "z1"): GameState {
+  const { width, height, tiles: terrainIds, objects: placements } = template;
+  if (terrainIds.length !== width * height) {
+    throw new Error(`Zona '${zoneId}': tiles.length (${terrainIds.length}) !== width*height (${width * height})`);
   }
 
-  const obj = (objectTypeId: string, x: number, y: number): WorldObject => {
+  const tiles: RuntimeTile[] = terrainIds.map((terrain, i) => {
+    const def = index.terrainById.get(terrain);
+    if (!def) throw new Error(`Zona '${zoneId}': terrainId desconocido '${terrain}' — no existe en el catálogo`);
+    return { x: i % width, y: Math.floor(i / width), terrain, walkable: def.walkable, tags: def.tags };
+  });
+
+  const obj = (objectTypeId: string, x: number, y: number, stateOverride?: Record<string, unknown>): WorldObject => {
     const def = index.objectById.get(objectTypeId);
-    return { id: newId("wo"), objectTypeId, position: { x, y }, state: { ...(def?.defaultState ?? {}) }, tags: [], visibility: "visible" };
+    return {
+      id: newId("wo"),
+      objectTypeId,
+      position: { x, y },
+      state: { ...(def?.defaultState ?? {}), ...(stateOverride ?? {}) },
+      tags: [],
+      visibility: "visible",
+    };
   };
 
-  const objects: WorldObject[] = [
-    obj("tree", 3, 4),
-    obj("tree", 11, 5),
-    obj("tree", 6, 7),
-    obj("tall_grass", 4, 6),
-    obj("tall_grass", 9, 6),
-    obj("tall_grass", 12, 8),
-    obj("small_rock", 2, 9),
-    obj("wreckage", 10, 10),
-    // Adjacent to the player's spawn tile (8,9) so R7's "interact with a
-    // table" (crafting-surface change) is reachable end-to-end from the very
-    // first tick, without first having to craft/build one.
-    // `blocksMovement: true` (like tree/rock), so it sits on its own tile
-    // rather than the player's; `rebuildInventories` below (already called
-    // unconditionally) populates its grid record from `surfaceGrid`.
-    obj("rustic_table", 8, 8),
-  ];
+  // Object placements come entirely from the template now. `rustic_table` at
+  // (8,8) — adjacent to the player's spawn tile (8,9) — is part of
+  // `zones/zone-z1.json` so R7's "interact with a table" (crafting-surface
+  // change) stays reachable end-to-end from the very first tick.
+  const objects: WorldObject[] = placements.map((p) =>
+    obj(p.objectTypeId, p.x, p.y, p.state as Record<string, unknown> | undefined),
+  );
 
   const looseStone: ItemInstance = {
     id: newId("it"),
@@ -73,7 +53,7 @@ export function seedState(index: CatalogIndex, playerId = "p1", zoneId = "z1"): 
   };
 
   const state: GameState = {
-    zone: { id: zoneId, ownerPlayerId: playerId, type: "personal", width: W, height: H },
+    zone: { id: zoneId, ownerPlayerId: playerId, type: "personal", width, height },
     tiles,
     objects,
     items: [looseStone],

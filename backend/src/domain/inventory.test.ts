@@ -1,36 +1,38 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadCatalog } from "../infrastructure/catalog/loader";
+import { loadZone } from "../infrastructure/zone/loader";
 import { seedState } from "../bootstrap/seed";
 import { canPlaceInInventory, canPlaceOnSurface, findFreeInventorySlot, handEquipFits, handItems, occupiedCells } from "./inventory";
 import type { ItemInstance, WorldObject } from "../contract/events";
 
 const { index } = loadCatalog();
+const template = loadZone("z1");
 
 // --- Player-wrapper regression: existing behavior must be unaffected by the
 // grid-agnostic extraction (cellsOnGrid/occupiedSetOnGrid/fitsOnGrid). ---
 
 test("occupiedCells: sigue calculando celdas del inventario del jugador (regresión)", () => {
-  const s = seedState(index);
+  const s = seedState(index, template);
   const it: ItemInstance = { id: "it_a", itemTypeId: "dry_branch", location: { type: "player_inventory", playerId: s.player.id, x: 1, y: 1, rotation: 0 } };
   const cells = occupiedCells(it, index);
   assert.deepEqual(cells, [{ x: 1, y: 1 }, { x: 1, y: 2 }]);
 });
 
 test("occupiedCells: un item en una superficie devuelve [] (no es celda de jugador)", () => {
-  const s = seedState(index);
+  const s = seedState(index, template);
   const it: ItemInstance = { id: "it_b", itemTypeId: "dry_branch", location: { type: "surface", surfaceId: "wo_x", x: 0, y: 0, rotation: 0 } };
   assert.deepEqual(occupiedCells(it, index), []);
 });
 
 test("findFreeInventorySlot: sigue encontrando hueco libre en el inventario del jugador (regresión)", () => {
-  const s = seedState(index);
+  const s = seedState(index, template);
   const slot = findFreeInventorySlot(s, index, "plant_fiber", s.player.id);
   assert.ok(slot && slot.type === "player_inventory");
 });
 
 test("handItems: sigue detectando items en slots de mano (regresión)", () => {
-  const s = seedState(index);
+  const s = seedState(index, template);
   s.items.push({ id: "hand_axe", itemTypeId: "simple_axe", location: { type: "player_inventory", playerId: s.player.id, x: 0, y: 0, rotation: 0 } });
   const hands = handItems(s, index);
   assert.equal(hands.left?.id, "hand_axe");
@@ -42,7 +44,7 @@ const TABLE_ID = "wo_table_test";
 const DIMS = { width: 3, height: 2 };
 
 function withTable(): ReturnType<typeof seedState> {
-  const s = seedState(index);
+  const s = seedState(index, template);
   const table: WorldObject = { id: TABLE_ID, objectTypeId: "rustic_table", position: { x: 5, y: 5 }, state: {}, tags: [], visibility: "visible" };
   s.objects.push(table);
   s.inventories[TABLE_ID] = DIMS;
@@ -85,18 +87,18 @@ test("canPlaceOnSurface: honra rotación (1x2 rotado a 2x1 cambia lo que entra)"
 // --- canPlaceInInventory: fit / overflow / overlap / exceptId / rotation ---
 
 test("canPlaceInInventory: un item 1x1 entra en una celda vacía de la grilla 4x4", () => {
-  const s = seedState(index);
+  const s = seedState(index, template);
   assert.equal(canPlaceInInventory(s, index, "small_stone", 3, 3, 0), true);
 });
 
 test("canPlaceInInventory: rechaza overlap con un item ya presente en el inventario", () => {
-  const s = seedState(index);
+  const s = seedState(index, template);
   s.items.push({ id: "it_occupant", itemTypeId: "small_stone", location: { type: "player_inventory", playerId: s.player.id, x: 1, y: 1, rotation: 0 } });
   assert.equal(canPlaceInInventory(s, index, "plant_fiber", 1, 1, 0), false);
 });
 
 test("canPlaceInInventory: permite mover un item sobre su propio footprint via exceptId", () => {
-  const s = seedState(index);
+  const s = seedState(index, template);
   s.items.push({ id: "it_move", itemTypeId: "dry_branch", location: { type: "player_inventory", playerId: s.player.id, x: 2, y: 0, rotation: 0 } });
   // Moving the SAME item onto its own cells must not self-collide.
   assert.equal(canPlaceInInventory(s, index, "dry_branch", 2, 0, 0, "it_move"), true);
@@ -105,13 +107,13 @@ test("canPlaceInInventory: permite mover un item sobre su propio footprint via e
 });
 
 test("canPlaceInInventory: rechaza fuera de los límites de la grilla 4x4", () => {
-  const s = seedState(index);
+  const s = seedState(index, template);
   assert.equal(canPlaceInInventory(s, index, "small_stone", 4, 0, 0), false);
   assert.equal(canPlaceInInventory(s, index, "dry_branch", 0, 3, 0), false); // 1x2 vertical en y=3 se sale (h=2, gh=4)
 });
 
 test("canPlaceInInventory: honra rotación (1x2 rotado a 2x1 cambia lo que entra)", () => {
-  const s = seedState(index);
+  const s = seedState(index, template);
   // dry_branch rotated 90 becomes 2x1: fits at (2,3) within the 4x4 grid.
   assert.equal(canPlaceInInventory(s, index, "dry_branch", 2, 3, 90), true);
   // Unrotated (1x2) at (2,3) would need y in [3,4] -> out of bounds (gh=4).
@@ -121,18 +123,18 @@ test("canPlaceInInventory: honra rotación (1x2 rotado a 2x1 cambia lo que entra
 // --- handEquipFits: empty hand / occupied hand / footprint collision ---
 
 test("handEquipFits: mano vacía acepta un item 1x1", () => {
-  const s = seedState(index);
+  const s = seedState(index, template);
   assert.equal(handEquipFits(s, index, "small_stone", "left"), true);
 });
 
 test("handEquipFits: rechaza cuando la mano ya está ocupada por otro item", () => {
-  const s = seedState(index);
+  const s = seedState(index, template);
   s.items.push({ id: "it_left", itemTypeId: "small_stone", location: { type: "player_inventory", playerId: s.player.id, x: 0, y: 0, rotation: 0 } });
   assert.equal(handEquipFits(s, index, "plant_fiber", "left"), false);
 });
 
 test("handEquipFits: rechaza colisión de footprint 1x2 contra el resto de la mano izquierda", () => {
-  const s = seedState(index);
+  const s = seedState(index, template);
   // dry_branch/simple_axe are 1x2 (w x h): equipping left anchors at (0,0) and also occupies (0,1).
   s.items.push({ id: "it_blocker", itemTypeId: "small_stone", location: { type: "player_inventory", playerId: s.player.id, x: 0, y: 1, rotation: 0 } });
   assert.equal(handEquipFits(s, index, "simple_axe", "left"), false);

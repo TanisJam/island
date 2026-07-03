@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadCatalog } from "../infrastructure/catalog/loader";
+import { loadZone } from "../infrastructure/zone/loader";
 import { seedState } from "../bootstrap/seed";
 import { processCommand } from "../application/process-command";
 import { GameService } from "../application/game-service";
@@ -10,6 +11,7 @@ import type { GameState } from "./state";
 import { derivePiles } from "./piles";
 
 const { index } = loadCatalog();
+const template = loadZone("z1");
 const ctx = (state: GameState): EngineCtx => ({ state, index, rng: () => 0, now: () => 1 });
 
 function addInInventory(s: GameState, id: string, itemTypeId: string, x: number, y: number): void {
@@ -21,7 +23,7 @@ const take = (s: GameState, id: string) =>
   processCommand(ctx(s), { playerId: s.player.id, clientCommandId: "c", command: { type: "TakeItem", target: { kind: "item", id } } });
 
 test("dropping a second same-type item on a tile forms a pile", () => {
-  const s = seedState(index);
+  const s = seedState(index, template);
   const p = s.player.position;
   addInInventory(s, "st1", "small_stone", 1, 1);
   addInInventory(s, "st2", "small_stone", 2, 1);
@@ -39,7 +41,7 @@ test("dropping a second same-type item on a tile forms a pile", () => {
 });
 
 test("taking one item from a pile of two dissolves it", () => {
-  const s = seedState(index);
+  const s = seedState(index, template);
   const p = s.player.position;
   addInInventory(s, "st1", "small_stone", 1, 1);
   addInInventory(s, "st2", "small_stone", 2, 1);
@@ -55,7 +57,7 @@ test("taking one item from a pile of two dissolves it", () => {
 });
 
 test("different item types on the same tile do not pile together", () => {
-  const s = seedState(index);
+  const s = seedState(index, template);
   const p = s.player.position;
   addInInventory(s, "st", "small_stone", 1, 1);
   addInInventory(s, "br", "dry_branch", 2, 1);
@@ -65,7 +67,7 @@ test("different item types on the same tile do not pile together", () => {
 });
 
 test("derivePiles groups same-type world items, ignoring singles and inventory", () => {
-  const s = seedState(index);
+  const s = seedState(index, template);
   addInInventory(s, "inv", "small_stone", 1, 1); // inventory item must be ignored
   s.items.push({ id: "w1", itemTypeId: "dry_branch", location: { type: "world", zoneId: s.zone.id, x: 4, y: 4 } });
   s.items.push({ id: "w2", itemTypeId: "dry_branch", location: { type: "world", zoneId: s.zone.id, x: 4, y: 4 } });
@@ -81,7 +83,7 @@ test("derivePiles groups same-type world items, ignoring singles and inventory",
 test("zoneSnapshot derives piles from pre-grouped world items with no command run", () => {
   // Regression: the served snapshot must reflect grouped items even if state was
   // constructed (seed/load) with a stale or empty `piles`, since no command ran.
-  const s = seedState(index);
+  const s = seedState(index, template);
   s.piles = []; // force a stale piles array
   s.items.push({ id: "b1", itemTypeId: "dry_branch", location: { type: "world", zoneId: s.zone.id, x: 6, y: 6 } });
   s.items.push({ id: "b2", itemTypeId: "dry_branch", location: { type: "world", zoneId: s.zone.id, x: 6, y: 6 } });

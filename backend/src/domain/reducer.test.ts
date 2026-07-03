@@ -1,29 +1,31 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadCatalog } from "../infrastructure/catalog/loader";
+import { loadZone } from "../infrastructure/zone/loader";
 import { seedState } from "../bootstrap/seed";
 import { applyEvent } from "./reducer";
 import { rebuildInventories } from "./state";
 import type { WorldObject } from "../contract/events";
 
 const { index } = loadCatalog();
+const template = loadZone("z1");
 
 test("WorldObjectCreated: un world object con surfaceGrid puebla inventories", () => {
-  const s = seedState(index);
+  const s = seedState(index, template);
   const table: WorldObject = { id: "wo_table_1", objectTypeId: "rustic_table", position: { x: 5, y: 5 }, state: {}, tags: [], visibility: "visible" };
   applyEvent(s, index, { type: "WorldObjectCreated", object: table });
   assert.deepEqual(s.inventories["wo_table_1"], { width: 3, height: 2 });
 });
 
 test("WorldObjectCreated: un world object sin surfaceGrid NO puebla inventories", () => {
-  const s = seedState(index);
+  const s = seedState(index, template);
   const campfire: WorldObject = { id: "wo_fire_1", objectTypeId: "campfire", position: { x: 5, y: 5 }, state: { lit: false, fuel: 0 }, tags: [], visibility: "visible" };
   applyEvent(s, index, { type: "WorldObjectCreated", object: campfire });
   assert.equal(s.inventories["wo_fire_1"], undefined);
 });
 
 test("ItemMoved a surface: setea location.type='surface' con los campos correctos", () => {
-  const s = seedState(index);
+  const s = seedState(index, template);
   const table: WorldObject = { id: "wo_table_2", objectTypeId: "rustic_table", position: { x: 5, y: 5 }, state: {}, tags: [], visibility: "visible" };
   applyEvent(s, index, { type: "WorldObjectCreated", object: table });
   const it = { id: "it_1", itemTypeId: "small_stone", location: { type: "world" as const, zoneId: s.zone.id, x: 5, y: 6 } };
@@ -34,7 +36,7 @@ test("ItemMoved a surface: setea location.type='surface' con los campos correcto
 });
 
 test("rebuildInventories: es idempotente y no duplica ni pierde registros", () => {
-  const s = seedState(index);
+  const s = seedState(index, template);
   const table: WorldObject = { id: "wo_table_3", objectTypeId: "rustic_table", position: { x: 5, y: 5 }, state: {}, tags: [], visibility: "visible" };
   s.objects.push(table);
   rebuildInventories(s, index);

@@ -4,6 +4,7 @@ import { buildServer } from "../infrastructure/http/server";
 import { InMemoryGameRepository } from "../infrastructure/persistence/in-memory-repo";
 import type { GameRepository } from "../infrastructure/persistence/ports";
 import { createSqliteRepository } from "../infrastructure/persistence/sqlite-repo";
+import { loadZone } from "../infrastructure/zone/loader";
 import { seedState } from "./seed";
 
 const PLAYER_ID = "p1";
@@ -28,8 +29,11 @@ async function main(): Promise<void> {
   const { catalog, index } = loadCatalog();
   console.log(`Catálogo OK (v${catalog.catalogVersion}): ${catalog.items.length} items, ${catalog.worldObjects.length} objetos, ${catalog.actions.length} acciones`);
 
+  const template = loadZone(ZONE_ID);
+  console.log(`Zona '${ZONE_ID}' OK: ${template.width}x${template.height}, ${template.objects.length} objetos`);
+
   const repo = await chooseRepo();
-  if (!repo.load(PLAYER_ID)) repo.save(seedState(index, PLAYER_ID, ZONE_ID));
+  if (!repo.load(PLAYER_ID)) repo.save(seedState(index, template, PLAYER_ID, ZONE_ID));
 
   const service = new GameService(index, repo, PLAYER_ID);
   const app = buildServer(service);
