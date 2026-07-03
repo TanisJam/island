@@ -19,7 +19,11 @@
     "sync:catalog:items": "mkdir -p tools/items-editor/catalog && cp ../catalog/*.json tools/items-editor/catalog/",
     "sync:schemas:items": "mkdir -p tools/items-editor/schemas && cp ../schemas/common.json ../schemas/catalog.json tools/items-editor/schemas/",
     "dev:tool:items": "vite --config vite.config.items-editor.ts",
-    "build:tool:items": "pnpm sync:catalog:items && pnpm sync:schemas:items && vite build --config vite.config.items-editor.ts"
+    "build:tool:items": "pnpm sync:catalog:items && pnpm sync:schemas:items && vite build --config vite.config.items-editor.ts",
+    "sync:catalog:map": "mkdir -p tools/map-editor/catalog && cp ../catalog/*.json tools/map-editor/catalog/",
+    "sync:zones:map": "mkdir -p tools/map-editor/zones && cp ../zones/*.json tools/map-editor/zones/",
+    "dev:tool:map": "vite --config vite.config.map-editor.ts",
+    "build:tool:map": "pnpm sync:catalog:map && pnpm sync:zones:map && vite build --config vite.config.map-editor.ts"
   },
   "devDependencies": {
     "@types/node": "^22.7.0",

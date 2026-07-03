@@ -1,0 +1,163 @@
+/* Map Editor — dev-only tool. Color tokens + base rules copied verbatim
+ * from ../items-editor/style.css "Luz de fuego" identity for visual
+ * consistency with the game and the sibling tools, kept as raw hex here (no
+ * shared import) since this tool ships as a fully separate Vite entry —
+ * same convention every sibling tool (atlas-editor, items-editor) follows. */
+
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  --sombra: #0f1a16;
+  --madera: #2b2620;
+  --arena: #e8dcc0;
+  --brasa: #f0a24e;
+  --linea: #3a332b;
+  --panel: #1a1512;
+  --focus-ring: #7ec9ff;
+  --peligro: #d9534f;
+  --exito: #6fbf73;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--sombra);
+  color: var(--arena);
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.topbar {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--linea);
+  background: var(--madera);
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.subtitle {
+  color: #b9ac8c;
+  font-size: 13px;
+}
+
+.status-bar {
+  margin-left: auto;
+  font-size: 13px;
+  color: #b9ac8c;
+}
+
+.map-editor-layout {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 24px;
+  padding: 24px;
+  align-items: start;
+}
+
+@media (max-width: 768px) {
+  .map-editor-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.palette-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--madera);
+  border: 1px solid var(--linea);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.palette-pane h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.selected-terrain-readout {
+  margin: 0;
+  font-size: 13px;
+  color: #b9ac8c;
+}
+
+.selected-terrain-readout span {
+  color: var(--brasa);
+  font-weight: 600;
+}
+
+.palette {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.palette-swatch {
+  min-height: 44px;
+  padding: 8px 12px;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--linea);
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease;
+}
+
+.palette-swatch:hover {
+  border-color: var(--brasa);
+}
+
+.palette-swatch.active {
+  border-color: var(--brasa);
+  background: #2a2119;
+  color: var(--brasa);
+}
+
+.canvas-pane {
+  background: var(--madera);
+  border: 1px solid var(--linea);
+  border-radius: 8px;
+  padding: 16px;
+  min-width: 0;
+}
+
+.canvas-wrap {
+  border: 1px solid var(--linea);
+  border-radius: 8px;
+  background: repeating-conic-gradient(#22201c 0% 25%, #1c1a16 0% 50%) 0 0 / 24px 24px;
+  overflow: auto;
+  max-height: calc(100vh - 160px);
+  display: inline-block;
+}
+
+#zone-canvas {
+  display: block;
+  image-rendering: pixelated;
+}

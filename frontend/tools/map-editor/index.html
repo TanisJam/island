@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Map Editor — Isla Misteriosa (dev tool)</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>Map Editor</h1>
+      <span class="subtitle">Dev-only zone editor — not part of the game build</span>
+      <div id="status" class="status-bar" role="status" aria-live="polite">Loading…</div>
+    </header>
+
+    <main class="map-editor-layout">
+      <section class="palette-pane" aria-label="Terrain palette">
+        <h2>Terrains</h2>
+        <p class="selected-terrain-readout">Selected: <span id="selected-terrain">none</span></p>
+        <div id="terrain-palette" class="palette"></div>
+      </section>
+
+      <section class="canvas-pane" aria-label="Zone grid">
+        <div class="canvas-wrap">
+          <canvas id="zone-canvas" aria-label="Zone z1 grid — read-only in this build"></canvas>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
