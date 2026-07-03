@@ -1,12 +1,15 @@
 /**
- * Terrain palette panel (design.md Slice 2 — "palette.ts: terrain palette
- * from live /catalog/terrains.json"). Fetches the catalog LIVE (served by
- * `itemsEditorCatalogReadPlugin`, reused from items-editor — design.md
- * "Reuse: catalog-read-middleware"), renders one button per terrain, and
- * tracks the current selection. READ-ONLY this slice: selecting a swatch
- * only updates `selectedTerrainId()` / fires `onSelect` — nothing paints yet
- * (Slice 3 wires the selection into `zone-canvas.ts` click/drag handling on
- * top of `zone-model.ts::paintTile`).
+ * Palette panels (design.md Slice 2 — "palette.ts: terrain palette from live
+ * /catalog/terrains.json"; Slice 3 task 3.1 extends this with a world-object
+ * palette from live `/catalog/world-objects.json`). Both fetch their
+ * catalog LIVE (served by `itemsEditorCatalogReadPlugin`, reused from
+ * items-editor — design.md "Reuse: catalog-read-middleware"), render one
+ * button per entry, and track the current selection. Selecting a swatch
+ * only updates the handle's `selectedId()` / fires `onSelect` — `main.ts` is
+ * the one that decides what selecting a terrain vs. an object DOES (switch
+ * the active paint tool, wire the click handler, etc.), keeping this module
+ * a dumb, reusable "fetch + render a labeled button grid" building block
+ * shared by both panels instead of two near-duplicate implementations.
  */
 
 export interface TerrainCatalogEntry {
@@ -17,48 +20,87 @@ export interface TerrainCatalogEntry {
   observation?: string;
 }
 
+export interface WorldObjectCatalogEntry {
+  id: string;
+  name: string;
+  description?: string;
+  tags?: string[];
+  blocksMovement?: boolean;
+  observation?: string;
+}
+
 export interface PaletteOptions {
   mountEl: HTMLElement;
-  onSelect?(terrainId: string): void;
+  onSelect?(id: string): void;
 }
 
 export interface PaletteHandle {
-  selectedTerrainId(): string | null;
+  selectedId(): string | null;
   destroy(): void;
 }
 
-const TERRAINS_ROUTE = "/catalog/terrains.json";
+interface PaletteEntry {
+  id: string;
+  label: string;
+  title: string;
+}
 
-export async function createTerrainPalette({ mountEl, onSelect }: PaletteOptions): Promise<PaletteHandle> {
+const TERRAINS_ROUTE = "/catalog/terrains.json";
+const WORLD_OBJECTS_ROUTE = "/catalog/world-objects.json";
+
+async function createPalette(route: string, toEntry: (raw: unknown) => PaletteEntry, { mountEl, onSelect }: PaletteOptions): Promise<PaletteHandle> {
   mountEl.innerHTML = "";
   mountEl.classList.add("palette");
 
-  const res = await fetch(TERRAINS_ROUTE, { cache: "no-store" });
-  if (!res.ok) throw new Error(`terrains.json: HTTP ${res.status}`);
-  const terrains = (await res.json()) as TerrainCatalogEntry[];
+  const res = await fetch(route, { cache: "no-store" });
+  if (!res.ok) throw new Error(`${route}: HTTP ${res.status}`);
+  const raw = (await res.json()) as unknown[];
+  const entries = raw.map(toEntry);
 
   let selected: string | null = null;
   const buttons = new Map<string, HTMLButtonElement>();
 
-  for (const terrain of terrains) {
+  for (const entry of entries) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "palette-swatch";
-    btn.textContent = terrain.name;
-    btn.title = `${terrain.id} — ${terrain.walkable ? "walkable" : "blocks movement"}`;
+    btn.textContent = entry.label;
+    btn.title = entry.title;
     btn.addEventListener("click", () => {
-      selected = terrain.id;
-      for (const [id, otherBtn] of buttons) otherBtn.classList.toggle("active", id === terrain.id);
-      onSelect?.(terrain.id);
+      selected = entry.id;
+      for (const [id, otherBtn] of buttons) otherBtn.classList.toggle("active", id === entry.id);
+      onSelect?.(entry.id);
     });
-    buttons.set(terrain.id, btn);
+    buttons.set(entry.id, btn);
     mountEl.appendChild(btn);
   }
 
   return {
-    selectedTerrainId: () => selected,
+    selectedId: () => selected,
     destroy: () => {
       mountEl.innerHTML = "";
     },
   };
+}
+
+export function createTerrainPalette(options: PaletteOptions): Promise<PaletteHandle> {
+  return createPalette(
+    TERRAINS_ROUTE,
+    (raw) => {
+      const terrain = raw as TerrainCatalogEntry;
+      return { id: terrain.id, label: terrain.name, title: `${terrain.id} — ${terrain.walkable ? "walkable" : "blocks movement"}` };
+    },
+    options,
+  );
+}
+
+export function createObjectPalette(options: PaletteOptions): Promise<PaletteHandle> {
+  return createPalette(
+    WORLD_OBJECTS_ROUTE,
+    (raw) => {
+      const worldObject = raw as WorldObjectCatalogEntry;
+      return { id: worldObject.id, label: worldObject.name, title: `${worldObject.id}${worldObject.blocksMovement ? " — blocks movement" : ""}` };
+    },
+    options,
+  );
 }

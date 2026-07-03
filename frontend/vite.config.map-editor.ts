@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import { itemsEditorCatalogReadPlugin } from "./tools/items-editor/server/catalog-read-middleware";
 import { mapEditorZoneReadPlugin } from "./tools/map-editor/server/zone-read-middleware";
+import { mapEditorZoneSavePlugin } from "./tools/map-editor/server/zone-write-middleware";
 
 /**
  * Fourth, fully separate Vite entry for the dev-only map-editor tool
@@ -29,7 +30,8 @@ export default defineConfig({
   // `itemsEditorCatalogReadPlugin` (reused, not copied — design.md "Reuse")
   // serves `catalog/*.json` LIVE from the repo-root source, giving the
   // terrain/world-object palettes zero-staleness reads. `mapEditorZoneReadPlugin`
-  // serves `GET /zones/zone-{id}.json` LIVE the same way — read-only this
-  // slice, no write route yet (Slice 3 adds `zone-write-middleware.ts`).
-  plugins: [itemsEditorCatalogReadPlugin(), mapEditorZoneReadPlugin()],
+  // serves `GET /zones/zone-{id}.json` LIVE the same way. `mapEditorZoneSavePlugin`
+  // (Slice 3) adds `POST /__save-zone/:zoneId` — ajv-validated, atomic write
+  // of the in-memory edited zone back to `zones/zone-{id}.json`.
+  plugins: [itemsEditorCatalogReadPlugin(), mapEditorZoneReadPlugin(), mapEditorZoneSavePlugin()],
 });
