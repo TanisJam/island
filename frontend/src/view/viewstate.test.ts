@@ -220,13 +220,16 @@ test("frame(): the 'visible' ring follows the avatar's CURRENT interpolated tile
   // Mid-tween: only the first leg has completed (avatar visually at (6,5)),
   // even though the AUTHORITATIVE position already jumped to (8,5) and
   // `discovered` already includes (9,5) — marked around the destination by
-  // the reducer regardless of animation state.
+  // the reducer regardless of animation state. Progressive-reveal fix: the
+  // far tile must stay "unseen" until the avatar's interpolated vision has
+  // actually swept it — it must NOT be "explored" just because `discovered`
+  // (the authoritative mirror) already has it.
   vs.update(MS_PER_TILE);
   const midFrame = vs.frame();
   assert.equal(
     midFrame.tiles.find((t) => t.x === 9 && t.y === 5)!.visibility,
-    "explored",
-    "not yet 'visible' — the avatar hasn't visually arrived at the destination, even though it's authoritatively there",
+    "unseen",
+    "not yet revealed — the avatar's vision hasn't swept this tile, even though it's authoritatively discovered",
   );
   assert.equal(
     midFrame.tiles.find((t) => t.x === 6 && t.y === 5)!.visibility,
@@ -238,4 +241,115 @@ test("frame(): the 'visible' ring follows the avatar's CURRENT interpolated tile
   // up to the destination and the far tile becomes visible too.
   vs.update(2 * MS_PER_TILE);
   assert.equal(vs.frame().tiles.find((t) => t.x === 9 && t.y === 5)!.visibility, "visible");
+});
+
+// --- Progressive fog reveal fix: fog lifts as the avatar's vision sweeps
+// tiles, not instantly when a far destination is added to `discovered` ---
+
+test("frame(): tiles already in the seeded `discovered` set render as 'explored' immediately, without any movement", () => {
+  const base = makeSnapshot();
+  const tiles = [5, 6, 7].map((x) => makeTile(x, 5));
+  const store = createStore(
+    makeSnapshot({
+      visionRadius: 1,
+      tiles,
+      player: { ...base.player, position: { x: 5, y: 5 } },
+      // (7,5) is already known from a previous session/boot, even though it
+      // is outside the avatar's current vision ring (distance 2, radius 1).
+      discovered: new Set(["5,5", "7,5"]),
+    }),
+  );
+  const vs = createViewState(store);
+
+  const frame = vs.frame();
+  assert.equal(frame.tiles.find((t) => t.x === 7 && t.y === 5)!.visibility, "explored");
+});
+
+test("frame(): a TilesRevealed event marks its tiles 'explored' immediately, without needing the avatar to walk there", () => {
+  const base = makeSnapshot();
+  const tiles = [5, 6, 7, 8, 9].map((x) => makeTile(x, 5));
+  const store = createStore(
+    makeSnapshot({
+      visionRadius: 1,
+      tiles,
+      player: { ...base.player, position: { x: 5, y: 5 } },
+      discovered: new Set(["5,5"]),
+    }),
+  );
+  const vs = createViewState(store);
+
+  // Sanity: before the reveal, the far tile is unseen.
+  assert.equal(vs.frame().tiles.find((t) => t.x === 9 && t.y === 5)!.visibility, "unseen");
+
+  store.ingest([{ type: "TilesRevealed", tiles: [{ x: 9, y: 5, terrain: "grass", walkable: true, tags: ["ground"], visibility: "visible" }] }]);
+
+  // Explicitly revealed tiles are NOT movement-gated — they show as
+  // 'explored' right away, unlike tiles that only entered `discovered` via a
+  // far PlayerMoved (which must wait for the avatar's vision to sweep them).
+  assert.equal(vs.frame().tiles.find((t) => t.x === 9 && t.y === 5)!.visibility, "explored");
+});
+
+test("frame(): a far PlayerMoved's destination stays 'unseen' until the avatar's interpolated position advances near it, then becomes 'visible'", () => {
+  const base = makeSnapshot();
+  const tiles = [5, 6, 7, 8, 9].map((x) => makeTile(x, 5));
+  const store = createStore(
+    makeSnapshot({
+      visionRadius: 1,
+      tiles,
+      player: { ...base.player, position: { x: 5, y: 5 } },
+      discovered: new Set(["5,5"]),
+    }),
+  );
+  const vs = createViewState(store);
+
+  // Far double-click move: destination (9,5) is well outside current vision.
+  // The reducer immediately adds the destination's vicinity to `discovered`
+  // (authoritative — unaffected by this fix), but the tile must still render
+  // 'unseen' until the avatar's interpolated position actually gets there.
+  store.ingest([
+    { type: "PlayerMoved", playerId: "p1", path: [{ x: 6, y: 5 }, { x: 7, y: 5 }, { x: 8, y: 5 }, { x: 9, y: 5 }], position: { x: 9, y: 5 } },
+  ]);
+
+  const before = vs.frame();
+  assert.equal(before.tiles.find((t) => t.x === 9 && t.y === 5)!.visibility, "unseen", "destination not yet swept by vision, even though authoritatively discovered");
+
+  // Advance the avatar all the way to the destination.
+  vs.update(4 * MS_PER_TILE);
+  const after = vs.frame();
+  assert.equal(after.tiles.find((t) => t.x === 9 && t.y === 5)!.visibility, "visible", "avatar has arrived, tile is within the live vision ring");
+});
+
+test("frame(): an entity sitting on a far PlayerMoved's destination stays 'unseen' until the avatar's interpolated position sweeps it, then becomes 'visible'", () => {
+  const base = makeSnapshot();
+  const tiles = [5, 6, 7, 8, 9].map((x) => makeTile(x, 5));
+  const obj: WorldObject = { id: "wo_far", objectTypeId: "tree", position: { x: 9, y: 5 }, state: {} };
+  const store = createStore(
+    makeSnapshot({
+      visionRadius: 1,
+      tiles,
+      objects: [obj],
+      player: { ...base.player, position: { x: 5, y: 5 } },
+      discovered: new Set(["5,5"]),
+    }),
+  );
+  const vs = createViewState(store);
+
+  // Far double-click move: destination (9,5) is well outside current vision.
+  // The reducer immediately marks the destination's vicinity as `discovered`
+  // (authoritative — unaffected by this fix), but the entity sitting on that
+  // tile must still render 'unseen' until the avatar's interpolated position
+  // actually sweeps it.
+  store.ingest([
+    { type: "PlayerMoved", playerId: "p1", path: [{ x: 6, y: 5 }, { x: 7, y: 5 }, { x: 8, y: 5 }, { x: 9, y: 5 }], position: { x: 9, y: 5 } },
+  ]);
+
+  const before = vs.frame();
+  const objBefore = before.entities.find((e) => e.id === "wo_far")!;
+  assert.equal(objBefore.visibility, "unseen", "entity not yet swept by vision, even though authoritatively discovered");
+
+  // Advance the avatar all the way to the destination.
+  vs.update(4 * MS_PER_TILE);
+  const after = vs.frame();
+  const objAfter = after.entities.find((e) => e.id === "wo_far")!;
+  assert.equal(objAfter.visibility, "visible", "avatar has arrived, the entity is within the live vision ring");
 });

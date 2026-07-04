@@ -41,19 +41,25 @@ export function visibilityFrom(snapshot: ClientSnapshot, from: Position, pos: Po
   return "unseen";
 }
 
+/** Invokes `cb` for each tile key within the zone's vision radius of `pos`
+ * (clamped to zone bounds, euclidean radius). Shared by the authoritative
+ * discovery mirror (markVisibleAround) and the viewstate's presentation-only
+ * progressive-reveal set. */
+export function forEachTileInVision(snapshot: ClientSnapshot, pos: Position, cb: (key: string) => void): void {
+  const r = snapshot.visionRadius;
+  const { width, height } = snapshot.zone;
+  for (let y = pos.y - r; y <= pos.y + r; y++) {
+    for (let x = pos.x - r; x <= pos.x + r; x++) {
+      if (x >= 0 && y >= 0 && x < width && y < height && euclid(pos, { x, y }) <= r) cb(tileKey(x, y));
+    }
+  }
+}
+
 /**
  * Marks every tile within the zone's vision radius of `pos` as discovered. Mirrors
  * backend `markVisibleAround`. Called whenever the player's position changes (on
  * `PlayerMoved`) so the client's `discovered` set tracks the backend's.
  */
 export function markVisibleAround(snapshot: ClientSnapshot, pos: Position): void {
-  const r = snapshot.visionRadius;
-  const { width, height } = snapshot.zone;
-  for (let y = pos.y - r; y <= pos.y + r; y++) {
-    for (let x = pos.x - r; x <= pos.x + r; x++) {
-      if (x >= 0 && y >= 0 && x < width && y < height && euclid(pos, { x, y }) <= r) {
-        snapshot.discovered.add(tileKey(x, y));
-      }
-    }
-  }
+  forEachTileInVision(snapshot, pos, (k) => snapshot.discovered.add(k));
 }

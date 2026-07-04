@@ -1,7 +1,7 @@
 import type { Event, Position, Tile } from "../contract";
 import type { Store } from "../state/store";
 import type { ClientSnapshot } from "../state/snapshot";
-import { chebyshev, visibilityFrom } from "../state/visibility";
+import { chebyshev, euclid, forEachTileInVision, tileKey } from "../state/visibility";
 
 export type Visibility = "unseen" | "explored" | "visible";
 
@@ -139,13 +139,20 @@ function buildLegs(startPos: Position, pos: Position, path: Position[] | undefin
  * LOAD-BEARING (spec "ViewState as Derived Presentation Layer" + tasks.md
  * 2.3, revised by the 7th playtest fix pass): per-tile and per-entity
  * `visibility` is computed here from the avatar's CURRENT INTERPOLATED tile
- * — not the authoritative snapshot position — via `visibilityFrom`, so the
+ * — not the authoritative snapshot position — via `renderedVisibility`, so the
  * fog/vision field visually follows the moving sprite instead of snapping to
  * the destination. The reference tile is only recomputed when it actually
  * changes (crosses a tile boundary), not every frame, to avoid boundary
- * shimmer and keep it cheap. The `Renderer` must never call `visibilityOf`/
- * `visibilityFrom` or receive a `ClientSnapshot` — it only reads
- * `Frame.tiles[].visibility` and `Frame.entities[].visibility`.
+ * shimmer and keep it cheap.
+ *
+ * `renderedVisibility` additionally gates "explored" by `revealedVisual`, a
+ * presentation-only set of tiles the avatar's vision has actually swept (fix:
+ * "fog must lift progressively as the avatar walks, not reveal a whole
+ * destination area instantly on a far move") — see `revealedVisual` below.
+ * `discovered` itself (the authoritative mirror) is untouched by this gate.
+ * The `Renderer` must never call `visibilityOf`/`visibilityFrom` or receive a
+ * `ClientSnapshot` — it only reads `Frame.tiles[].visibility` and
+ * `Frame.entities[].visibility`.
  */
 export function createViewState(store: Store): ViewState {
   const entities = new Map<string, TweenEntity>();
@@ -156,15 +163,25 @@ export function createViewState(store: Store): ViewState {
   // `PlayerMoved.path` per player id via the raw-events channel, consumed
   // (and cleared) the next time that entity's position is reconciled.
   const pendingPaths = new Map<string, Position[]>();
+  // Presentation-only: tiles the interpolated avatar's vision has actually
+  // swept (or that were explicitly revealed). Gates the "explored" render so
+  // fog lifts progressively as the avatar walks, WITHOUT touching the
+  // authoritative `discovered` mirror. Seeded with what is already explored
+  // so a reload shows the known map immediately.
+  const revealedVisual = new Set<string>(lastSnapshot.discovered);
   store.subscribeEvents((events: Event[]) => {
     for (const e of events) {
       if (e.type === "PlayerMoved") pendingPaths.set(e.playerId, e.path);
+      if (e.type === "TilesRevealed") {
+        for (const t of e.tiles) revealedVisual.add(tileKey(t.x, t.y));
+      }
     }
   });
 
   // Fix: "vision field must follow the moving avatar" — the tile reference
-  // used for every `visibilityFrom` call this frame. Updated only when the
-  // avatar's rounded (interpolated) tile actually changes.
+  // used by `renderedVisibility` (see `frame()` below) for every visibility
+  // check this frame. Updated only when the avatar's rounded (interpolated)
+  // tile actually changes.
   let avatarTile: Position = lastSnapshot.player.position;
 
   function upsert(
@@ -248,6 +265,10 @@ export function createViewState(store: Store): ViewState {
   return {
     sync(snapshot: ClientSnapshot): void {
       reconcile(snapshot);
+      // A full resync from the authoritative snapshot should immediately reveal
+      // everything already explored; the movement-progressive reveal only applies
+      // to live in-session discovery, not to a fresh authoritative snapshot.
+      for (const k of snapshot.discovered) revealedVisual.add(k);
     },
 
     update(dt: number): void {
@@ -286,11 +307,27 @@ export function createViewState(store: Store): ViewState {
       const player = entities.get(snapshot.player.id);
       const avatarRenderPos = player ? player.renderPos : snapshot.player.position;
       const nextAvatarTile = { x: Math.round(avatarRenderPos.x), y: Math.round(avatarRenderPos.y) };
-      if (!samePos(avatarTile, nextAvatarTile)) avatarTile = nextAvatarTile;
+      if (!samePos(avatarTile, nextAvatarTile)) {
+        avatarTile = nextAvatarTile;
+        forEachTileInVision(snapshot, avatarTile, (k) => revealedVisual.add(k));
+      }
+
+      // Local visibility computation (replaces the old `visibilityFrom` call):
+      // within `visionRadius` of the avatar's current interpolated tile is
+      // "visible"; otherwise "explored" additionally requires the tile to be
+      // in `revealedVisual` (swept by the avatar's vision or explicitly
+      // revealed), so a far destination's fog lifts progressively as the
+      // avatar walks instead of all at once when `discovered` gains it.
+      const renderedVisibility = (pos: Position): Visibility => {
+        if (euclid(avatarTile, pos) <= snapshot.visionRadius) return "visible";
+        const key = tileKey(pos.x, pos.y);
+        if (snapshot.discovered.has(key) && revealedVisual.has(key)) return "explored";
+        return "unseen";
+      };
 
       const tiles = snapshot.tiles.map((tile) => ({
         ...tile,
-        visibility: visibilityFrom(snapshot, avatarTile, { x: tile.x, y: tile.y }),
+        visibility: renderedVisibility({ x: tile.x, y: tile.y }),
       }));
 
       const renderEntities: RenderEntity[] = [];
@@ -300,7 +337,7 @@ export function createViewState(store: Store): ViewState {
           kind: entity.kind,
           typeId: entity.typeId,
           renderPos: entity.renderPos,
-          visibility: visibilityFrom(snapshot, avatarTile, entity.authoritativePos),
+          visibility: renderedVisibility(entity.authoritativePos),
           count: entity.count,
           state: entity.state,
         });
