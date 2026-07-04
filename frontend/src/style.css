@@ -67,6 +67,18 @@ body {
   font-family: "Spectral", Georgia, serif;
 }
 
+/* Dev-only editor mount (src/main.ts). The body above is `overflow: hidden`
+ * for the fullscreen game canvas, so a mounted editor needs its OWN
+ * full-viewport scroll container — otherwise its lower controls (Save /
+ * Delete entry) get clipped below the fold with no way to scroll to them. */
+#app-editor:not([hidden]) {
+  position: fixed;
+  inset: 0;
+  overflow-y: auto;
+  z-index: 40;
+  background: var(--sombra);
+}
+
 #game {
   position: fixed;
   inset: 0;
