@@ -1,7 +1,3 @@
 node_modules/
 dist/
-dist-tool/
-dist-tool-items/
 tools/atlas-editor/catalog/
-tools/items-editor/catalog/
-tools/items-editor/schemas/
