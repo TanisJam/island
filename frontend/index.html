@@ -12,30 +12,40 @@
     />
   </head>
   <body>
-    <canvas id="game"></canvas>
-    <div id="vignette"></div>
-    <div id="hint"></div>
+    <!-- Wrapped so the dev-only hash router (src/main.ts) can show/hide the
+         game vs. a mounted editor route from one unified index.html. All
+         game elements keep their original ids/positioning (fixed elements
+         position relative to the viewport, unaffected by this wrapper). -->
+    <div id="app-game">
+      <canvas id="game"></canvas>
+      <div id="vignette"></div>
+      <div id="hint"></div>
 
-    <div id="hud">
-      <div class="hand left">
-        <span class="lbl">MANO IZQ</span>
-        <div class="hslot" id="hand-left"></div>
-        <span class="nm" id="hand-left-name">-</span>
-      </div>
-      <div class="voice">
-        <div class="thought" id="thought"></div>
-        <div class="energy">
-          <span class="lbl">ENERGÍA</span>
-          <div class="bar"><i id="energy-bar"></i></div>
-          <span class="num" id="energy-num">-</span>
+      <div id="hud">
+        <div class="hand left">
+          <span class="lbl">MANO IZQ</span>
+          <div class="hslot" id="hand-left"></div>
+          <span class="nm" id="hand-left-name">-</span>
+        </div>
+        <div class="voice">
+          <div class="thought" id="thought"></div>
+          <div class="energy">
+            <span class="lbl">ENERGÍA</span>
+            <div class="bar"><i id="energy-bar"></i></div>
+            <span class="num" id="energy-num">-</span>
+          </div>
+        </div>
+        <div class="hand right">
+          <span class="lbl">MANO DER</span>
+          <div class="hslot" id="hand-right"></div>
+          <span class="nm" id="hand-right-name">-</span>
         </div>
       </div>
-      <div class="hand right">
-        <span class="lbl">MANO DER</span>
-        <div class="hslot" id="hand-right"></div>
-        <span class="nm" id="hand-right-name">-</span>
-      </div>
     </div>
+
+    <!-- Dev-only editor mount point. Empty/hidden in production — nothing
+         ever writes into it when import.meta.env.DEV is false. -->
+    <div id="app-editor" hidden></div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

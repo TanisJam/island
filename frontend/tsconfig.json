@@ -11,8 +11,7 @@
     "resolveJsonModule": true,
     "verbatimModuleSyntax": false,
     "noEmit": true,
-    "rootDir": "src",
-    "types": ["node"]
+    "types": ["node", "vite/client"]
   },
   "include": ["src"]
 }

@@ -1,3 +1,4 @@
+import "./style.css";
 import { footprintFromDrag, pastDragThreshold, type Footprint, type Point } from "../shared/picking";
 import { catalogTypeIdsByKind, type CatalogEntry } from "./catalog";
 import { buildAtlasExport, type Mapping } from "./atlas-export";
@@ -9,33 +10,73 @@ const GRID = 16;
 const ZOOM_LEVELS = [1, 2, 3, 4, 6, 8] as const;
 const DEFAULT_ZOOM = 4;
 
-function mustEl<T extends Element>(id: string): T {
-  const el = document.getElementById(id);
-  if (!el) throw new Error(`atlas-editor: missing #${id} in index.html`);
-  return el as unknown as T;
-}
+/** Was `index.html`'s body markup before the unified-app migration
+ * (tasks.md "Migrate atlas-editor" — Phase 2). Injected into the mounting
+ * container's `innerHTML` by `mount()`; DOM structure/ids unchanged so the
+ * lookups below still work exactly as they did against the old
+ * bespoke-entry `index.html`. */
+const TEMPLATE = `
+  <header class="topbar">
+    <h1>Atlas Editor</h1>
+    <span class="subtitle">Dev-only tileset mapping tool — not part of the game build</span>
+  </header>
 
-const fileInput = mustEl<HTMLInputElement>("file-input");
-const canvas = mustEl<HTMLCanvasElement>("picking-canvas");
-const emptyState = mustEl<HTMLDivElement>("empty-state");
-const zoomSelect = mustEl<HTMLSelectElement>("zoom-select");
-const readout = mustEl<HTMLDivElement>("readout");
-const assignBtn = mustEl<HTMLButtonElement>("assign-btn");
-const exportBtn = mustEl<HTMLButtonElement>("export-btn");
-const statusEl = mustEl<HTMLDivElement>("status");
-const lists: Record<AtlasKind, HTMLUListElement> = {
-  terrain: mustEl<HTMLUListElement>("list-terrain"),
-  object: mustEl<HTMLUListElement>("list-object"),
-  item: mustEl<HTMLUListElement>("list-item"),
-  player: mustEl<HTMLUListElement>("list-player"),
-};
+  <main class="layout">
+    <section class="picking-pane">
+      <div class="toolbar">
+        <label class="file-label" for="file-input">
+          Load tileset PNG
+          <input id="file-input" type="file" accept="image/png" />
+        </label>
+        <label class="zoom-label" for="zoom-select">
+          Zoom
+          <select id="zoom-select"></select>
+        </label>
+        <div id="readout" class="readout">No selection</div>
+      </div>
+      <div id="canvas-wrap" class="canvas-wrap">
+        <canvas id="picking-canvas"></canvas>
+        <div id="empty-state" class="empty-state">Load a tileset PNG to begin</div>
+      </div>
+      <div id="status" class="status" role="status" aria-live="polite"></div>
+    </section>
 
-const ctx: CanvasRenderingContext2D = (() => {
-  const c = canvas.getContext("2d");
-  if (!c) throw new Error("atlas-editor: no 2D context");
-  return c;
-})();
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2>Catalog typeIds</h2>
+        <p class="hint">Pick a typeId, draw a selection on the left, then Assign.</p>
+      </div>
 
+      <div class="type-section">
+        <h3>Terrain</h3>
+        <ul id="list-terrain" class="type-list"></ul>
+      </div>
+      <div class="type-section">
+        <h3>Object</h3>
+        <ul id="list-object" class="type-list"></ul>
+      </div>
+      <div class="type-section">
+        <h3>Item</h3>
+        <ul id="list-item" class="type-list"></ul>
+      </div>
+      <div class="type-section">
+        <h3>Player</h3>
+        <ul id="list-player" class="type-list"></ul>
+      </div>
+
+      <div class="actions">
+        <button id="assign-btn" type="button" class="btn btn-secondary" disabled>Assign selection</button>
+        <button id="export-btn" type="button" class="btn btn-primary">Export atlas.json</button>
+      </div>
+    </aside>
+  </main>
+`;
+
+// Module-level state (unchanged from the pre-migration file): a single
+// mounted instance is all this dev tool ever needs, and keeping state here
+// (rather than function-local to `mount()`) means switching away to
+// another route and back preserves the loaded image/mappings (spec "Switch
+// away mid-edit" allows losing them, doesn't require it).
 let image: HTMLImageElement | null = null;
 let imageFilename = "tileset.png";
 let zoom: number = DEFAULT_ZOOM;
@@ -48,13 +89,24 @@ let currentKind: AtlasKind | null = null;
 let cachedTypeIdsByKind: Record<AtlasKind, string[]> | null = null;
 const mappings = new Map<string, Mapping>();
 
-for (const level of ZOOM_LEVELS) {
-  const opt = document.createElement("option");
-  opt.value = String(level);
-  opt.textContent = `${level}x`;
-  if (level === DEFAULT_ZOOM) opt.selected = true;
-  zoomSelect.appendChild(opt);
-}
+// Element bindings are re-queried on every `mount()` call since the
+// container's `innerHTML` is rebuilt each time — see below.
+let fileInput: HTMLInputElement;
+let canvas: HTMLCanvasElement;
+let emptyState: HTMLDivElement;
+let zoomSelect: HTMLSelectElement;
+let readout: HTMLDivElement;
+let assignBtn: HTMLButtonElement;
+let exportBtn: HTMLButtonElement;
+let statusEl: HTMLDivElement;
+let lists: Record<AtlasKind, HTMLUListElement>;
+let ctx: CanvasRenderingContext2D;
+
+// The `window` "mouseup" listener is attached exactly once (module scope),
+// not once per `mount()` — it closes over the mutable bindings above, so it
+// always operates on whichever canvas/state is current, even across
+// repeated mounts (guards against duplicate listeners piling up).
+let windowListenersAttached = false;
 
 function setStatus(message: string): void {
   statusEl.textContent = message;
@@ -162,83 +214,23 @@ async function fetchJsonArray(path: string): Promise<CatalogEntry[]> {
   }
 }
 
+/** Resolves catalog file URLs against THIS module's own URL rather than the
+ * page's URL. Needed because the unified app-shell serves every route from
+ * one `index.html` at "/" (hash routing doesn't change `location.pathname`),
+ * so a plain relative fetch like `"./catalog/x.json"` would incorrectly
+ * resolve against the document instead of this module's directory. */
+function catalogUrl(fileName: string): string {
+  return new URL(`./catalog/${fileName}`, import.meta.url).toString();
+}
+
 async function loadCatalog(): Promise<Record<AtlasKind, string[]>> {
   const [terrains, worldObjects, items] = await Promise.all([
-    fetchJsonArray("./catalog/terrains.json"),
-    fetchJsonArray("./catalog/world-objects.json"),
-    fetchJsonArray("./catalog/items.json"),
+    fetchJsonArray(catalogUrl("terrains.json")),
+    fetchJsonArray(catalogUrl("world-objects.json")),
+    fetchJsonArray(catalogUrl("items.json")),
   ]);
   return catalogTypeIdsByKind(terrains, worldObjects, items);
 }
-
-fileInput.addEventListener("change", () => {
-  const file = fileInput.files?.[0];
-  if (!file) return;
-  imageFilename = file.name;
-  const url = URL.createObjectURL(file);
-  const img = new Image();
-  img.onload = () => {
-    image = img;
-    URL.revokeObjectURL(url);
-    setStatus(`Loaded ${imageFilename} (${img.width}x${img.height})`);
-    render();
-    updateAssignEnabled();
-  };
-  img.onerror = () => setStatus(`Failed to load ${file.name}`);
-  img.src = url;
-});
-
-zoomSelect.addEventListener("change", () => {
-  zoom = Number(zoomSelect.value) || DEFAULT_ZOOM;
-  render();
-});
-
-canvas.addEventListener("mousedown", (e) => {
-  if (!image) return;
-  dragStart = canvasPointToImagePx(e.clientX, e.clientY);
-  dragCurrent = dragStart;
-  isDragging = true;
-});
-
-canvas.addEventListener("mousemove", (e) => {
-  if (!isDragging || !dragStart) return;
-  dragCurrent = canvasPointToImagePx(e.clientX, e.clientY);
-  render();
-});
-
-window.addEventListener("mouseup", (e) => {
-  if (!isDragging || !dragStart) return;
-  const end = canvasPointToImagePx(e.clientX, e.clientY);
-  const startScreen = { x: dragStart.x * zoom, y: dragStart.y * zoom };
-  const endScreen = { x: end.x * zoom, y: end.y * zoom };
-  const effectiveEnd = pastDragThreshold(startScreen, endScreen) ? end : dragStart;
-  selection = footprintFromDrag(dragStart, effectiveEnd, GRID);
-  isDragging = false;
-  dragStart = null;
-  dragCurrent = null;
-  updateReadout();
-  updateAssignEnabled();
-  render();
-});
-
-assignBtn.addEventListener("click", () => {
-  if (!selection || !currentTypeId || !currentKind) return;
-  mappings.set(currentTypeId, { kind: currentKind, typeId: currentTypeId, region: { ...selection } });
-  setStatus(`Assigned ${currentTypeId} -> {x:${selection.x}, y:${selection.y}, w:${selection.w}, h:${selection.h}}`);
-  if (cachedTypeIdsByKind) renderSidebar(cachedTypeIdsByKind);
-});
-
-exportBtn.addEventListener("click", () => {
-  const atlas = buildAtlasExport(Array.from(mappings.values()), imageFilename, GRID);
-  const blob = new Blob([JSON.stringify(atlas, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "atlas.json";
-  a.click();
-  URL.revokeObjectURL(url);
-  setStatus(`Exported atlas.json (${mappings.size} typeId${mappings.size === 1 ? "" : "s"} mapped)`);
-});
 
 async function boot(): Promise<void> {
   setStatus("Loading catalog...");
@@ -255,4 +247,118 @@ async function boot(): Promise<void> {
   updateAssignEnabled();
 }
 
-void boot();
+/** Mounts the atlas editor into `container` (tasks.md 2.1 — replaces the
+ * old bespoke `index.html` bootstrap). Safe to call more than once (e.g.
+ * navigating away and back via the hash router): rebuilds the DOM inside
+ * `container` and re-binds element references, while in-memory tool state
+ * (loaded image, assigned mappings) survives across mounts. */
+export function mount(container: HTMLElement): void {
+  container.innerHTML = TEMPLATE;
+
+  function mustEl<T extends Element>(id: string): T {
+    const el = container.querySelector(`#${id}`);
+    if (!el) throw new Error(`atlas-editor: missing #${id} in mount template`);
+    return el as unknown as T;
+  }
+
+  fileInput = mustEl<HTMLInputElement>("file-input");
+  canvas = mustEl<HTMLCanvasElement>("picking-canvas");
+  emptyState = mustEl<HTMLDivElement>("empty-state");
+  zoomSelect = mustEl<HTMLSelectElement>("zoom-select");
+  readout = mustEl<HTMLDivElement>("readout");
+  assignBtn = mustEl<HTMLButtonElement>("assign-btn");
+  exportBtn = mustEl<HTMLButtonElement>("export-btn");
+  statusEl = mustEl<HTMLDivElement>("status");
+  lists = {
+    terrain: mustEl<HTMLUListElement>("list-terrain"),
+    object: mustEl<HTMLUListElement>("list-object"),
+    item: mustEl<HTMLUListElement>("list-item"),
+    player: mustEl<HTMLUListElement>("list-player"),
+  };
+
+  const nextCtx = canvas.getContext("2d");
+  if (!nextCtx) throw new Error("atlas-editor: no 2D context");
+  ctx = nextCtx;
+
+  for (const level of ZOOM_LEVELS) {
+    const opt = document.createElement("option");
+    opt.value = String(level);
+    opt.textContent = `${level}x`;
+    if (level === zoom) opt.selected = true;
+    zoomSelect.appendChild(opt);
+  }
+
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+    imageFilename = file.name;
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      image = img;
+      URL.revokeObjectURL(url);
+      setStatus(`Loaded ${imageFilename} (${img.width}x${img.height})`);
+      render();
+      updateAssignEnabled();
+    };
+    img.onerror = () => setStatus(`Failed to load ${file.name}`);
+    img.src = url;
+  });
+
+  zoomSelect.addEventListener("change", () => {
+    zoom = Number(zoomSelect.value) || DEFAULT_ZOOM;
+    render();
+  });
+
+  canvas.addEventListener("mousedown", (e) => {
+    if (!image) return;
+    dragStart = canvasPointToImagePx(e.clientX, e.clientY);
+    dragCurrent = dragStart;
+    isDragging = true;
+  });
+
+  canvas.addEventListener("mousemove", (e) => {
+    if (!isDragging || !dragStart) return;
+    dragCurrent = canvasPointToImagePx(e.clientX, e.clientY);
+    render();
+  });
+
+  assignBtn.addEventListener("click", () => {
+    if (!selection || !currentTypeId || !currentKind) return;
+    mappings.set(currentTypeId, { kind: currentKind, typeId: currentTypeId, region: { ...selection } });
+    setStatus(`Assigned ${currentTypeId} -> {x:${selection.x}, y:${selection.y}, w:${selection.w}, h:${selection.h}}`);
+    if (cachedTypeIdsByKind) renderSidebar(cachedTypeIdsByKind);
+  });
+
+  exportBtn.addEventListener("click", () => {
+    const atlas = buildAtlasExport(Array.from(mappings.values()), imageFilename, GRID);
+    const blob = new Blob([JSON.stringify(atlas, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "atlas.json";
+    a.click();
+    URL.revokeObjectURL(url);
+    setStatus(`Exported atlas.json (${mappings.size} typeId${mappings.size === 1 ? "" : "s"} mapped)`);
+  });
+
+  if (!windowListenersAttached) {
+    window.addEventListener("mouseup", (e) => {
+      if (!isDragging || !dragStart) return;
+      const end = canvasPointToImagePx(e.clientX, e.clientY);
+      const startScreen = { x: dragStart.x * zoom, y: dragStart.y * zoom };
+      const endScreen = { x: end.x * zoom, y: end.y * zoom };
+      const effectiveEnd = pastDragThreshold(startScreen, endScreen) ? end : dragStart;
+      selection = footprintFromDrag(dragStart, effectiveEnd, GRID);
+      isDragging = false;
+      dragStart = null;
+      dragCurrent = null;
+      updateReadout();
+      updateAssignEnabled();
+      render();
+    });
+    windowListenersAttached = true;
+  }
+
+  void boot();
+}
