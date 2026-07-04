@@ -10,9 +10,9 @@ import type { ZoneTemplate } from "../../../src/contract/zone";
 /**
  * Vite dev-server middleware exposing `POST /__save-zone/:zoneId`
  * (design.md "Backend Zone Loader" / task 3.4 — "mirror
- * items-editor/server/write-middleware.ts"). Registered ONLY under
- * `dev:tool:map` via `vite.config.map-editor.ts` — never present in
- * `vite build`, never in the game, never in the backend.
+ * items-editor/server/write-middleware.ts"). Registered in the unified
+ * `vite.config.ts`, gated on `command === "serve"` (tasks.md Phase 4) —
+ * never present in `vite build`, never in the game, never in the backend.
  *
  * Unlike `write-middleware.ts`'s generalized `/__save/:collectionId`
  * (records array + catalogVersion bump), a zone save has no "current file

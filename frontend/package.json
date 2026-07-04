@@ -13,11 +13,7 @@
     "typecheck:tool": "tsc -p tsconfig.tool.json --noEmit",
     "test": "node --import tsx --test \"src/**/*.test.ts\" \"tools/**/*.test.ts\"",
     "sync:contract": "cp ../schemas/generated/*.ts src/contract/",
-    "sync:catalog": "mkdir -p tools/atlas-editor/catalog && cp ../catalog/*.json tools/atlas-editor/catalog/",
-    "sync:catalog:map": "mkdir -p tools/map-editor/catalog && cp ../catalog/*.json tools/map-editor/catalog/",
-    "sync:zones:map": "mkdir -p tools/map-editor/zones && cp ../zones/*.json tools/map-editor/zones/",
-    "dev:tool:map": "vite --config vite.config.map-editor.ts",
-    "build:tool:map": "pnpm sync:catalog:map && pnpm sync:zones:map && vite build --config vite.config.map-editor.ts"
+    "sync:catalog": "mkdir -p tools/atlas-editor/catalog && cp ../catalog/*.json tools/atlas-editor/catalog/"
   },
   "devDependencies": {
     "@types/node": "^22.7.0",

@@ -1,3 +1,4 @@
+import "./style.css";
 import { parseAtlas, type Atlas } from "../../src/render/assets";
 import type { ZoneTemplate } from "../../src/contract/zone";
 import { footprintFromDrag, type Point } from "../shared/picking";
@@ -7,8 +8,11 @@ import { paintTile, placeObject, removeObjectAt } from "./zone-model";
 import { saveZone } from "./save";
 
 /**
- * Bootstrap for the map editor (design.md Slice 3 — "paint/place/save" +
- * the user-requested zoom control). Fetches `atlas.json` (served from
+ * Mountable bootstrap for the map editor (design.md Slice 3 —
+ * "paint/place/save" + the user-requested zoom control; converted to
+ * `mount(container)` for the unified-app shell — tasks.md Phase 4, mirroring
+ * the atlas-editor/items-editor migrations in `tools/{atlas,items}-editor/
+ * main.ts`). Fetches `atlas.json` (served from the unified server's
  * `publicDir`), the tileset image, `zone-z1.json` (served by
  * `zone-read-middleware.ts`, live from repo source), and both catalogs
  * (served by the reused `itemsEditorCatalogReadPlugin`), then renders the
@@ -32,204 +36,272 @@ const ATLAS_ROUTE = "/atlas.json";
 
 type Tool = "terrain" | "object" | "erase";
 
-function mustEl<T extends Element>(id: string): T {
-  const el = document.getElementById(id);
-  if (!el) throw new Error(`map-editor: missing #${id} in index.html`);
-  return el as unknown as T;
-}
+/** Was `index.html`'s body markup before the unified-app migration
+ * (tasks.md "Migrate map-editor" — Phase 4). Injected into the mounting
+ * container's `innerHTML` by `mount()`; DOM structure/ids unchanged so the
+ * lookups below still work exactly as they did against the old
+ * bespoke-entry `index.html`. */
+const TEMPLATE = `
+  <header class="topbar">
+    <h1>Map Editor</h1>
+    <span class="subtitle">Dev-only zone editor — not part of the game build</span>
+    <div id="status" class="status-bar" role="status" aria-live="polite">Loading…</div>
+  </header>
 
-const canvasEl = mustEl<HTMLCanvasElement>("zone-canvas");
-const terrainPaletteEl = mustEl<HTMLDivElement>("terrain-palette");
-const objectPaletteEl = mustEl<HTMLDivElement>("object-palette");
-const eraseBtn = mustEl<HTMLButtonElement>("erase-btn");
-const zoomSelect = mustEl<HTMLSelectElement>("zoom-select");
-const activeToolEl = mustEl<HTMLSpanElement>("active-tool");
-const saveBtn = mustEl<HTMLButtonElement>("save-btn");
-const saveStatusEl = mustEl<HTMLSpanElement>("save-status");
-const statusEl = mustEl<HTMLDivElement>("status");
-const selectedTerrainLabelEl = mustEl<HTMLSpanElement>("selected-terrain");
-const selectedObjectLabelEl = mustEl<HTMLSpanElement>("selected-object");
+  <main class="map-editor-layout">
+    <aside class="palette-pane" aria-label="Painting tools">
+      <section aria-label="Terrain palette">
+        <h2>Terrains</h2>
+        <p class="selected-terrain-readout">Selected: <span id="selected-terrain">none</span></p>
+        <div id="terrain-palette" class="palette"></div>
+      </section>
 
-const zoneCanvas: ZoneCanvasHandle = createZoneCanvas(canvasEl);
+      <section aria-label="World object palette">
+        <h2>Objects</h2>
+        <p class="selected-terrain-readout">Selected: <span id="selected-object">none</span></p>
+        <div id="object-palette" class="palette"></div>
+        <button type="button" id="erase-btn" class="btn btn-danger palette-tool-btn">Erase objects</button>
+      </section>
+    </aside>
 
-let currentTemplate: ZoneTemplate | null = null;
-let atlas: Atlas | null = null;
-let tilesetImage: HTMLImageElement | null = null;
+    <section class="canvas-pane" aria-label="Zone grid">
+      <div class="canvas-toolbar">
+        <label class="zoom-label">Zoom <select id="zoom-select"></select></label>
+        <span class="active-tool-readout">Tool: <span id="active-tool">terrain</span></span>
+        <div class="save-controls">
+          <button type="button" id="save-btn" class="btn btn-primary">Save zone</button>
+          <span id="save-status" class="save-status" role="status" aria-live="polite"></span>
+        </div>
+      </div>
+      <div class="canvas-wrap">
+        <canvas id="zone-canvas" aria-label="Zone z1 grid — click to paint, click-drag to paint continuously"></canvas>
+      </div>
+    </section>
+  </main>
+`;
 
-let activeTool: Tool = "terrain";
-let selectedTerrainId: string | null = null;
-let selectedObjectTypeId: string | null = null;
+// The `window` "mouseup" listener must be attached exactly once PER mount
+// (not accumulate across remounts, since `window` persists across hash-route
+// navigation while `container`'s DOM is torn down and rebuilt). Rather than
+// guarding with an "attached once ever" flag (which would leave the FIRST
+// mount's stale closure operating on a discarded `isPointerDown`/
+// `lastPaintedCell` pair after a remount), the previous mount's listener is
+// explicitly removed before the new one is attached — same net effect as
+// `atlas-editor/main.ts`'s `windowListenersAttached` guard, but safe for a
+// tool whose per-mount state (unlike atlas-editor's module-scope image/
+// mappings) is fully local to `mount()`.
+let currentWindowMouseUpHandler: (() => void) | null = null;
 
-let isPointerDown = false;
-let lastPaintedCell: { x: number; y: number } | null = null;
+/** Mounts the map editor into `container` (tasks.md 4.1/4.3 — replaces the
+ * old bespoke `index.html` bootstrap). Safe to call more than once (e.g.
+ * navigating away and back via the hash router): rebuilds the DOM inside
+ * `container` and re-fetches the live zone/atlas/catalogs fresh, mirroring
+ * `tools/items-editor/main.ts::mount` — a remount re-fetches and re-renders
+ * the same way a hard reload of the old standalone dev server would have. */
+export function mount(container: HTMLElement): void {
+  container.innerHTML = TEMPLATE;
 
-function loadTilesetImage(imageName: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error(`Failed to load tileset image "${imageName}"`));
-    img.src = `/${imageName}`;
-  });
-}
-
-function updateActiveToolLabel(): void {
-  activeToolEl.textContent = activeTool;
-  eraseBtn.classList.toggle("active", activeTool === "erase");
-}
-
-function updateStatusLine(): void {
-  if (!currentTemplate) return;
-  statusEl.textContent = `Zone ${ZONE_ID}: ${currentTemplate.width}x${currentTemplate.height}, ${currentTemplate.objects.length} objects.`;
-}
-
-function rerender(): void {
-  if (!currentTemplate || !atlas || !tilesetImage) return;
-  zoneCanvas.render(currentTemplate, atlas, tilesetImage);
-  updateStatusLine();
-}
-
-/** Converts a canvas-local pixel point into a tile `(x, y)`, using
- * `zoneCanvas.cellPx()` (the LIVE effective cell size at the current zoom)
- * so painting stays correct after `setZoom` changes it. Reuses
- * `picking.ts::footprintFromDrag` for the pixel->cell math (a
- * single-point "drag" degenerates to one grid-aligned cell — same trick
- * `texture-panel.ts` relies on), rather than hand-rolling the same
- * `Math.floor(v / cell)` division a second time in this module. Returns
- * `null` for a point outside the current template's bounds. */
-function tileFromPoint(point: Point): { x: number; y: number } | null {
-  if (!currentTemplate) return null;
-  const cell = zoneCanvas.cellPx();
-  const footprint = footprintFromDrag(point, point, cell);
-  const x = footprint.x / cell;
-  const y = footprint.y / cell;
-  if (x < 0 || y < 0 || x >= currentTemplate.width || y >= currentTemplate.height) return null;
-  return { x, y };
-}
-
-function pointFromEvent(e: MouseEvent): Point {
-  const rect = canvasEl.getBoundingClientRect();
-  return { x: e.clientX - rect.left, y: e.clientY - rect.top };
-}
-
-function applyToolAt(x: number, y: number): void {
-  if (!currentTemplate) return;
-  if (activeTool === "terrain") {
-    if (!selectedTerrainId) return;
-    currentTemplate = paintTile(currentTemplate, x, y, selectedTerrainId);
-  } else if (activeTool === "object") {
-    if (!selectedObjectTypeId) return;
-    currentTemplate = placeObject(currentTemplate, selectedObjectTypeId, x, y);
-  } else {
-    // erase — a no-op when nothing is placed there, safe to call on every
-    // cell a click-drag passes over.
-    currentTemplate = removeObjectAt(currentTemplate, x, y);
+  function mustEl<T extends Element>(id: string): T {
+    const el = container.querySelector(`#${id}`);
+    if (!el) throw new Error(`map-editor: missing #${id} in mount template`);
+    return el as unknown as T;
   }
-  rerender();
-}
 
-function onCanvasMouseDown(e: MouseEvent): void {
-  const tile = tileFromPoint(pointFromEvent(e));
-  if (!tile) return;
-  isPointerDown = true;
-  lastPaintedCell = tile;
-  applyToolAt(tile.x, tile.y);
-}
+  const canvasEl = mustEl<HTMLCanvasElement>("zone-canvas");
+  const terrainPaletteEl = mustEl<HTMLDivElement>("terrain-palette");
+  const objectPaletteEl = mustEl<HTMLDivElement>("object-palette");
+  const eraseBtn = mustEl<HTMLButtonElement>("erase-btn");
+  const zoomSelect = mustEl<HTMLSelectElement>("zoom-select");
+  const activeToolEl = mustEl<HTMLSpanElement>("active-tool");
+  const saveBtn = mustEl<HTMLButtonElement>("save-btn");
+  const saveStatusEl = mustEl<HTMLSpanElement>("save-status");
+  const statusEl = mustEl<HTMLDivElement>("status");
+  const selectedTerrainLabelEl = mustEl<HTMLSpanElement>("selected-terrain");
+  const selectedObjectLabelEl = mustEl<HTMLSpanElement>("selected-object");
 
-function onCanvasMouseMove(e: MouseEvent): void {
-  // Object placement is deliberately click-ONLY (no drag-spam of
-  // duplicate placements) — only terrain paint and erase continue on drag.
-  if (!isPointerDown || activeTool === "object") return;
-  const tile = tileFromPoint(pointFromEvent(e));
-  if (!tile) return;
-  if (lastPaintedCell && lastPaintedCell.x === tile.x && lastPaintedCell.y === tile.y) return;
-  lastPaintedCell = tile;
-  applyToolAt(tile.x, tile.y);
-}
+  const zoneCanvas: ZoneCanvasHandle = createZoneCanvas(canvasEl);
 
-function onWindowMouseUp(): void {
-  isPointerDown = false;
-  lastPaintedCell = null;
-}
+  let currentTemplate: ZoneTemplate | null = null;
+  let atlas: Atlas | null = null;
+  let tilesetImage: HTMLImageElement | null = null;
 
-function setupZoomSelect(): void {
-  for (const level of ZOOM_LEVELS) {
-    const opt = document.createElement("option");
-    opt.value = String(level);
-    opt.textContent = `${level}x`;
-    if (level === DEFAULT_ZOOM) opt.selected = true;
-    zoomSelect.appendChild(opt);
+  let activeTool: Tool = "terrain";
+  let selectedTerrainId: string | null = null;
+  let selectedObjectTypeId: string | null = null;
+
+  let isPointerDown = false;
+  let lastPaintedCell: { x: number; y: number } | null = null;
+
+  function loadTilesetImage(imageName: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error(`Failed to load tileset image "${imageName}"`));
+      img.src = `/${imageName}`;
+    });
   }
-  zoomSelect.addEventListener("change", () => {
-    zoneCanvas.setZoom(Number(zoomSelect.value) || DEFAULT_ZOOM);
-  });
-}
 
-async function handleSave(): Promise<void> {
-  if (!currentTemplate) return;
-  saveBtn.disabled = true;
-  saveStatusEl.textContent = "Saving…";
-  saveStatusEl.classList.remove("save-status-success");
-  try {
-    const result = await saveZone(ZONE_ID, currentTemplate);
-    if (!result.ok) {
-      saveStatusEl.textContent = `Save failed${result.errors[0] ? `: ${result.errors[0].message}` : ""}.`;
-      return;
+  function updateActiveToolLabel(): void {
+    activeToolEl.textContent = activeTool;
+    eraseBtn.classList.toggle("active", activeTool === "erase");
+  }
+
+  function updateStatusLine(): void {
+    if (!currentTemplate) return;
+    statusEl.textContent = `Zone ${ZONE_ID}: ${currentTemplate.width}x${currentTemplate.height}, ${currentTemplate.objects.length} objects.`;
+  }
+
+  function rerender(): void {
+    if (!currentTemplate || !atlas || !tilesetImage) return;
+    zoneCanvas.render(currentTemplate, atlas, tilesetImage);
+    updateStatusLine();
+  }
+
+  /** Converts a canvas-local pixel point into a tile `(x, y)`, using
+   * `zoneCanvas.cellPx()` (the LIVE effective cell size at the current zoom)
+   * so painting stays correct after `setZoom` changes it. Reuses
+   * `picking.ts::footprintFromDrag` for the pixel->cell math (a
+   * single-point "drag" degenerates to one grid-aligned cell — same trick
+   * `texture-panel.ts` relies on), rather than hand-rolling the same
+   * `Math.floor(v / cell)` division a second time in this module. Returns
+   * `null` for a point outside the current template's bounds. */
+  function tileFromPoint(point: Point): { x: number; y: number } | null {
+    if (!currentTemplate) return null;
+    const cell = zoneCanvas.cellPx();
+    const footprint = footprintFromDrag(point, point, cell);
+    const x = footprint.x / cell;
+    const y = footprint.y / cell;
+    if (x < 0 || y < 0 || x >= currentTemplate.width || y >= currentTemplate.height) return null;
+    return { x, y };
+  }
+
+  function pointFromEvent(e: MouseEvent): Point {
+    const rect = canvasEl.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  function applyToolAt(x: number, y: number): void {
+    if (!currentTemplate) return;
+    if (activeTool === "terrain") {
+      if (!selectedTerrainId) return;
+      currentTemplate = paintTile(currentTemplate, x, y, selectedTerrainId);
+    } else if (activeTool === "object") {
+      if (!selectedObjectTypeId) return;
+      currentTemplate = placeObject(currentTemplate, selectedObjectTypeId, x, y);
+    } else {
+      // erase — a no-op when nothing is placed there, safe to call on every
+      // cell a click-drag passes over.
+      currentTemplate = removeObjectAt(currentTemplate, x, y);
     }
-    saveStatusEl.textContent = "Saved. Restart the backend to load the new layout.";
-    saveStatusEl.classList.add("save-status-success");
-  } catch (e) {
-    saveStatusEl.textContent = `Save failed: ${e instanceof Error ? e.message : String(e)}`;
-  } finally {
-    saveBtn.disabled = false;
-  }
-}
-
-async function boot(): Promise<void> {
-  statusEl.textContent = "Loading…";
-  try {
-    const [atlasRes, zoneRes] = await Promise.all([fetch(ATLAS_ROUTE, { cache: "no-store" }), fetch(ZONE_ROUTE, { cache: "no-store" })]);
-    if (!atlasRes.ok) throw new Error(`atlas.json: HTTP ${atlasRes.status}`);
-    if (!zoneRes.ok) throw new Error(`zone-${ZONE_ID}.json: HTTP ${zoneRes.status}`);
-
-    atlas = parseAtlas(await atlasRes.json());
-    currentTemplate = (await zoneRes.json()) as ZoneTemplate;
-    tilesetImage = await loadTilesetImage(atlas.image);
-
-    setupZoomSelect();
     rerender();
-    updateActiveToolLabel();
-
-    canvasEl.addEventListener("mousedown", onCanvasMouseDown);
-    canvasEl.addEventListener("mousemove", onCanvasMouseMove);
-    window.addEventListener("mouseup", onWindowMouseUp);
-    saveBtn.addEventListener("click", () => void handleSave());
-    eraseBtn.addEventListener("click", () => {
-      activeTool = "erase";
-      updateActiveToolLabel();
-    });
-
-    await createTerrainPalette({
-      mountEl: terrainPaletteEl,
-      onSelect: (terrainId) => {
-        selectedTerrainId = terrainId;
-        activeTool = "terrain";
-        selectedTerrainLabelEl.textContent = terrainId;
-        updateActiveToolLabel();
-      },
-    });
-
-    await createObjectPalette({
-      mountEl: objectPaletteEl,
-      onSelect: (objectTypeId) => {
-        selectedObjectTypeId = objectTypeId;
-        activeTool = "object";
-        selectedObjectLabelEl.textContent = objectTypeId;
-        updateActiveToolLabel();
-      },
-    });
-  } catch (e) {
-    statusEl.textContent = `Failed to load: ${e instanceof Error ? e.message : String(e)}`;
   }
-}
 
-void boot();
+  function onCanvasMouseDown(e: MouseEvent): void {
+    const tile = tileFromPoint(pointFromEvent(e));
+    if (!tile) return;
+    isPointerDown = true;
+    lastPaintedCell = tile;
+    applyToolAt(tile.x, tile.y);
+  }
+
+  function onCanvasMouseMove(e: MouseEvent): void {
+    // Object placement is deliberately click-ONLY (no drag-spam of
+    // duplicate placements) — only terrain paint and erase continue on drag.
+    if (!isPointerDown || activeTool === "object") return;
+    const tile = tileFromPoint(pointFromEvent(e));
+    if (!tile) return;
+    if (lastPaintedCell && lastPaintedCell.x === tile.x && lastPaintedCell.y === tile.y) return;
+    lastPaintedCell = tile;
+    applyToolAt(tile.x, tile.y);
+  }
+
+  function onWindowMouseUp(): void {
+    isPointerDown = false;
+    lastPaintedCell = null;
+  }
+
+  function setupZoomSelect(): void {
+    for (const level of ZOOM_LEVELS) {
+      const opt = document.createElement("option");
+      opt.value = String(level);
+      opt.textContent = `${level}x`;
+      if (level === DEFAULT_ZOOM) opt.selected = true;
+      zoomSelect.appendChild(opt);
+    }
+    zoomSelect.addEventListener("change", () => {
+      zoneCanvas.setZoom(Number(zoomSelect.value) || DEFAULT_ZOOM);
+    });
+  }
+
+  async function handleSave(): Promise<void> {
+    if (!currentTemplate) return;
+    saveBtn.disabled = true;
+    saveStatusEl.textContent = "Saving…";
+    saveStatusEl.classList.remove("save-status-success");
+    try {
+      const result = await saveZone(ZONE_ID, currentTemplate);
+      if (!result.ok) {
+        saveStatusEl.textContent = `Save failed${result.errors[0] ? `: ${result.errors[0].message}` : ""}.`;
+        return;
+      }
+      saveStatusEl.textContent = "Saved. Restart the backend to load the new layout.";
+      saveStatusEl.classList.add("save-status-success");
+    } catch (e) {
+      saveStatusEl.textContent = `Save failed: ${e instanceof Error ? e.message : String(e)}`;
+    } finally {
+      saveBtn.disabled = false;
+    }
+  }
+
+  async function boot(): Promise<void> {
+    statusEl.textContent = "Loading…";
+    try {
+      const [atlasRes, zoneRes] = await Promise.all([fetch(ATLAS_ROUTE, { cache: "no-store" }), fetch(ZONE_ROUTE, { cache: "no-store" })]);
+      if (!atlasRes.ok) throw new Error(`atlas.json: HTTP ${atlasRes.status}`);
+      if (!zoneRes.ok) throw new Error(`zone-${ZONE_ID}.json: HTTP ${zoneRes.status}`);
+
+      atlas = parseAtlas(await atlasRes.json());
+      currentTemplate = (await zoneRes.json()) as ZoneTemplate;
+      tilesetImage = await loadTilesetImage(atlas.image);
+
+      setupZoomSelect();
+      rerender();
+      updateActiveToolLabel();
+
+      canvasEl.addEventListener("mousedown", onCanvasMouseDown);
+      canvasEl.addEventListener("mousemove", onCanvasMouseMove);
+      if (currentWindowMouseUpHandler) window.removeEventListener("mouseup", currentWindowMouseUpHandler);
+      currentWindowMouseUpHandler = onWindowMouseUp;
+      window.addEventListener("mouseup", onWindowMouseUp);
+      saveBtn.addEventListener("click", () => void handleSave());
+      eraseBtn.addEventListener("click", () => {
+        activeTool = "erase";
+        updateActiveToolLabel();
+      });
+
+      await createTerrainPalette({
+        mountEl: terrainPaletteEl,
+        onSelect: (terrainId) => {
+          selectedTerrainId = terrainId;
+          activeTool = "terrain";
+          selectedTerrainLabelEl.textContent = terrainId;
+          updateActiveToolLabel();
+        },
+      });
+
+      await createObjectPalette({
+        mountEl: objectPaletteEl,
+        onSelect: (objectTypeId) => {
+          selectedObjectTypeId = objectTypeId;
+          activeTool = "object";
+          selectedObjectLabelEl.textContent = objectTypeId;
+          updateActiveToolLabel();
+        },
+      });
+    } catch (e) {
+      statusEl.textContent = `Failed to load: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+
+  void boot();
+}

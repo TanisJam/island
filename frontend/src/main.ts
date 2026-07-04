@@ -6,13 +6,12 @@ import { showThought } from "./hud/hud";
 
 const BASE_URL = "http://localhost:3000";
 
-/** Dev-only editor route names wired to a mount-capable module. "atlas" and
- * "items" are wired as of this slice — the map editor keeps running on its
- * separate `dev:tool:map` server until a later slice migrates it
- * (design.md D3, tasks.md Phase 4). */
-type EditorRoute = "atlas" | "items";
+/** Dev-only editor route names wired to a mount-capable module. All three
+ * editors (atlas, items, map) are wired as of this slice (design.md D3,
+ * tasks.md Phase 4). */
+type EditorRoute = "atlas" | "items" | "map";
 
-const KNOWN_EDITOR_ROUTES: readonly EditorRoute[] = ["atlas", "items"];
+const KNOWN_EDITOR_ROUTES: readonly EditorRoute[] = ["atlas", "items", "map"];
 
 function parseEditorRoute(hash: string): EditorRoute | null {
   const match = /^#\/editor\/(\w+)$/.exec(hash);
@@ -62,6 +61,9 @@ async function showEditor(route: EditorRoute): Promise<void> {
     } else if (route === "items") {
       const mod = await import("../tools/items-editor/main");
       mod.mount(editorEl);
+    } else if (route === "map") {
+      const mod = await import("../tools/map-editor/main");
+      mod.mount(editorEl);
     }
   } catch (e) {
     editorEl.textContent = `No se pudo cargar el editor "${route}": ${e instanceof Error ? e.message : String(e)}`;
@@ -92,6 +94,7 @@ function renderDevSwitcher(): void {
     <a href="#/" style="color:#fff;">Game</a>
     <a href="#/editor/atlas" style="color:#fff;">Atlas Editor</a>
     <a href="#/editor/items" style="color:#fff;">Items Editor</a>
+    <a href="#/editor/map" style="color:#fff;">Map Editor</a>
   `;
   document.body.appendChild(nav);
 }

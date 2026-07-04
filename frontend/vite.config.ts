@@ -2,6 +2,8 @@ import { defineConfig } from "vite";
 import { itemsEditorAtlasSavePlugin } from "./tools/items-editor/server/atlas-write-middleware";
 import { itemsEditorCatalogReadPlugin } from "./tools/items-editor/server/catalog-read-middleware";
 import { itemsEditorSavePlugin } from "./tools/items-editor/server/write-middleware";
+import { mapEditorZoneReadPlugin } from "./tools/map-editor/server/zone-read-middleware";
+import { mapEditorZoneSavePlugin } from "./tools/map-editor/server/zone-write-middleware";
 
 /**
  * Single Vite config for the unified app shell (design.md D2): one dev
@@ -15,9 +17,14 @@ import { itemsEditorSavePlugin } from "./tools/items-editor/server/write-middlew
  * collection-save route (`itemsEditorSavePlugin`), the atlas-region save
  * route (`itemsEditorAtlasSavePlugin`), and the live catalog/schema reader
  * (`itemsEditorCatalogReadPlugin`) — all three were previously registered
- * only under the standalone `vite.config.items-editor.ts`, deleted this
- * slice. map-editor adds its plugins here in a later slice (tasks.md
- * Phase 4).
+ * only under the standalone `vite.config.items-editor.ts`, deleted in the
+ * items-editor migration. map-editor (tasks.md Phase 4) reuses
+ * `itemsEditorCatalogReadPlugin` for its terrain/world-object palettes and
+ * adds two of its own: `mapEditorZoneReadPlugin` (`GET
+ * /zones/zone-{id}.json`, live from the repo-root `zones/` dir) and
+ * `mapEditorZoneSavePlugin` (`POST /__save-zone/:zoneId`, ajv-validated
+ * atomic write) — both previously registered only under the now-deleted
+ * standalone `vite.config.map-editor.ts`.
  */
 export default defineConfig(({ command }) => ({
   root: ".",
@@ -27,5 +34,15 @@ export default defineConfig(({ command }) => ({
   build: {
     outDir: "dist",
   },
-  plugins: [...(command === "serve" ? [itemsEditorSavePlugin(), itemsEditorAtlasSavePlugin(), itemsEditorCatalogReadPlugin()] : [])],
+  plugins: [
+    ...(command === "serve"
+      ? [
+          itemsEditorSavePlugin(),
+          itemsEditorAtlasSavePlugin(),
+          itemsEditorCatalogReadPlugin(),
+          mapEditorZoneReadPlugin(),
+          mapEditorZoneSavePlugin(),
+        ]
+      : []),
+  ],
 }));
