@@ -12,8 +12,7 @@ import { mapEditorZoneSavePlugin } from "./tools/map-editor/server/zone-write-mi
  * middleware, live content reader) MUST be added to `plugins` gated behind
  * `command === "serve"` so `vite build` never bundles it — the production
  * build stays game-only (spec "Production Build Excludes Editors").
- * atlas-editor (tasks.md Phase 2) exports via browser download and needs no
- * server plugin. items-editor (tasks.md Phase 3) needs three: the generic
+ * items-editor (tasks.md Phase 3) needs three: the generic
  * collection-save route (`itemsEditorSavePlugin`), the atlas-region save
  * route (`itemsEditorAtlasSavePlugin`), and the live catalog/schema reader
  * (`itemsEditorCatalogReadPlugin`) — all three were previously registered

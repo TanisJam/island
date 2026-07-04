@@ -12,8 +12,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:tool": "tsc -p tsconfig.tool.json --noEmit",
     "test": "node --import tsx --test \"src/**/*.test.ts\" \"tools/**/*.test.ts\"",
-    "sync:contract": "cp ../schemas/generated/*.ts src/contract/",
-    "sync:catalog": "mkdir -p tools/atlas-editor/catalog && cp ../catalog/*.json tools/atlas-editor/catalog/"
+    "sync:contract": "cp ../schemas/generated/*.ts src/contract/"
   },
   "devDependencies": {
     "@types/node": "^22.7.0",

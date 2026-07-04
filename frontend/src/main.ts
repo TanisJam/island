@@ -6,12 +6,12 @@ import { showThought } from "./hud/hud";
 
 const BASE_URL = "http://localhost:3000";
 
-/** Dev-only editor route names wired to a mount-capable module. All three
- * editors (atlas, items, map) are wired as of this slice (design.md D3,
+/** Dev-only editor route names wired to a mount-capable module. Both
+ * editors (items, map) are wired as of this slice (design.md D3,
  * tasks.md Phase 4). */
-type EditorRoute = "atlas" | "items" | "map";
+type EditorRoute = "items" | "map";
 
-const KNOWN_EDITOR_ROUTES: readonly EditorRoute[] = ["atlas", "items", "map"];
+const KNOWN_EDITOR_ROUTES: readonly EditorRoute[] = ["items", "map"];
 
 function parseEditorRoute(hash: string): EditorRoute | null {
   const match = /^#\/editor\/(\w+)$/.exec(hash);
@@ -55,10 +55,7 @@ async function showEditor(route: EditorRoute): Promise<void> {
   editorEl.innerHTML = "";
 
   try {
-    if (route === "atlas") {
-      const mod = await import("../tools/atlas-editor/main");
-      mod.mount(editorEl);
-    } else if (route === "items") {
+    if (route === "items") {
       const mod = await import("../tools/items-editor/main");
       mod.mount(editorEl);
     } else if (route === "map") {
@@ -92,7 +89,6 @@ function renderDevSwitcher(): void {
     "position:fixed;top:0;right:0;z-index:9999;display:flex;gap:8px;padding:6px 10px;background:rgba(0,0,0,0.6);font:12px monospace;";
   nav.innerHTML = `
     <a href="#/" style="color:#fff;">Game</a>
-    <a href="#/editor/atlas" style="color:#fff;">Atlas Editor</a>
     <a href="#/editor/items" style="color:#fff;">Items Editor</a>
     <a href="#/editor/map" style="color:#fff;">Map Editor</a>
   `;
