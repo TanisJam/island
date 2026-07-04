@@ -27,7 +27,9 @@
     "id": "idea_fire",
     "name": "Hacer fuego",
     "kind": "idea",
-    "unlockOnObserveTags": ["fire"],
+    "unlockOnObserveTags": [
+      "fire"
+    ],
     "unlockThought": "Necesito fuego si quiero pasar la noche."
   },
   {
@@ -40,7 +42,10 @@
     "id": "idea_jungle_clearance",
     "name": "Despejar jungla",
     "kind": "idea",
-    "unlockOnObserveTags": ["dense_jungle", "blocker"],
+    "unlockOnObserveTags": [
+      "dense_jungle",
+      "blocker"
+    ],
     "unlockThought": "Si pudiera cortar esto, tal vez encontraría un paso."
   }
 ]

@@ -3,42 +3,61 @@
     "id": "sand",
     "name": "Arena",
     "walkable": true,
-    "tags": ["ground", "searchable"],
+    "tags": [
+      "ground",
+      "searchable"
+    ],
     "observation": "Suelo arenoso. Podría rebuscar algo."
   },
   {
     "id": "grass",
     "name": "Pasto",
     "walkable": true,
-    "tags": ["ground"],
+    "tags": [
+      "ground"
+    ],
     "observation": "Pasto firme bajo mis pies."
   },
   {
     "id": "dirt",
     "name": "Tierra",
     "walkable": true,
-    "tags": ["ground", "diggable"],
+    "tags": [
+      "ground",
+      "diggable"
+    ],
     "observation": "Tierra blanda. Quizás más adelante pueda cavar acá."
   },
   {
     "id": "shallow_water",
     "name": "Agua baja",
     "walkable": false,
-    "tags": ["water", "wet", "resource"],
+    "tags": [
+      "water",
+      "wet",
+      "resource"
+    ],
     "observation": "Agua salobre y poco profunda."
   },
   {
     "id": "rocky_ground",
     "name": "Suelo rocoso",
     "walkable": true,
-    "tags": ["ground", "hard"],
+    "tags": [
+      "ground",
+      "hard"
+    ],
     "observation": "Suelo duro y pedregoso."
   },
   {
     "id": "dense_jungle",
     "name": "Jungla espesa",
     "walkable": false,
-    "tags": ["blocker", "progression_gate", "plant"],
+    "tags": [
+      "blocker",
+      "progression_gate",
+      "plant"
+    ],
     "observation": "La vegetación es demasiado cerrada. No voy a poder pasar empujando."
   }
 ]
