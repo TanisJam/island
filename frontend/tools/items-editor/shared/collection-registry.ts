@@ -15,8 +15,14 @@
 
 /** Which atlas bucket (frontend/src/render/assets.ts `AtlasKind`) a collection's
  * texture panel writes to, if any. `null` means the collection has no sprite
- * data and the texture panel does not mount (`knowledge`, `research`). */
-export type AtlasKind = "terrain" | "object" | "item" | null;
+ * data and the texture panel does not mount (`knowledge`, `research`).
+ * `"player"` is not a `COLLECTIONS` entry's `atlasKind` (there is no player
+ * collection) — it is included here only so items-editor's standalone
+ * "Player" tab (`main.ts`, mounted OUTSIDE `mountCollectionEngine`) can
+ * instantiate `createTexturePanel({ atlasKind: "player" })` and typecheck,
+ * since `texture-panel-math.ts`'s `AtlasBucketKind` derives from this union
+ * (atlas-editor-fold design.md "Extending the kind unions in lockstep"). */
+export type AtlasKind = "terrain" | "object" | "item" | "player" | null;
 
 export interface CollectionMeta {
   /** Matches the catalog file name (`catalog/${id}.json`) and `catalog/meta.json`'s `collections` entry. */

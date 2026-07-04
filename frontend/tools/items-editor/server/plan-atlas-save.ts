@@ -14,11 +14,12 @@ import { parseAtlas, type Atlas, type AtlasRegion } from "../../../src/render/as
  * (server/atlas-targets.ts), which this module does not even import. See
  * `plan-atlas-save.test.ts` for the load-bearing proof.
  *
- * SECURITY-CRITICAL (bucket allow-list, Slice 3b atlasKind generalization):
- * `kind` selects WHICH atlas bucket (`terrain`/`object`/`item`) is patched
- * — it is checked against `ALLOWED_ATLAS_KINDS` and rejected outright if it
- * is anything else (e.g. `"player"`, `"__proto__"`, an arbitrary string).
- * It is a bucket-key selector, never a path or file target.
+ * SECURITY-CRITICAL (bucket allow-list, Slice 3b atlasKind generalization;
+ * widened to include `player` by atlas-editor-fold Slice 1): `kind` selects
+ * WHICH atlas bucket (`terrain`/`object`/`item`/`player`) is patched — it is
+ * checked against `ALLOWED_ATLAS_KINDS` and rejected outright if it is
+ * anything else (e.g. `"__proto__"`, an arbitrary string). It is a
+ * bucket-key selector, never a path or file target.
  *
  * SECURITY-CRITICAL (prototype pollution): `typeId` is used as a dynamic
  * property key on the cloned atlas's selected bucket. A `typeId` of
@@ -43,11 +44,13 @@ export type PlanAtlasSaveResult =
  * a bracket-assignment property key. Rejected outright as invalid typeIds. */
 const UNSAFE_TYPE_IDS = new Set(["__proto__", "constructor", "prototype"]);
 
-/** Atlas buckets a texture panel is allowed to write to (Slice 3b
- * atlasKind generalization). `player` is deliberately excluded — no
- * collection editor mounts a texture panel for it. */
-const ALLOWED_ATLAS_KINDS = new Set(["terrain", "object", "item"]);
-type AllowedAtlasKind = "terrain" | "object" | "item";
+/** Atlas buckets a texture panel is allowed to write to (Slice 3b atlasKind
+ * generalization). `player` was added in atlas-editor-fold Slice 1 — the
+ * items-editor's standalone "Player" tab mounts a texture panel targeting
+ * this bucket (single fixed typeId `"player"`), even though no
+ * `COLLECTIONS` entry has `atlasKind: "player"`. */
+const ALLOWED_ATLAS_KINDS = new Set(["terrain", "object", "item", "player"]);
+type AllowedAtlasKind = "terrain" | "object" | "item" | "player";
 
 function isAllowedAtlasKind(value: unknown): value is AllowedAtlasKind {
   return typeof value === "string" && ALLOWED_ATLAS_KINDS.has(value);

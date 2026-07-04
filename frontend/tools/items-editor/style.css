@@ -118,6 +118,13 @@ textarea {
   }
 }
 
+/* The Player pane (atlas-editor-fold Slice 1) has no master list — just the
+ * texture panel — so it uses a single column instead of `.layout`'s default
+ * 320px + 1fr master-detail split. */
+#player-pane {
+  grid-template-columns: 1fr;
+}
+
 .master-pane {
   display: flex;
   flex-direction: column;

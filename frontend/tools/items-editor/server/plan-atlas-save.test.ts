@@ -112,9 +112,16 @@ test("planAtlasSave: rejects a missing kind", () => {
   assert.equal(result.ok, false);
 });
 
-test("planAtlasSave: rejects kind:\"player\" — no editor mounts a texture panel for it", () => {
-  const result = planAtlasSave({ typeId: "crude_tool", kind: "player", region: { x: 1, y: 1, w: 16, h: 16 } }, input());
-  assert.equal(result.ok, false);
+test("planAtlasSave: kind:\"player\" patches the player bucket, leaves the rest untouched (atlas-editor-fold Slice 1)", () => {
+  const result = planAtlasSave({ typeId: "player", kind: "player", region: { x: 336, y: 512, w: 16, h: 32 } }, input());
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    const atlas = JSON.parse(result.atlasJson) as Atlas;
+    assert.deepEqual(atlas.player?.player, { x: 336, y: 512, w: 16, h: 32 });
+    assert.deepEqual(atlas.item, baseAtlas.item);
+    assert.deepEqual(atlas.object, baseAtlas.object);
+    assert.deepEqual(atlas.terrain, baseAtlas.terrain);
+  }
 });
 
 test("planAtlasSave: rejects an arbitrary/hostile kind string", () => {

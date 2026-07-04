@@ -80,10 +80,22 @@ test("atlas-write-middleware: kind:\"terrain\" patches the terrain bucket on dis
 test("atlas-write-middleware: rejects an unknown/hostile kind with 400 and does not write to disk", async () => {
   await withServer(async ({ url, atlasPath }) => {
     const before = readFileSync(atlasPath, "utf-8");
-    const { status, json } = await post(url, { typeId: "crude_tool", kind: "player", region: { x: 1, y: 1, w: 16, h: 16 } });
+    const { status, json } = await post(url, { typeId: "crude_tool", kind: "__proto__", region: { x: 1, y: 1, w: 16, h: 16 } });
     assert.equal(status, 400);
     assert.equal(json.ok, false);
     assert.equal(readFileSync(atlasPath, "utf-8"), before);
+  });
+});
+
+test('atlas-write-middleware: kind:"player" patches the player bucket on disk (atlas-editor-fold Slice 1 — items-editor\'s Player tab)', async () => {
+  await withServer(async ({ url, atlasPath }) => {
+    const { status, json } = await post(url, { typeId: "player", kind: "player", region: { x: 336, y: 512, w: 16, h: 32 } });
+    assert.equal(status, 200);
+    assert.equal(json.ok, true);
+    const onDisk = JSON.parse(readFileSync(atlasPath, "utf-8")) as Atlas;
+    assert.deepEqual(onDisk.player?.player, { x: 336, y: 512, w: 16, h: 32 });
+    assert.deepEqual(onDisk.item?.simple_axe, baseAtlas.item?.simple_axe);
+    assert.deepEqual(onDisk.terrain, baseAtlas.terrain);
   });
 });
 

@@ -5,6 +5,7 @@ import { RESEARCH_DESCRIPTOR } from "./shared/descriptors/research";
 import { TERRAINS_DESCRIPTOR } from "./shared/descriptors/terrains";
 import { WORLD_OBJECTS_DESCRIPTOR } from "./shared/descriptors/world-objects";
 import { ITEMS_DESCRIPTOR } from "./shared/descriptors/items";
+import { createTexturePanel } from "./texture-panel";
 
 /**
  * Mountable bootstrap for the items editor (design.md "1. Chosen
@@ -22,6 +23,14 @@ import { ITEMS_DESCRIPTOR } from "./shared/descriptors/items";
  * `items` is the DEFAULT/active pane on mount, so its engine instance boots
  * eagerly (matching its pre-migration eager `void boot()`) rather than
  * lazily on first tab click like the other four.
+ *
+ * A SIXTH tab, "Player" (atlas-editor-fold Slice 1, design.md "THE
+ * LOAD-BEARING DECISION"), is DELIBERATELY NOT one of these five — the
+ * player has no catalog/collection/list, just a single fixed `player`
+ * sprite. It mounts OUTSIDE `mountCollectionEngine`, directly instantiating
+ * `createTexturePanel({ atlasKind: "player" })` and calling
+ * `.selectItem("player")` on first activation, reusing the texture panel
+ * verbatim (no engine distortion for a one-shot sprite editor).
  */
 
 /** Was `index.html`'s body markup before the unified-app migration
@@ -39,6 +48,7 @@ const TEMPLATE = `
       <button id="collection-tab-research" type="button" class="collection-tab" aria-pressed="false">Research</button>
       <button id="collection-tab-terrains" type="button" class="collection-tab" aria-pressed="false">Terrains</button>
       <button id="collection-tab-world-objects" type="button" class="collection-tab" aria-pressed="false">World Objects</button>
+      <button id="collection-tab-player" type="button" class="collection-tab" aria-pressed="false">Player</button>
     </nav>
     <div id="catalog-version" class="catalog-version"></div>
   </header>
@@ -227,6 +237,15 @@ const TEMPLATE = `
       </form>
     </section>
   </main>
+
+  <main id="player-pane" class="layout" hidden>
+    <section class="detail-pane" aria-label="Player sprite">
+      <section class="texture-panel" aria-label="Player sprite">
+        <h3 class="texture-panel-heading">Player sprite</h3>
+        <div id="player-texture-panel-mount"></div>
+      </section>
+    </section>
+  </main>
 `;
 
 const ACTIVE_TAB_KEY = "items-editor:active-collection";
@@ -262,16 +281,19 @@ export function mount(container: HTMLElement): void {
   const researchTabBtn = mustEl<HTMLButtonElement>("collection-tab-research");
   const terrainsTabBtn = mustEl<HTMLButtonElement>("collection-tab-terrains");
   const worldObjectsTabBtn = mustEl<HTMLButtonElement>("collection-tab-world-objects");
+  const playerTabBtn = mustEl<HTMLButtonElement>("collection-tab-player");
   const itemsPaneEl = mustEl<HTMLElement>("items-pane");
   const knowledgePaneEl = mustEl<HTMLElement>("knowledge-pane");
   const researchPaneEl = mustEl<HTMLElement>("research-pane");
   const terrainsPaneEl = mustEl<HTMLElement>("terrains-pane");
   const worldObjectsPaneEl = mustEl<HTMLElement>("world-objects-pane");
+  const playerPaneEl = mustEl<HTMLElement>("player-pane");
 
   let knowledgeEngineBooted = false;
   let researchEngineBooted = false;
   let terrainsEngineBooted = false;
   let worldObjectsEngineBooted = false;
+  let playerPanelMounted = false;
 
   function activateTab(activeBtn: HTMLButtonElement, ...inactiveBtns: HTMLButtonElement[]): void {
     activeBtn.classList.add("active");
@@ -288,7 +310,8 @@ export function mount(container: HTMLElement): void {
     researchPaneEl.hidden = true;
     terrainsPaneEl.hidden = true;
     worldObjectsPaneEl.hidden = true;
-    activateTab(itemsTabBtn, knowledgeTabBtn, researchTabBtn, terrainsTabBtn, worldObjectsTabBtn);
+    playerPaneEl.hidden = true;
+    activateTab(itemsTabBtn, knowledgeTabBtn, researchTabBtn, terrainsTabBtn, worldObjectsTabBtn, playerTabBtn);
   });
 
   knowledgeTabBtn.addEventListener("click", () => {
@@ -297,7 +320,8 @@ export function mount(container: HTMLElement): void {
     researchPaneEl.hidden = true;
     terrainsPaneEl.hidden = true;
     worldObjectsPaneEl.hidden = true;
-    activateTab(knowledgeTabBtn, itemsTabBtn, researchTabBtn, terrainsTabBtn, worldObjectsTabBtn);
+    playerPaneEl.hidden = true;
+    activateTab(knowledgeTabBtn, itemsTabBtn, researchTabBtn, terrainsTabBtn, worldObjectsTabBtn, playerTabBtn);
     if (!knowledgeEngineBooted) {
       knowledgeEngineBooted = true;
       const knowledgeEls: EngineElements = {
@@ -326,7 +350,8 @@ export function mount(container: HTMLElement): void {
     researchPaneEl.hidden = false;
     terrainsPaneEl.hidden = true;
     worldObjectsPaneEl.hidden = true;
-    activateTab(researchTabBtn, itemsTabBtn, knowledgeTabBtn, terrainsTabBtn, worldObjectsTabBtn);
+    playerPaneEl.hidden = true;
+    activateTab(researchTabBtn, itemsTabBtn, knowledgeTabBtn, terrainsTabBtn, worldObjectsTabBtn, playerTabBtn);
     if (!researchEngineBooted) {
       researchEngineBooted = true;
       const researchEls: EngineElements = {
@@ -355,7 +380,8 @@ export function mount(container: HTMLElement): void {
     researchPaneEl.hidden = true;
     terrainsPaneEl.hidden = false;
     worldObjectsPaneEl.hidden = true;
-    activateTab(terrainsTabBtn, itemsTabBtn, knowledgeTabBtn, researchTabBtn, worldObjectsTabBtn);
+    playerPaneEl.hidden = true;
+    activateTab(terrainsTabBtn, itemsTabBtn, knowledgeTabBtn, researchTabBtn, worldObjectsTabBtn, playerTabBtn);
     if (!terrainsEngineBooted) {
       terrainsEngineBooted = true;
       const terrainsEls: EngineElements = {
@@ -388,7 +414,8 @@ export function mount(container: HTMLElement): void {
     researchPaneEl.hidden = true;
     terrainsPaneEl.hidden = true;
     worldObjectsPaneEl.hidden = false;
-    activateTab(worldObjectsTabBtn, itemsTabBtn, knowledgeTabBtn, researchTabBtn, terrainsTabBtn);
+    playerPaneEl.hidden = true;
+    activateTab(worldObjectsTabBtn, itemsTabBtn, knowledgeTabBtn, researchTabBtn, terrainsTabBtn, playerTabBtn);
     if (!worldObjectsEngineBooted) {
       worldObjectsEngineBooted = true;
       const worldObjectsEls: EngineElements = {
@@ -411,6 +438,31 @@ export function mount(container: HTMLElement): void {
         texturePanelMountEl: mustEl<HTMLDivElement>("world-objects-texture-panel-mount"),
       };
       void mountCollectionEngine(WORLD_OBJECTS_DESCRIPTOR, worldObjectsEls).boot();
+    }
+  });
+
+  /**
+   * Player tab (atlas-editor-fold Slice 1, design.md "THE LOAD-BEARING
+   * DECISION"): deliberately NOT `mountCollectionEngine` — there is no
+   * player collection/catalog/list, just the single fixed `player` typeId.
+   * Lazily, on first activation, mounts the texture panel verbatim and
+   * immediately selects "player" (mirrors the `*EngineBooted` guard above).
+   */
+  playerTabBtn.addEventListener("click", () => {
+    itemsPaneEl.hidden = true;
+    knowledgePaneEl.hidden = true;
+    researchPaneEl.hidden = true;
+    terrainsPaneEl.hidden = true;
+    worldObjectsPaneEl.hidden = true;
+    playerPaneEl.hidden = false;
+    activateTab(playerTabBtn, itemsTabBtn, knowledgeTabBtn, researchTabBtn, terrainsTabBtn, worldObjectsTabBtn);
+    if (!playerPanelMounted) {
+      playerPanelMounted = true;
+      const playerTexturePanel = createTexturePanel({
+        mountEl: mustEl<HTMLDivElement>("player-texture-panel-mount"),
+        atlasKind: "player",
+      });
+      playerTexturePanel.selectItem("player");
     }
   });
   void collectionSwitcherEl; // referenced only to fail fast via mustEl if the mount template drifts
@@ -458,6 +510,7 @@ export function mount(container: HTMLElement): void {
     ["research", researchTabBtn],
     ["terrains", terrainsTabBtn],
     ["world-objects", worldObjectsTabBtn],
+    ["player", playerTabBtn],
   ];
   for (const [id, btn] of tabButtons) {
     btn.addEventListener("click", () => localStorage.setItem(ACTIVE_TAB_KEY, id));
