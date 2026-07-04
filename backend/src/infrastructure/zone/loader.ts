@@ -6,7 +6,7 @@ import type { ZoneTemplate } from "../../contract/zone";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..", "..", "..");
-const zonesDir = join(repoRoot, "zones");
+export const zonesDir = join(repoRoot, "zones");
 const schemasDir = join(repoRoot, "schemas");
 
 const readJson = (p: string): any => JSON.parse(readFileSync(p, "utf-8"));

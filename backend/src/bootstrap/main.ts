@@ -4,7 +4,8 @@ import { buildServer } from "../infrastructure/http/server";
 import { InMemoryGameRepository } from "../infrastructure/persistence/in-memory-repo";
 import type { GameRepository } from "../infrastructure/persistence/ports";
 import { createSqliteRepository } from "../infrastructure/persistence/sqlite-repo";
-import { loadZone } from "../infrastructure/zone/loader";
+import { loadZone, zonesDir } from "../infrastructure/zone/loader";
+import { createReloadZone, watchZones } from "./reload-zone";
 import { seedState } from "./seed";
 
 const PLAYER_ID = "p1";
@@ -36,6 +37,13 @@ async function main(): Promise<void> {
   if (!repo.load(PLAYER_ID)) repo.save(seedState(index, template, PLAYER_ID, ZONE_ID));
 
   const service = new GameService(index, repo, PLAYER_ID);
+
+  // Recarga en caliente: el map-editor sigue escribiendo zones/zone-{id}.json vía
+  // la Vite dev-middleware (sin cambios); acá solo observamos el archivo y
+  // re-sembramos el repo, sin reiniciar el proceso (D1/D5, design.md `unified-app`).
+  const reloadZone = createReloadZone(index, repo, PLAYER_ID);
+  watchZones(zonesDir, reloadZone);
+
   const app = buildServer(service);
   await app.listen({ port: PORT, host: "0.0.0.0" });
   console.log(`Isla Misteriosa backend escuchando en http://localhost:${PORT}`);
@@ -43,6 +51,7 @@ async function main(): Promise<void> {
   console.log(`  GET  /zones/${ZONE_ID}`);
   console.log(`  GET  /players/${PLAYER_ID}/state`);
   console.log(`  POST /commands`);
+  console.log(`  watch: ${zonesDir} (recarga en caliente de zonas)`);
 }
 
 main().catch((e) => {
