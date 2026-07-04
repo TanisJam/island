@@ -79,6 +79,7 @@ Eso puede aportar poco a *Comprensión térmica*.
 
 ## Relacionado
 
+- [Research: UX de crafteo sin libro de recetas](crafting-ux-research.md)
 - [Técnicas y herramientas](tecnicas-herramientas.md)
 - [Reglas de diseño para expansión](../2-dominio/reglas-de-expansion.md)
 - [Combinaciones ocultas (MVP)](../5-mvp/construcciones-combinaciones.md)
