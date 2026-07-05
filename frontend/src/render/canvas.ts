@@ -3,10 +3,9 @@ import type { AssetResolver, SpriteRegion } from "./assets";
 import type { Renderer } from "./renderer";
 import type { Frame, RenderEntity } from "../view/viewstate";
 import { cameraOffset } from "./camera";
+import { TILE, SCALE, PX } from "./constants";
 
-export const TILE = 16;
-export const SCALE = 3;
-export const PX = TILE * SCALE; // 48px/tile
+export { TILE, SCALE, PX };
 
 const EMOJI_FONT = '"Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", sans-serif';
 const FALLBACK_TERRAIN_COLOR = "#444";
@@ -14,14 +13,12 @@ const BRASA = "#f0a24e"; // spec "Light-Semantics Visual Identity" — selection
 
 /** `render/camera.ts` is the single source of truth for the camera (design.md
  * "Renderer camera" + spec "Fullscreen Map with Player-Centered Camera").
- * `camera.ts` imports `PX` from here, and this module imports `cameraOffset`
- * back from `camera.ts` — a deliberate two-way ES-module reference. Both
- * sides only ever read the other's export from inside function bodies
- * invoked after both modules finish loading (never at top level), so the
- * cycle is safe. `input/mouse.ts` MUST call the same `cameraOffset` for
- * hit-testing — never recompute the offset independently — or a click during
- * a movement tween could resolve to a different tile than the one drawn
- * under it. */
+ * Both modules import `PX` from `constants.ts` (not from each other), and
+ * this module imports `cameraOffset` from `camera.ts` — a one-way dependency
+ * from this module onto `camera.ts`. `input/mouse.ts` MUST call the same
+ * `cameraOffset` for hit-testing — never recompute the offset independently
+ * — or a click during a movement tween could resolve to a different tile
+ * than the one drawn under it. */
 
 /** True when the user has requested reduced motion — gates the optional
  * selection-ring pulse (spec "Reduced motion respected"). Guarded so this

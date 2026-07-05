@@ -1,6 +1,6 @@
 import type { Position } from "../contract";
 import type { Frame } from "../view/viewstate";
-import { PX } from "./canvas";
+import { PX } from "./constants";
 
 /**
  * Single source of truth for the fullscreen player-centered camera
