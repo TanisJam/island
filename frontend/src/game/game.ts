@@ -9,6 +9,8 @@ import { createViewState } from "../view/viewstate";
 import { createEmojiAssets, createSpriteAssets, parseAtlas } from "../render/assets";
 import type { AssetResolver } from "../render/assets";
 import { createCanvasRenderer } from "../render/canvas";
+import { createPixiRenderer } from "../render/pixi/renderer";
+import type { Renderer } from "../render/renderer";
 import { canvasToTile, createInputController } from "../input/mouse";
 import { createActionPacing } from "../input/action-pacing";
 import type { Ui } from "../hud/ui";
@@ -34,6 +36,16 @@ export interface GameDeps {
 export interface Game {
   start(): Promise<void>;
   stop(): void;
+}
+
+/** Acquires the 2D drawing context for the Canvas renderer. MUST NOT be
+ * called on the `?renderer=pixi` path (design.md D4) — a 2D context poisons
+ * the canvas for WebGL, so the flag branch in `start()` skips this entirely
+ * rather than acquiring-then-discarding it. */
+function getCanvas2dContext(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("No se pudo obtener el contexto 2D del canvas");
+  return ctx;
 }
 
 /** Loads the tileset image from the given URL. Rejects (never throws
@@ -74,10 +86,25 @@ export async function loadSpriteAssets(fallback: AssetResolver): Promise<AssetRe
 
 export function createGame(deps: GameDeps): Game {
   let rafId: number | null = null;
+  // Set the instant `stop()` is called and checked again once the renderer
+  // (Canvas, synchronous; or Pixi, async via `app.init()`) is ready — this is
+  // the guard against `stop()` racing the async Pixi init (design.md D5): a
+  // fast stop-after-start must never leave an initializing Pixi app / GL
+  // context nobody will ever `destroy()`.
+  let stopped = false;
+  let renderer: Renderer | null = null;
 
   async function start(): Promise<void> {
-    const ctx = deps.canvas.getContext("2d");
-    if (!ctx) throw new Error("No se pudo obtener el contexto 2D del canvas");
+    stopped = false;
+
+    // Renderer selection flag (spec "Renderer Selection Flag", design.md
+    // D4). Read and branched on BEFORE any `getContext("2d")` call — the
+    // Pixi branch never touches the 2D context path at all, since acquiring
+    // one first would poison the canvas for WebGL. Node-safe guard (mirrors
+    // `render/canvas.ts`'s `prefersReducedMotion()`): `location` doesn't
+    // exist under `node --test`, so the flag is simply off there — Canvas
+    // stays the default, matching every existing boot test's expectations.
+    const usePixi = typeof location !== "undefined" && new URLSearchParams(location.search).get("renderer") === "pixi";
 
     const [catalog, zone, player, assets] = await Promise.all([
       fetchCatalog(),
@@ -89,14 +116,28 @@ export function createGame(deps: GameDeps): Game {
 
     const store = createStore(snapshot);
     const viewState = createViewState(store);
-    const renderer = createCanvasRenderer(ctx, assets);
+
+    const createdRenderer: Renderer = usePixi
+      ? await createPixiRenderer(deps.canvas, assets)
+      : createCanvasRenderer(getCanvas2dContext(deps.canvas), assets);
+
+    if (stopped) {
+      // `stop()` fired while the awaits above (in particular Pixi's async
+      // `app.init()`) were still in flight. Tear the freshly created
+      // renderer down immediately and bail out before wiring anything else
+      // (input, HUD, the render loop) — never let a stopped game keep
+      // running.
+      createdRenderer.destroy();
+      return;
+    }
+    renderer = createdRenderer;
 
     // Fullscreen map (spec "Fullscreen Map with Player-Centered Camera"):
     // size the canvas to the viewport now, and re-fit on every resize —
     // `render/canvas.ts`'s camera translate recenters on the player using
     // whatever width/height the canvas buffer currently has.
-    renderer.resize(window.innerWidth, window.innerHeight);
-    window.addEventListener("resize", () => renderer.resize(window.innerWidth, window.innerHeight));
+    createdRenderer.resize(window.innerWidth, window.innerHeight);
+    window.addEventListener("resize", () => createdRenderer.resize(window.innerWidth, window.innerHeight));
 
     // Slice C — Action Duration (Decision 1, engram #2854): gates input and
     // defers `store.ingest` for the window a `CommandResult.durationMs > 0`
@@ -283,7 +324,7 @@ export function createGame(deps: GameDeps): Game {
         viewState.update(STEP);
         acc -= STEP;
       }
-      renderer.render(viewState.frame(), input.getSelection()?.preview.pos ?? null, actionPacing.isWorking());
+      createdRenderer.render(viewState.frame(), input.getSelection()?.preview.pos ?? null, actionPacing.isWorking());
       rafId = requestAnimationFrame(frame);
     }
 
@@ -291,9 +332,18 @@ export function createGame(deps: GameDeps): Game {
   }
 
   function stop(): void {
+    stopped = true;
     if (rafId !== null) {
       cancelAnimationFrame(rafId);
       rafId = null;
+    }
+    // Load-bearing (design.md D5): Canvas's `destroy()` was always a no-op,
+    // which hid the fact this was never called at all. Pixi's `destroy()`
+    // actually releases GPU resources (textures + the app/renderer) — skip
+    // this and every `start()` after a `stop()` leaks the previous instance.
+    if (renderer) {
+      renderer.destroy();
+      renderer = null;
     }
   }
 
