@@ -101,6 +101,20 @@ test("buildContextMenu: self section always has the two ui items plus any self-t
   assert.ok(ids.includes("reflect"), "self-target catalog action is included (future-proofing, even though today's real catalog has none)");
 });
 
+test("buildContextMenu: 'Descansar' (Rest) is offered in the 'Yo' section only when energy isn't full (crouch-crafting Slice E)", () => {
+  const full = makeSnapshot(); // energy 100 === maxEnergy 100
+  const fullYo = buildContextMenu(catalog, full, selfResolution(), "visible").sections.find((sec) => sec.title === "Yo")!;
+  assert.ok(!fullYo.items.some((i) => i.id === "rest"), "no 'Descansar' at full energy — resting would be a no-op");
+
+  const tired = makeSnapshot({ player: { ...makeSnapshot().player, energy: 40 } });
+  const tiredYo = buildContextMenu(catalog, tired, selfResolution(), "visible").sections.find((sec) => sec.title === "Yo")!;
+  const rest = tiredYo.items.find((i) => i.id === "rest");
+  assert.ok(rest, "'Descansar' appears in the 'Yo' section when energy is below max");
+  assert.equal(rest!.label, "Descansar");
+  assert.equal(rest!.kind, "action");
+  assert.deepEqual(rest!.command, { type: "Rest" });
+});
+
 test("buildContextMenu: bare self menu (no ground items on the player's own tile) never offers 'Examinar de cerca' (crouch-crafting rework: per-tile trigger, not a self affordance)", () => {
   const s = makeSnapshot();
   const menu = buildContextMenu(catalog, s, selfResolution(), "visible");

@@ -198,6 +198,12 @@ export function renderHud(catalog: Catalog, snapshot: ClientSnapshot, _handlers:
   if (energyBarEl) energyBarEl.style.width = `${pct}%`;
   if (energyNumEl) energyNumEl.textContent = `${snapshot.player.energy}/${snapshot.player.maxEnergy}`;
 
+  const healthBarEl = document.getElementById("health-bar");
+  const healthNumEl = document.getElementById("health-num");
+  const healthPct = snapshot.player.maxHealth > 0 ? Math.round((100 * snapshot.player.health) / snapshot.player.maxHealth) : 0;
+  if (healthBarEl) healthBarEl.style.width = `${healthPct}%`;
+  if (healthNumEl) healthNumEl.textContent = `${snapshot.player.health}/${snapshot.player.maxHealth}`;
+
   const hintEl = document.getElementById("hint");
   if (hintEl) {
     const craftable = findCraftable(catalog, snapshot);

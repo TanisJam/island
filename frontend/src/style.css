@@ -266,7 +266,8 @@ body {
   }
 }
 
-.energy {
+.energy,
+.health {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -274,7 +275,8 @@ body {
   margin-top: 10px;
 }
 
-.energy .lbl {
+.energy .lbl,
+.health .lbl {
   font-family: "Silkscreen";
   font-size: 9px;
   color: var(--recuerdo);
@@ -297,11 +299,18 @@ body {
   background: linear-gradient(90deg, #b56a2a, var(--brasa));
 }
 
-.energy .num {
+.energy .num,
+.health .num {
   font-family: "Silkscreen";
   font-size: 10px;
   color: var(--arena);
   text-shadow: 0 1px 3px #000;
+}
+
+/* Vida se distingue de la energía (ámbar) con un rojo-brasa cálido que
+ * sigue en la familia "Luz de fuego" en vez de un rojo puro que chocaría. */
+.health .bar > i {
+  background: linear-gradient(90deg, #7a241a, #d1503c);
 }
 
 /*

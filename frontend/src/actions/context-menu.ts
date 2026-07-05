@@ -242,16 +242,19 @@ function buildSelfMenu(catalog: Catalog, snapshot: ClientSnapshot): ContextMenu 
 
   const selfTarget: ActionTarget = { kind: "self", pos, tags: [] };
   const selfActions = computeAvailableActions(catalog, selfTarget, snapshot);
-  const sections: ContextMenuSection[] = [
-    {
-      title: "Yo",
-      items: [
-        { id: "ui:inventory", label: "Ver mis cosas", hint: "el inventario", kind: "ui", uiIntent: "inventory" },
-        { id: "ui:thoughts", label: "Ver mis pensamientos", hint: "lo que fui entendiendo", kind: "ui", uiIntent: "thoughts" },
-        ...selfActions.map((a) => actionToItem(a, { kind: "self" })),
-      ],
-    },
+  const selfItems: ContextMenuItem[] = [
+    { id: "ui:inventory", label: "Ver mis cosas", hint: "el inventario", kind: "ui", uiIntent: "inventory" },
+    { id: "ui:thoughts", label: "Ver mis pensamientos", hint: "lo que fui entendiendo", kind: "ui", uiIntent: "thoughts" },
+    ...selfActions.map((a) => actionToItem(a, { kind: "self" })),
   ];
+  // "Descansar" (crouch-crafting Slice E): entry point for the backend `Rest`
+  // command (process-command.ts), which had no UI trigger. Dispatches straight
+  // through the same `kind: "action"` path as catalog actions (input/mouse.ts).
+  // Only offered when energy isn't already full — resting at max is a no-op.
+  if (snapshot.player.energy < snapshot.player.maxEnergy) {
+    selfItems.push({ id: "rest", label: "Descansar", hint: "recuperar energía", kind: "action", command: { type: "Rest" } });
+  }
+  const sections: ContextMenuSection[] = [{ title: "Yo", items: selfItems }];
 
   const tile = snapshot.tiles.find((t) => t.x === pos.x && t.y === pos.y);
   if (tile) {
