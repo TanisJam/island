@@ -81,6 +81,35 @@ test("action-pacing: durationMs>0 -> applyResult returns true (deferred) and DEF
   assert.equal(pacing.isBusy(), false, "busy clears once applied (the scheduled callback owns clearing it)");
 });
 
+test("action-pacing: isWorking() tracks ONLY the deferred window — false before, true during, false after; never set for an instant action", () => {
+  const scheduler = fakeScheduler();
+  const pacing = createActionPacing({ ingest: () => {}, showBusy: () => {}, schedule: scheduler.schedule });
+
+  assert.equal(pacing.isWorking(), false, "not working before anything runs");
+
+  // Instant action: busy briefly (round-trip) but NEVER working — no cue flicker.
+  pacing.beginDispatch();
+  pacing.applyResult(acceptedResult([THOUGHT_EVENT]));
+  assert.equal(pacing.isWorking(), false, "an instant (durationMs absent) action never enters the working window");
+  pacing.endDispatch();
+
+  // Deferred action: working across the whole "Trabajando…" window.
+  pacing.beginDispatch();
+  pacing.applyResult(acceptedResult([THOUGHT_EVENT], 900));
+  assert.equal(pacing.isWorking(), true, "working while the deferred timer is pending");
+  scheduler.fire();
+  assert.equal(pacing.isWorking(), false, "working clears once the deferred window elapses");
+});
+
+test("action-pacing: reducedMotion() opens no working window (durationMs applied instantly)", () => {
+  const scheduler = fakeScheduler();
+  const pacing = createActionPacing({ ingest: () => {}, showBusy: () => {}, schedule: scheduler.schedule, reducedMotion: () => true });
+
+  pacing.beginDispatch();
+  pacing.applyResult(acceptedResult([THOUGHT_EVENT], 5000));
+  assert.equal(pacing.isWorking(), false, "reduced motion never enters the working window");
+});
+
 test("action-pacing: onApplied runs AFTER ingest, both for instant and deferred results", () => {
   const order: string[] = [];
   const scheduler = fakeScheduler();

@@ -60,6 +60,18 @@ export interface ActionPacing {
    * `input/mouse.ts`'s click gate. */
   isBusy(): boolean;
   /**
+   * True ONLY while a deferred `durationMs` window is open — i.e. exactly when
+   * the "Trabajando…" teletype (`BUSY_MESSAGE`) is showing, from the moment
+   * `applyResult` defers ingest until its scheduled callback fires. NARROWER
+   * than `isBusy()` (which also covers the pre-ingest network round-trip of
+   * EVERY command, instant ones included): this is the signal a purely
+   * cosmetic "action in progress" cue (e.g. the over-avatar indicator in
+   * render/canvas.ts) should follow, so the cue tracks the SAME window as the
+   * teletype and never flickers on instant commands. Always false under
+   * reduced motion (no window is ever opened).
+   */
+  isWorking(): boolean;
+  /**
    * Synchronously attempts to start a new command's lifecycle. MUST be
    * called BEFORE the network round-trip begins (i.e. before `await
    * transport.send(...)`) — this is what closes the double-send race during
@@ -98,6 +110,10 @@ export function createActionPacing(deps: ActionPacingDeps): ActionPacing {
   const schedule = deps.schedule ?? defaultSchedule;
   const reducedMotion = deps.reducedMotion ?? defaultReducedMotion;
   let busy = false;
+  // Distinct from `busy`: true ONLY across the deferred "Trabajando…" window
+  // (see `isWorking` doc). Never set on the round-trip or instant paths, so a
+  // cosmetic cue bound to it matches the teletype exactly.
+  let working = false;
 
   function beginDispatch(): boolean {
     if (busy) return false;
@@ -116,14 +132,16 @@ export function createActionPacing(deps: ActionPacingDeps): ActionPacing {
       onApplied?.();
       return false;
     }
+    working = true;
     deps.showBusy(BUSY_MESSAGE);
     schedule(() => {
       busy = false;
+      working = false;
       deps.ingest(result.events);
       onApplied?.();
     }, durationMs);
     return true;
   }
 
-  return { isBusy: () => busy, beginDispatch, applyResult, endDispatch };
+  return { isBusy: () => busy, isWorking: () => working, beginDispatch, applyResult, endDispatch };
 }

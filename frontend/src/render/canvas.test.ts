@@ -59,19 +59,23 @@ test("spriteDrawRect: bottom edge of a tall region always lands exactly on the t
 // `drawObjectOrItem`/`drawPile`/`drawPlayer`, terrain via its own
 // fill-OR-sprite branch).
 
-type RecordedCalls = { drawImage: unknown[][]; fillText: unknown[][]; fillRect: unknown[][] };
+type RecordedCalls = { drawImage: unknown[][]; fillText: unknown[][]; fillRect: unknown[][]; stroke: unknown[][] };
 
 /** Mirrors `game/game.test.ts`'s `fakeCanvasContext`, extended to RECORD
- * calls to `drawImage`/`fillText`/`fillRect` instead of no-op'ing them, so
- * tests can assert which draw path actually fired. */
+ * calls to `drawImage`/`fillText`/`fillRect`/`stroke` instead of no-op'ing
+ * them, so tests can assert which draw path actually fired. `stroke()` (the
+ * bare path stroke) is UNIQUE to the busy indicator's spinner arc — no other
+ * draw in this renderer calls it (the selection ring uses `strokeRect`), so
+ * it's a clean discriminator for "the over-avatar cue drew". */
 function fakeRecordingContext(): { ctx: CanvasRenderingContext2D; calls: RecordedCalls } {
   const noop = () => {};
-  const calls: RecordedCalls = { drawImage: [], fillText: [], fillRect: [] };
+  const calls: RecordedCalls = { drawImage: [], fillText: [], fillRect: [], stroke: [] };
   const ctx = {
     canvas: { width: 480, height: 480 },
     fillStyle: "",
     strokeStyle: "",
     lineWidth: 1,
+    lineCap: "butt",
     globalAlpha: 1,
     font: "",
     textAlign: "left",
@@ -86,6 +90,7 @@ function fakeRecordingContext(): { ctx: CanvasRenderingContext2D; calls: Recorde
     beginPath: noop,
     arc: noop,
     fill: noop,
+    stroke: (...args: unknown[]) => calls.stroke.push(args),
     save: noop,
     restore: noop,
     translate: noop,
@@ -129,6 +134,27 @@ test("createCanvasRenderer: unmapped entity draws via ctx.fillText (drawEmoji), 
 
   assert.equal(calls.fillText.length, 1, "fillText must be called once for an unmapped entity");
   assert.equal(calls.drawImage.length, 0, "drawImage must NOT be called for an unmapped entity");
+});
+
+test("createCanvasRenderer: busy=true draws the over-avatar spinner (ctx.stroke) at the player; busy=false does not (crouch-crafting follow-up)", () => {
+  const assets: AssetResolver = { resolve: () => ({ glyph: "🧍", scale: 0.72 }) };
+  const playerFrame = () =>
+    baseFrame({ entities: [{ id: "p1", kind: "player", typeId: "player", renderPos: { x: 2, y: 2 }, visibility: "visible" }] });
+
+  const idle = fakeRecordingContext();
+  createCanvasRenderer(idle.ctx, assets).render(playerFrame(), null, false);
+  assert.equal(idle.calls.stroke.length, 0, "no spinner arc when not busy");
+
+  const working = fakeRecordingContext();
+  createCanvasRenderer(working.ctx, assets).render(playerFrame(), null, true);
+  assert.equal(working.calls.stroke.length, 1, "the spinner arc strokes once over the player when busy");
+});
+
+test("createCanvasRenderer: busy=true with NO player entity draws no spinner (nothing to anchor to)", () => {
+  const assets: AssetResolver = { resolve: () => ({ glyph: "?" }) };
+  const { ctx, calls } = fakeRecordingContext();
+  createCanvasRenderer(ctx, assets).render(baseFrame({ entities: [] }), null, true);
+  assert.equal(calls.stroke.length, 0, "the cue is anchored to the player — none present, none drawn");
 });
 
 test("createCanvasRenderer: sprite-mapped terrain draws via ctx.drawImage, not ctx.fillRect (terrain's own fill-OR-sprite branch)", () => {

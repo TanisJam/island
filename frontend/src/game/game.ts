@@ -282,7 +282,7 @@ export function createGame(deps: GameDeps): Game {
         viewState.update(STEP);
         acc -= STEP;
       }
-      renderer.render(viewState.frame(), input.getSelection()?.preview.pos ?? null);
+      renderer.render(viewState.frame(), input.getSelection()?.preview.pos ?? null, actionPacing.isWorking());
       rafId = requestAnimationFrame(frame);
     }
 

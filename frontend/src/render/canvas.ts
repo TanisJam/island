@@ -102,6 +102,36 @@ function drawSelection(ctx: CanvasRenderingContext2D, pos: Position, clockMs: nu
 }
 
 /**
+ * "Action in progress" cue drawn OVER the avatar while `ActionPacing.isWorking()`
+ * (the deferred `durationMs` window — same window that shows the "Trabajando…"
+ * teletype). A brasa arc spinning around a dark backing disc just above the
+ * player's head, animated off `clockMs` — the SAME global anim clock the
+ * selection-ring pulse already rides (`drawSelection`). Under reduced motion
+ * the arc is static (no rotation), mirroring how `drawSelection` freezes its
+ * pulse. Purely cosmetic: reads no snapshot, gated entirely by the `busy` flag
+ * threaded into `render`. */
+function drawBusyIndicator(ctx: CanvasRenderingContext2D, pos: Position, clockMs: number): void {
+  const cx = pos.x * PX + PX / 2;
+  const cy = pos.y * PX - PX * 0.08; // just above the tile's top edge (over the head)
+  const r = PX * 0.16;
+  // Dark backing disc so the arc stays legible over any terrain or glyph
+  // (same legibility trick as drawCount's stroke-then-fill).
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.beginPath();
+  ctx.arc(cx, cy, r + 3, 0, Math.PI * 2);
+  ctx.fill();
+  // A 3/4 arc; its start angle sweeps with the clock so it reads as spinning.
+  const start = prefersReducedMotion() ? 0 : (clockMs / 140) % (Math.PI * 2);
+  ctx.strokeStyle = BRASA;
+  ctx.lineWidth = 3;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, start, start + Math.PI * 1.5);
+  ctx.stroke();
+  ctx.lineCap = "butt";
+}
+
+/**
  * Canvas 2D implementation of `Renderer` (design.md SEAM 4). Draws
  * EXCLUSIVELY from the `Frame` produced by `ViewState.frame()`: terrain and
  * entity visibility are read from the frame, NEVER recomputed via
@@ -148,7 +178,7 @@ export function createCanvasRenderer(ctx: CanvasRenderingContext2D, assets: Asse
       ctx.canvas.height = height;
     },
 
-    render(frame: Frame, selection: Position | null): void {
+    render(frame: Frame, selection: Position | null, busy = false): void {
       ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 
       // Fullscreen, player-centered camera (spec "Fullscreen Map with
@@ -188,7 +218,14 @@ export function createCanvasRenderer(ctx: CanvasRenderingContext2D, assets: Asse
       for (const entity of frame.entities) if (entity.kind === "object") drawObjectOrItem(entity);
       for (const entity of frame.entities) if (entity.kind === "pile") drawPile(entity);
       for (const entity of frame.entities) if (entity.kind === "item") drawObjectOrItem(entity);
-      for (const entity of frame.entities) if (entity.kind === "player") drawPlayer(entity);
+      for (const entity of frame.entities) {
+        if (entity.kind !== "player") continue;
+        drawPlayer(entity);
+        // Anchored to the player's INTERPOLATED renderPos so it tracks the
+        // avatar in tile-space (moves with the camera), drawn last over the
+        // player so it's never occluded. Only while an action is in progress.
+        if (busy) drawBusyIndicator(ctx, entity.renderPos, frame.clockMs);
+      }
 
       if (selection) drawSelection(ctx, selection, frame.clockMs);
 
