@@ -1,5 +1,5 @@
-import { Container, Sprite, Text } from "pixi.js";
-import type { AssetResolver } from "../assets";
+import { Container, Graphics, Sprite, Text } from "pixi.js";
+import type { AssetResolver, VisualDescriptor } from "../assets";
 import type { Frame, RenderEntity, Visibility } from "../../view/viewstate";
 import { PX, SCALE } from "../constants";
 import type { TextureProvider } from "./textures";
@@ -84,8 +84,47 @@ interface EntityNode {
 
 /** Object/item/pile share ONE reconciliation loop (design.md D1's "Entities"
  * row); player is excluded here on purpose — it gets its own halo+sprite
- * container in WU4, never routed through this pool. */
+ * container in `createPlayerScene`, never routed through this pool. */
 const ENTITY_LAYER_KINDS: ReadonlySet<RenderEntity["kind"]> = new Set(["object", "pile", "item"]);
+
+/**
+ * Sprite-first with glyph-fallback anchor/size branch (spec "Sprite-First
+ * Rendering with Emoji/Text Fallback"), extracted so every consumer that
+ * draws a `VisualDescriptor` onto a `Sprite` — `createEntityScene`'s object/
+ * item/pile pool AND `createPlayerScene`'s player node — shares exactly ONE
+ * implementation of the sizing rule this module already documented once
+ * (a real bug WU3's browser verification caught): a `.sprite` region carries
+ * its OWN pixel dimensions (`sw`/`sh`) sized via `region.sw/sh * SCALE` and
+ * bottom-left-anchored so tall multi-cell sprites extend upward from the
+ * entity's tile (`dx=0`, `dy=PX` relative to the node root, mirroring
+ * `canvas.ts`'s `spriteDrawRect`); `VisualDescriptor.scale` is a GLYPH-only
+ * draw factor (`drawEmoji`'s font-size factor) and is never set on a
+ * sprite-backed visual — using it to size a sprite instead of the region's
+ * own dimensions silently squashes any multi-cell sprite into a single small
+ * tile-sized square. Duplicating this branch per consumer would risk that
+ * regression resurfacing in exactly one of the copies.
+ */
+function applyEntityVisual(sprite: Sprite, visual: VisualDescriptor, textures: TextureProvider): void {
+  if (visual.sprite) {
+    const region = visual.sprite;
+    const texture = textures.forRegion(region);
+    if (sprite.texture !== texture) sprite.texture = texture;
+    sprite.anchor.set(0, 1);
+    sprite.x = 0;
+    sprite.y = PX;
+    sprite.width = region.sw * SCALE;
+    sprite.height = region.sh * SCALE;
+  } else {
+    const texture = textures.forGlyph(visual.glyph ?? "");
+    if (sprite.texture !== texture) sprite.texture = texture;
+    sprite.anchor.set(0.5);
+    sprite.x = PX / 2;
+    sprite.y = PX / 2;
+    const scale = visual.scale ?? 1;
+    sprite.width = PX * scale;
+    sprite.height = PX * scale;
+  }
+}
 
 export interface EntityScene {
   container: Container;
@@ -180,38 +219,11 @@ export function createEntityScene(deps: SceneDeps): EntityScene {
 
         // Sprite-first with glyph fallback (spec "Sprite-First Rendering
         // with Emoji/Text Fallback" — entities, unlike terrain, always have
-        // a glyph fallback per `createEmojiAssets`). Sizing/anchor differ by
-        // branch and MUST NOT be conflated (a real bug caught during this
-        // WU's browser verification): a `.sprite` region carries its OWN
-        // pixel dimensions (`sw`/`sh`, e.g. a multi-cell tree at 48x96
-        // source px) which canvas.ts's `spriteDrawRect` sizes via
-        // `region.sw/sh * SCALE` and bottom-left-anchors so tall sprites
-        // extend upward from the entity's tile (`dx=tileX*px`,
-        // `dy=tileY*px+px-dh`); `VisualDescriptor.scale` is a GLYPH-only
-        // draw factor (`drawEmoji`'s font-size factor) and is never set on
-        // a sprite-backed visual — using it to size a sprite instead of the
-        // region's own dimensions silently squashes any multi-cell sprite
-        // into a single small tile-sized square.
+        // a glyph fallback per `createEmojiAssets`). Shared with
+        // `createPlayerScene` via `applyEntityVisual` (see its doc comment
+        // for the sizing rule this branch enforces).
         const visual = deps.assets.resolve(entity.kind, entity.typeId, entity.state ?? {});
-        if (visual.sprite) {
-          const region = visual.sprite;
-          const texture = deps.textures.forRegion(region);
-          if (node.sprite.texture !== texture) node.sprite.texture = texture;
-          node.sprite.anchor.set(0, 1);
-          node.sprite.x = 0;
-          node.sprite.y = PX;
-          node.sprite.width = region.sw * SCALE;
-          node.sprite.height = region.sh * SCALE;
-        } else {
-          const texture = deps.textures.forGlyph(visual.glyph ?? "");
-          if (node.sprite.texture !== texture) node.sprite.texture = texture;
-          node.sprite.anchor.set(0.5);
-          node.sprite.x = PX / 2;
-          node.sprite.y = PX / 2;
-          const scale = visual.scale ?? 1;
-          node.sprite.width = PX * scale;
-          node.sprite.height = PX * scale;
-        }
+        applyEntityVisual(node.sprite, visual, deps.textures);
 
         // Pile-count badge (spec "Pile count badge"), reconciled by id
         // alongside the rest of the node — added the first time `count` is
@@ -231,6 +243,114 @@ export function createEntityScene(deps: SceneDeps): EntityScene {
           node.badge.destroy();
           node.badge = undefined;
         }
+      }
+
+      for (const id of nodes.keys()) {
+        if (!seen.has(id)) removeNode(id);
+      }
+    },
+  };
+}
+
+// --- Player (WU4: halo + sprite) ---
+
+/** Halo geometry/paint (design.md D1 "Player halo -> one baked `Graphics`
+ * circle under player sprite (static)"), same radius/color/alpha as
+ * `render/canvas.ts`'s `drawPlayer` arc (`rgba(255,240,120,0.28)` at
+ * `PX*0.44`, `255,240,120` == `0xfff078`). Built ONCE per node — static
+ * geometry, never rebuilt per frame (unlike the WU5 busy-spinner rotation,
+ * this halo never animates). */
+const HALO_COLOR = 0xfff078;
+const HALO_ALPHA = 0.28;
+const HALO_RADIUS_FACTOR = 0.44;
+
+function createHalo(): Graphics {
+  return new Graphics()
+    .circle(PX / 2, PX / 2, PX * HALO_RADIUS_FACTOR)
+    .fill({ color: HALO_COLOR, alpha: HALO_ALPHA });
+}
+
+/** One node per player id: a static `halo` (added first, so it paints
+ * BELOW `sprite` in Pixi's back-to-front child order — design.md D1's
+ * layer order ends "...player" as a single row, halo-under-sprite within
+ * it) plus the player's own sprite/glyph, sized via the same
+ * `applyEntityVisual` branch WU3's entity pool established. */
+interface PlayerNode {
+  root: Container;
+  halo: Graphics;
+  sprite: Sprite;
+}
+
+export interface PlayerScene {
+  container: Container;
+  /**
+   * Reconciles the player node against `frame.entities` (design.md D1
+   * "Player" row / spec "Visual Parity Checklist" — player halo+sprite).
+   * Unlike `createEntityScene`'s object/item/pile pool, the player is NEVER
+   * fog-culled while `visibility === "unseen"` — mirrors `canvas.ts`'s
+   * `drawPlayer`, which is called unconditionally regardless of visibility
+   * ("the player's own position was never fog-culled"). The node is only
+   * destroyed once the player's id no longer appears in `frame.entities` at
+   * all (matches the object/item/pile pool's own destroy rule).
+   */
+  sync(frame: Frame): void;
+}
+
+/**
+ * Pure player reconciler (design.md D1/D6), same pool shape as
+ * `createEntityScene` but scoped to `kind === "player"` and never hidden by
+ * fog — only `scene.ts`'s pure reconciliation is exercised by
+ * `pixi.test.ts` (spec "Test Coverage Without GPU Dependency").
+ */
+export function createPlayerScene(deps: SceneDeps): PlayerScene {
+  const container = new Container();
+  const nodes = new Map<string, PlayerNode>();
+
+  function createNode(): PlayerNode {
+    const halo = createHalo();
+    const sprite = new Sprite();
+    const root = new Container();
+    // z-order within this node: halo first (renders below), sprite second
+    // (renders on top) — Pixi's `Container` paints children in the order
+    // they were added, back-to-front.
+    root.addChild(halo, sprite);
+    container.addChild(root);
+    return { root, halo, sprite };
+  }
+
+  function removeNode(id: string): void {
+    const node = nodes.get(id);
+    if (!node) return;
+    node.root.destroy({ children: true });
+    nodes.delete(id);
+  }
+
+  return {
+    container,
+    sync(frame: Frame): void {
+      const seen = new Set<string>();
+
+      for (const entity of frame.entities) {
+        if (entity.kind !== "player") continue;
+        seen.add(entity.id);
+
+        let node = nodes.get(entity.id);
+        if (!node) {
+          node = createNode();
+          nodes.set(entity.id, node);
+        }
+
+        // Never fog-culled (canvas.ts's `drawPlayer` comment, verbatim):
+        // "the player's own position was never fog-culled" — always visible
+        // regardless of `entity.visibility`.
+        node.root.visible = true;
+        node.root.x = entity.renderPos.x * PX;
+        node.root.y = entity.renderPos.y * PX;
+
+        // canvas.ts's `drawPlayer` resolves via the fixed "player" kind and
+        // does NOT pass `entity.state` — mirrored here verbatim.
+        const visual = deps.assets.resolve("player", entity.typeId);
+        applyEntityVisual(node.sprite, visual, deps.textures);
       }
 
       for (const id of nodes.keys()) {

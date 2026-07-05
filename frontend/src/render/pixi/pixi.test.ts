@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Container, Sprite, Text, Texture } from "pixi.js";
-import { createEntityScene, createTileScene } from "./scene";
+import { Container, Graphics, Sprite, Text, Texture } from "pixi.js";
+import { createEntityScene, createPlayerScene, createTileScene } from "./scene";
 import type { TextureProvider } from "./textures";
 import type { AssetResolver, SpriteRegion } from "../assets";
 import type { Frame, RenderEntity, Visibility } from "../../view/viewstate";
@@ -405,4 +405,106 @@ test("createEntityScene skips redundant .texture writes when the frame is unchan
 
   scene.sync(frame); // same frame again: texture unchanged, write must be skipped
   assert.equal(textureWrites.count(), 0);
+});
+
+// --- createPlayerScene (WU4: player halo + sprite) ---
+
+test("createPlayerScene creates one node for the player entity, with a halo Graphics under the sprite", () => {
+  const scene = createPlayerScene({ textures: stubTextures(), assets: stubEntityAssets() });
+  scene.sync(frameWithEntities([entity({ id: "p", kind: "player", typeId: "player" })]));
+
+  assert.equal(scene.container.children.length, 1, "one player node");
+  const root = scene.container.children[0] as Container;
+  assert.equal(root.children.length, 2, "halo + sprite");
+  assert.ok(root.children[0] instanceof Graphics, "first child is the halo Graphics");
+  assert.ok(root.children[1] instanceof Sprite, "second child is the sprite");
+});
+
+test("createPlayerScene z-orders the halo behind the sprite (halo added first, sprite painted on top)", () => {
+  const scene = createPlayerScene({ textures: stubTextures(), assets: stubEntityAssets() });
+  scene.sync(frameWithEntities([entity({ id: "p", kind: "player", typeId: "player" })]));
+
+  const root = scene.container.children[0] as Container;
+  const haloIndex = root.children.findIndex((child) => child instanceof Graphics);
+  const spriteIndex = root.children.findIndex((child) => child instanceof Sprite);
+  assert.ok(haloIndex < spriteIndex, "halo must come before the sprite in child order (paints below it)");
+});
+
+test("createPlayerScene reuses the pooled node across frames instead of duplicating it", () => {
+  const scene = createPlayerScene({ textures: stubTextures(), assets: stubEntityAssets() });
+  const frame = frameWithEntities([entity({ id: "p", kind: "player", typeId: "player" })]);
+
+  scene.sync(frame);
+  scene.sync(frame); // second sync, same player: pool must be reused
+
+  assert.equal(scene.container.children.length, 1);
+});
+
+test("createPlayerScene positions the player node at renderPos * PX", () => {
+  const scene = createPlayerScene({ textures: stubTextures(), assets: stubEntityAssets() });
+  scene.sync(frameWithEntities([entity({ id: "p", kind: "player", typeId: "player", renderPos: { x: 2, y: 3 } })]));
+
+  const root = scene.container.children[0] as Container;
+  assert.equal(root.x, 2 * PX);
+  assert.equal(root.y, 3 * PX);
+});
+
+test("createPlayerScene NEVER fog-culls the player — stays visible while 'unseen' (canvas.ts: player's own position was never fog-culled)", () => {
+  const scene = createPlayerScene({ textures: stubTextures(), assets: stubEntityAssets() });
+  scene.sync(frameWithEntities([entity({ id: "p", kind: "player", typeId: "player", visibility: "unseen" })]));
+
+  const root = scene.container.children[0] as Container;
+  assert.equal(root.visible, true, "player must stay visible even while its tile is unseen");
+});
+
+test("createPlayerScene destroys the node once the player id no longer appears in the frame", () => {
+  const scene = createPlayerScene({ textures: stubTextures(), assets: stubEntityAssets() });
+  scene.sync(frameWithEntities([entity({ id: "p", kind: "player", typeId: "player" })]));
+  assert.equal(scene.container.children.length, 1);
+
+  scene.sync(frameWithEntities([]));
+  assert.equal(scene.container.children.length, 0);
+});
+
+test("createPlayerScene draws a sprite region (forRegion) when the resolved visual has a .sprite, sized via the region's own sw/sh * SCALE", () => {
+  const regionTexture = new Texture();
+  const textures: TextureProvider = {
+    forColor: () => Texture.EMPTY,
+    forRegion: () => regionTexture,
+    forGlyph: () => Texture.EMPTY,
+    destroy: () => {},
+  };
+  const assets: AssetResolver = { resolve: () => ({ sprite: STUB_REGION }) };
+  const scene = createPlayerScene({ textures, assets });
+  scene.sync(frameWithEntities([entity({ id: "p", kind: "player", typeId: "player" })]));
+
+  const root = scene.container.children[0] as Container;
+  const sprite = root.children[1] as Sprite;
+  assert.equal(sprite.texture, regionTexture);
+  assert.equal(sprite.width, STUB_REGION.sw * SCALE);
+  assert.equal(sprite.height, STUB_REGION.sh * SCALE);
+  assert.deepEqual([sprite.anchor.x, sprite.anchor.y], [0, 1]);
+});
+
+test("createPlayerScene falls back to forGlyph when the resolved visual has no .sprite", () => {
+  const glyphCalls: string[] = [];
+  const textures: TextureProvider = {
+    forColor: () => Texture.EMPTY,
+    forRegion: () => Texture.EMPTY,
+    forGlyph: (glyph) => {
+      glyphCalls.push(glyph);
+      return Texture.EMPTY;
+    },
+    destroy: () => {},
+  };
+  const assets: AssetResolver = { resolve: () => ({ glyph: "🧍", scale: 0.82 }) };
+  const scene = createPlayerScene({ textures, assets });
+  scene.sync(frameWithEntities([entity({ id: "p", kind: "player", typeId: "player" })]));
+
+  assert.deepEqual(glyphCalls, ["🧍"]);
+  const root = scene.container.children[0] as Container;
+  const sprite = root.children[1] as Sprite;
+  assert.equal(sprite.width, PX * 0.82);
+  assert.equal(sprite.height, PX * 0.82);
+  assert.deepEqual([sprite.anchor.x, sprite.anchor.y], [0.5, 0.5]);
 });

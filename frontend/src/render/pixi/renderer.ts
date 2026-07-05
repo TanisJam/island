@@ -5,15 +5,15 @@ import type { Renderer } from "../renderer";
 import type { Frame } from "../../view/viewstate";
 import { cameraOffset } from "../camera";
 import { createPixiTextureProvider } from "./textures";
-import { createTileScene, createEntityScene } from "./scene";
+import { createTileScene, createEntityScene, createPlayerScene } from "./scene";
 
 /**
  * Pixi implementation of the unchanged `Renderer` interface (design.md SEAM
  * 4 / D1). Retained-mode: a persistent scene graph mutated per frame instead
  * of the Canvas renderer's per-frame immediate draws. WU1a: app lifecycle +
  * plain color-fallback terrain. WU2: sprite terrain + fog tint. WU3: object/
- * item/pile entity pool + glyph fallback + pile badge. Player halo/sprite and
- * FX (selection pulse, busy spinner) land in WU4/WU5.
+ * item/pile entity pool + glyph fallback + pile badge. WU4: player halo +
+ * sprite (never fog-culled). FX (selection pulse, busy spinner) land in WU5.
  *
  * `Application.init()` is async (Pixi v8 requirement), hence the
  * `Promise<Renderer>` return type — callers (`game.ts`) MUST await this
@@ -34,9 +34,12 @@ export async function createPixiRenderer(canvas: HTMLCanvasElement, assets: Asse
 
   // Layer order (design.md D1): tile -> object -> pile -> item -> player ->
   // fx. `entityScene.container` already enforces object/pile/item internally
-  // (see scene.ts); player + fx land on top in WU4/WU5.
+  // (see scene.ts); player lands on top here, fx lands on top of that in WU5.
   const entityScene = createEntityScene({ textures, assets });
   worldContainer.addChild(entityScene.container);
+
+  const playerScene = createPlayerScene({ textures, assets });
+  worldContainer.addChild(playerScene.container);
 
   let destroyed = false;
 
@@ -57,6 +60,7 @@ export async function createPixiRenderer(canvas: HTMLCanvasElement, assets: Asse
       worldContainer.y = offset.oy;
       tileScene.sync(frame);
       entityScene.sync(frame);
+      playerScene.sync(frame);
     },
 
     destroy(): void {
