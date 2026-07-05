@@ -1,4 +1,5 @@
-import type { Command, CommandEnvelope, CommandResult, Event, Position } from "../contract";
+import type { Command, CommandEnvelope, CommandResult, Event } from "../contract";
+import { dropTargetTile } from "../actions/context-menu";
 import { fetchCatalog, fetchPlayerState, fetchZone } from "../net/api";
 import type { Transport } from "../net/transport";
 import { buildSnapshot, type ClientSnapshot } from "../state/snapshot";
@@ -74,17 +75,6 @@ export async function loadSpriteAssets(fallback: AssetResolver): Promise<AssetRe
   } catch {
     return fallback;
   }
-}
-
-/** Tile donde soltar: el primer adyacente caminable (queda visible al lado del jugador
- *  y dentro del rango de crafting); si no hay, el tile propio. */
-function dropTargetTile(snapshot: ClientSnapshot): Position {
-  const p = snapshot.player.position;
-  for (const d of [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }]) {
-    const c = { x: p.x + d.x, y: p.y + d.y };
-    if (snapshot.tiles.find((t) => t.x === c.x && t.y === c.y)?.walkable) return c;
-  }
-  return p;
 }
 
 export function createGame(deps: GameDeps): Game {

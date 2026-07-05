@@ -1,4 +1,5 @@
-import type { Catalog, Command, ContextActionDef, Position, Tile } from "../contract";
+import type { Catalog, Command, ContextActionDef, ItemInstance, Position, Tile } from "../contract";
+import { INV_H, INV_W, inventoryCellsForItem } from "../hud/hud";
 import type { ClientSnapshot } from "../state/snapshot";
 import { chebyshev, type Visibility } from "../state/visibility";
 import { computeAvailableActions, type ActionTarget } from "./available";
@@ -31,7 +32,7 @@ export interface ContextMenuItem {
   id: string;
   label: string;
   hint?: string;
-  kind: "action" | "move" | "ui" | "mute";
+  kind: "action" | "move" | "ui" | "mute" | "info";
   command?: Command;
   uiIntent?: "inventory" | "thoughts" | "surface" | "crouch";
   /** Only set when `uiIntent === "surface"` — the world object id `input/mouse.ts`
@@ -44,6 +45,10 @@ export interface ContextMenuItem {
    * aggregate, superseding design.md Decision 2's flat-list presentation per
    * user playtest correction). Analogous to `surfaceId` above. */
   crouchAt?: Position;
+  /** Only set when `kind === "info"` — the first-person "Examinar" thought
+   * text, shown directly via `Ui.showThought` (item-context-menu change).
+   * Client-only: no `Command` is ever attached to an `"info"` entry. */
+  thought?: string;
 }
 
 export interface ContextMenuSection {
@@ -385,4 +390,266 @@ export function buildContextMenu(
   if (proximity === "penumbra") return buildPenumbraMenu(preview.pos);
   if (proximity === "unseen") return buildUnseenMenu();
   return buildReachableMenu(catalog, snapshot, preview, wireRef, proximity);
+}
+
+// ---------------------------------------------------------------------------
+// Per-item context menu (item-context-menu change): a SEPARATE, parallel
+// builder from `buildContextMenu` above — tapping/clicking an occupied bag,
+// hand, or mesa cell opens THIS menu instead of directly equipping/dropping
+// the item. `buildContextMenu`/`buildReachableMenu`/`buildSelfMenu` etc. are
+// untouched (spec R9.2).
+// ---------------------------------------------------------------------------
+
+export type ItemOrigin = "bag" | "hand" | "surface";
+
+/**
+ * Frontend equivalent of the backend's hand-footprint check (`coversHand` in
+ * `backend/src/domain/inventory.ts`, used by `handItems()`): true when ANY
+ * cell `item` occupies in the player's inventory grid coincides with a
+ * hand-slot cell sourced from `snapshot.handSlots.left`/`right` (never
+ * hardcoded — same discipline `renderInventoryGrid`'s hand-slot detection
+ * already follows). Reuses the existing pure `inventoryCellsForItem`
+ * (hud.ts), which already returns `[]` for anything not currently in
+ * `player_inventory` — so a mesa-origin item can never "cover" a hand slot.
+ */
+function coversHand(item: ItemInstance, catalog: Catalog, snapshot: ClientSnapshot): boolean {
+  const cells = inventoryCellsForItem(item, catalog);
+  const { left, right } = snapshot.handSlots;
+  return cells.some((c) => (c.x === left.x && c.y === left.y) || (c.x === right.x && c.y === right.y));
+}
+
+/**
+ * Derives which of the three menu-eligible origins `item` currently sits in
+ * (design.md Component 1) — `null` for anything else (world/pile/container/
+ * machine_slot), none of which are menu-eligible in this change.
+ */
+export function itemOrigin(item: ItemInstance, catalog: Catalog, snapshot: ClientSnapshot): ItemOrigin | null {
+  if (item.location.type === "surface") return "surface";
+  if (item.location.type === "player_inventory") return coversHand(item, catalog, snapshot) ? "hand" : "bag";
+  return null;
+}
+
+/**
+ * Tile donde soltar (Soltar / the old drag-off-cell "drop" behavior): el
+ * primer adyacente caminable (queda visible al lado del jugador y dentro del
+ * rango de crafting); si no hay, el tile propio. RELOCATED from
+ * `game/game.ts` (item-context-menu change, task 1.4) so this pure
+ * menu-builder can use it for Soltar too — `game.ts` now imports it from here
+ * instead of holding its own private copy.
+ */
+export function dropTargetTile(snapshot: ClientSnapshot): Position {
+  const p = snapshot.player.position;
+  for (const d of ORTHOGONAL_OFFSETS) {
+    const c = { x: p.x + d.x, y: p.y + d.y };
+    if (snapshot.tiles.find((t) => t.x === c.x && t.y === c.y)?.walkable) return c;
+  }
+  return p;
+}
+
+export type InventorySlot = { x: number; y: number; rotation: 0 | 90 };
+
+/** Set of `"x,y"` cells occupied by every inventory item EXCEPT `exceptId` —
+ * mirrors the backend's `occupiedSet`/`occupiedSetOnGrid` (inventory.ts),
+ * built here from `inventoryCellsForItem` instead of a second footprint
+ * implementation. */
+function inventoryOccupiedSet(catalog: Catalog, snapshot: ClientSnapshot, exceptId?: string): Set<string> {
+  const set = new Set<string>();
+  for (const it of snapshot.items) {
+    if (it.id === exceptId) continue;
+    for (const c of inventoryCellsForItem(it, catalog)) set.add(`${c.x},${c.y}`);
+  }
+  return set;
+}
+
+/** Mirrors the backend's `fitsOnGrid`/`fits` (inventory.ts) for the player's
+ * fixed 4x4 grid. */
+function fitsInInventory(set: Set<string>, x: number, y: number, w: number, h: number): boolean {
+  if (x < 0 || y < 0 || x + w > INV_W || y + h > INV_H) return false;
+  for (let dy = 0; dy < h; dy++) for (let dx = 0; dx < w; dx++) if (set.has(`${x + dx},${y + dy}`)) return false;
+  return true;
+}
+
+/** Mirrors the backend's private `coversHand(x, y, w, h)` (inventory.ts) —
+ * unrelated to (and not to be confused with) this file's own `coversHand`
+ * above, which checks a PLACED item against the hand slots, not a candidate
+ * placement rectangle. */
+function coversHandCell(x: number, y: number, w: number, h: number, snapshot: ClientSnapshot): boolean {
+  const { left, right } = snapshot.handSlots;
+  for (const slot of [left, right]) if (slot.x >= x && slot.x < x + w && slot.y >= y && slot.y < y + h) return true;
+  return false;
+}
+
+/**
+ * Mirrors the backend's `findFreeInventorySlot` (backend/src/domain/
+ * inventory.ts) read-only: first free 4x4 grid slot for `item`'s shape,
+ * trying rotation 0 then 90 when `rotatable && w !== h`, preferring
+ * non-hand-slot cells over hand-slot cells, and EXCLUDING the item's own
+ * currently-occupied cells (backend's `exceptId`) so re-storing an
+ * already-inventoried item never collides with itself. Returns `null` when
+ * no slot fits at all — Guardar is then omitted from the built menu.
+ */
+export function firstFreeInventorySlot(snapshot: ClientSnapshot, catalog: Catalog, item: ItemInstance): InventorySlot | null {
+  const def = catalog.items.find((i) => i.id === item.itemTypeId);
+  const w = def?.shape.w ?? 1;
+  const h = def?.shape.h ?? 1;
+  const set = inventoryOccupiedSet(catalog, snapshot, item.id);
+  const tries: Array<{ w: number; h: number; rotation: 0 | 90 }> = [{ w, h, rotation: 0 }];
+  if (def?.rotatable && w !== h) tries.push({ w: h, h: w, rotation: 90 });
+  for (const avoidHands of [true, false]) {
+    for (const t of tries) {
+      for (let y = 0; y < INV_H; y++) {
+        for (let x = 0; x < INV_W; x++) {
+          if (fitsInInventory(set, x, y, t.w, t.h) && (!avoidHands || !coversHandCell(x, y, t.w, t.h, snapshot))) {
+            return { x, y, rotation: t.rotation };
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/** `ownerId` for a Guardar `MoveItem { to: { type: "inventory", ... } }`
+ * payload: the item's own current inventory owner when already inventoried
+ * (a re-stow, e.g. rotate-adjacent-slot scenarios), else the current player
+ * (a hand- or mesa-origin item being stowed for the first time). */
+function inventoryOwnerId(item: ItemInstance, snapshot: ClientSnapshot): string {
+  return item.location.type === "player_inventory" ? item.location.playerId : snapshot.player.id;
+}
+
+/** First hand slot NOT covered by any currently-placed inventory item, or
+ * `null` when both are occupied — computed LOCALLY from `snapshot.handSlots`
+ * + `inventoryCellsForItem`, deliberately NOT `game.ts`'s `handsOccupied`
+ * (that helper lives in the DOM-composition layer; this pure builder must
+ * not depend on it, design.md Component 1). */
+function firstFreeHand(snapshot: ClientSnapshot, catalog: Catalog): "left" | "right" | null {
+  const isHandOccupied = (slot: Position) => snapshot.items.some((it) => inventoryCellsForItem(it, catalog).some((c) => c.x === slot.x && c.y === slot.y));
+  if (!isHandOccupied(snapshot.handSlots.left)) return "left";
+  if (!isHandOccupied(snapshot.handSlots.right)) return "right";
+  return null;
+}
+
+/** `Equipar` — bag or mesa origin only (never hand, already equipped), and
+ * only when a free hand slot exists (spec R2.3): a guaranteed-reject entry is
+ * omitted entirely rather than shown, so the gate is visible BEFORE the
+ * player selects it. */
+function equiparEntry(item: ItemInstance, catalog: Catalog, snapshot: ClientSnapshot): ContextMenuItem | null {
+  const hand = firstFreeHand(snapshot, catalog);
+  if (!hand) return null;
+  return { id: "equipar", label: "Equipar", kind: "action", command: { type: "MoveItem", itemInstanceId: item.id, to: { type: "hand", hand } } };
+}
+
+/** `Guardar` — hand or mesa origin only (never bag, already stored), and
+ * only when a free inventory slot exists (spec R2 table): omitted entirely
+ * when `firstFreeInventorySlot` returns `null` (full inventory). */
+function guardarEntry(item: ItemInstance, catalog: Catalog, snapshot: ClientSnapshot): ContextMenuItem | null {
+  const slot = firstFreeInventorySlot(snapshot, catalog, item);
+  if (!slot) return null;
+  return {
+    id: "guardar",
+    label: "Guardar",
+    kind: "action",
+    command: { type: "MoveItem", itemInstanceId: item.id, to: { type: "inventory", ownerId: inventoryOwnerId(item, snapshot), x: slot.x, y: slot.y, rotation: slot.rotation } },
+  };
+}
+
+/** `Soltar` — bag or hand origin only, NEVER mesa (spec R2.4/R5.4 — the
+ * backend's mesa-origin `DropItem` rejection carries no `thought` text, so
+ * this is a hard client-side gate, not a runtime fallback). Uses the
+ * relocated `dropTargetTile` heuristic unchanged (spec R5.1). */
+function soltarEntry(item: ItemInstance, snapshot: ClientSnapshot): ContextMenuItem {
+  return { id: "soltar", label: "Soltar", kind: "action", command: { type: "DropItem", itemInstanceId: item.id, to: dropTargetTile(snapshot) } };
+}
+
+/** `0 -> 90`, `90 -> 0` (spec R6.1/R6.2). Written fresh for this toggle
+ * idiom — `drag.ts`'s rotation handling PRESERVES rotation across a move, it
+ * is not a toggle, so it is not reused here (design.md Component 4). */
+function toggledRotation(rotation: number): 0 | 90 {
+  return rotation === 90 ? 0 : 90;
+}
+
+/** `Rotar` — only ever called for bag (`player_inventory`) or mesa
+ * (`surface`) origins (the caller already gates on `rotatable && origin !==
+ * "hand"`); returns `null` for any other location shape as a defensive
+ * no-op. */
+function rotarEntry(item: ItemInstance): ContextMenuItem | null {
+  const loc = item.location;
+  if (loc.type === "player_inventory") {
+    return {
+      id: "rotar",
+      label: "Rotar",
+      kind: "action",
+      command: { type: "MoveItem", itemInstanceId: item.id, to: { type: "inventory", ownerId: loc.playerId, x: loc.x, y: loc.y, rotation: toggledRotation(loc.rotation) } },
+    };
+  }
+  if (loc.type === "surface") {
+    return {
+      id: "rotar",
+      label: "Rotar",
+      kind: "action",
+      command: { type: "MoveItem", itemInstanceId: item.id, to: { type: "surface", surfaceId: loc.surfaceId, x: loc.x, y: loc.y, rotation: toggledRotation(loc.rotation) } },
+    };
+  }
+  return null;
+}
+
+/** `Examinar` — always present, always last (spec R4/R3.4). Client-only:
+ * shows the catalog's authored `observation` text via a `kind: "info"` entry
+ * (no `Command`), falling back to a generic first-person line when the
+ * catalog def carries no `observation` (spec R4.2 — untestable against real
+ * catalog data today, since every current item has authored text; covered by
+ * a synthetic fixture). */
+function examinarEntry(item: ItemInstance, catalog: Catalog): ContextMenuItem {
+  const def = catalog.items.find((i) => i.id === item.itemTypeId);
+  const name = def?.name ?? item.itemTypeId;
+  return { id: "examinar", label: "Examinar", kind: "info", thought: def?.observation ?? `Veo ${name} de cerca.` };
+}
+
+/**
+ * Property/origin-gated per-item menu (design.md Component 1, spec R2/R3).
+ * Gating + ordering matrix, primary action first, Examinar always last:
+ * - bag origin     -> Equipar, Rotar?, Soltar, Examinar
+ * - hand origin     -> Guardar, Soltar, Examinar
+ * - surface origin -> Guardar, Rotar?, Equipar, Examinar   (Soltar NEVER)
+ * Any entry excluded by its gate is simply omitted, never reordered around
+ * (spec R3.4). `origin === null` (not menu-eligible) defensively falls back
+ * to Examinar-only, so the menu is never empty — this fallback is not
+ * exercised by any wiring in this change (callers only invoke this for
+ * occupied bag/hand/mesa cells) but keeps the builder total.
+ */
+export function buildItemMenu(item: ItemInstance, catalog: Catalog, snapshot: ClientSnapshot): ContextMenu {
+  const origin = itemOrigin(item, catalog, snapshot);
+  const def = catalog.items.find((i) => i.id === item.itemTypeId);
+  const name = def?.name ?? item.itemTypeId;
+  const items: ContextMenuItem[] = [];
+
+  if (origin === "bag") {
+    const equipar = equiparEntry(item, catalog, snapshot);
+    if (equipar) items.push(equipar);
+    if (def?.rotatable) {
+      const rotar = rotarEntry(item);
+      if (rotar) items.push(rotar);
+    }
+    items.push(soltarEntry(item, snapshot));
+    items.push(examinarEntry(item, catalog));
+  } else if (origin === "hand") {
+    const guardar = guardarEntry(item, catalog, snapshot);
+    if (guardar) items.push(guardar);
+    items.push(soltarEntry(item, snapshot));
+    items.push(examinarEntry(item, catalog));
+  } else if (origin === "surface") {
+    const guardar = guardarEntry(item, catalog, snapshot);
+    if (guardar) items.push(guardar);
+    if (def?.rotatable) {
+      const rotar = rotarEntry(item);
+      if (rotar) items.push(rotar);
+    }
+    const equipar = equiparEntry(item, catalog, snapshot);
+    if (equipar) items.push(equipar);
+    items.push(examinarEntry(item, catalog));
+  } else {
+    items.push(examinarEntry(item, catalog));
+  }
+
+  return { title: name, sections: [{ title: name, items }] };
 }

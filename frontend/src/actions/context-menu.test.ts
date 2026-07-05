@@ -4,7 +4,7 @@ import type { Catalog, ItemInstance, Tile, WorldObject } from "../contract";
 import type { ClientSnapshot } from "../state/snapshot";
 import type { Visibility } from "../state/visibility";
 import type { ActionTarget } from "./available";
-import { buildContextMenu, classifyProximity, type WireTargetRef } from "./context-menu";
+import { buildContextMenu, buildItemMenu, classifyProximity, dropTargetTile, firstFreeInventorySlot, itemOrigin, type WireTargetRef } from "./context-menu";
 
 const catalog: Catalog = {
   catalogVersion: "test",
@@ -449,4 +449,293 @@ test("buildContextMenu: unseen target gets a single dim mute item that is never 
   assert.equal(menu.sections[0]?.dim, true);
   assert.deepEqual(menu.sections[0]?.items.map((i) => i.kind), ["mute"]);
   assert.equal(menu.sections[0]?.items[0]?.command, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// Per-item context menu (item-context-menu change): itemOrigin, buildItemMenu
+// gating/ordering matrix (spec R2/R3), Rotar payloads (R6), firstFreeInventorySlot,
+// Examinar fallback (R4.2), and dropTargetTile relocation parity.
+// ---------------------------------------------------------------------------
+
+const itemMenuCatalog: Catalog = {
+  catalogVersion: "test",
+  terrains: [{ id: "sand", name: "Arena", walkable: true, tags: ["ground"] }],
+  items: [
+    { id: "seed", name: "Semilla", description: "", shape: { w: 1, h: 1 }, rotatable: false, properties: {}, tags: [], observation: "Una semilla pequeña." },
+    { id: "hacha", name: "Hacha", description: "", shape: { w: 1, h: 2 }, rotatable: true, properties: {}, tags: [], observation: "Un hacha filosa." },
+    { id: "sin_obs", name: "Cosa sin nombre", description: "", shape: { w: 1, h: 1 }, rotatable: false, properties: {}, tags: [] },
+  ],
+  worldObjects: [],
+  knowledge: [],
+  actions: [],
+  research: [],
+};
+
+/** 4x4 hand slots at (0,0)/(3,0) — matches the real backend `HAND_LEFT`/`HAND_RIGHT`
+ * layout (backend/src/domain/inventory.ts), unlike the flat-list fixture above which
+ * doesn't exercise the real inventory grid geometry. */
+function makeItemSnapshot(overrides: Partial<ClientSnapshot> = {}): ClientSnapshot {
+  return {
+    zone: { id: "z1", width: 16, height: 12 },
+    visionRadius: 5,
+    tiles: [],
+    objects: [],
+    piles: [],
+    items: [],
+    player: { id: "p1", name: "Náufrago", position: { x: 5, y: 5 }, energy: 100, maxEnergy: 100, health: 100, maxHealth: 100, knowledge: [] },
+    handSlots: { left: { x: 0, y: 0 }, right: { x: 3, y: 0 } },
+    thoughtLog: [],
+    discovered: new Set<string>(),
+    catalogVersion: "test",
+    ...overrides,
+  };
+}
+
+/** Fills every cell of the 4x4 player inventory with a 1x1 blocker EXCEPT
+ * `freeCells`, so `firstFreeInventorySlot` tests can pin exact occupancy
+ * without hand-rolling 16 fixtures per test. */
+function fillInventoryExcept(freeCells: Array<{ x: number; y: number }>): ItemInstance[] {
+  const items: ItemInstance[] = [];
+  let id = 0;
+  for (let y = 0; y < 4; y++) {
+    for (let x = 0; x < 4; x++) {
+      if (freeCells.some((c) => c.x === x && c.y === y)) continue;
+      items.push({ id: `blocker-${id++}`, itemTypeId: "seed", location: { type: "player_inventory", playerId: "p1", x, y, rotation: 0 } });
+    }
+  }
+  return items;
+}
+
+// --- itemOrigin -------------------------------------------------------------
+
+test("itemOrigin: a player_inventory item NOT covering a hand slot is 'bag'", () => {
+  const item: ItemInstance = { id: "it1", itemTypeId: "seed", location: { type: "player_inventory", playerId: "p1", x: 1, y: 1, rotation: 0 } };
+  const s = makeItemSnapshot({ items: [item] });
+  assert.equal(itemOrigin(item, itemMenuCatalog, s), "bag");
+});
+
+test("itemOrigin: a player_inventory item covering a hand slot is 'hand' (coversHand via inventoryCellsForItem)", () => {
+  const item: ItemInstance = { id: "it1", itemTypeId: "seed", location: { type: "player_inventory", playerId: "p1", x: 0, y: 0, rotation: 0 } };
+  const s = makeItemSnapshot({ items: [item] });
+  assert.equal(itemOrigin(item, itemMenuCatalog, s), "hand");
+});
+
+test("itemOrigin: a surface item is 'surface' even at coordinates that would coincide with a hand slot (inventoryCellsForItem returns [] for non-inventory items)", () => {
+  const item: ItemInstance = { id: "it1", itemTypeId: "seed", location: { type: "surface", surfaceId: "table1", x: 0, y: 0, rotation: 0 } };
+  const s = makeItemSnapshot({ items: [item] });
+  assert.equal(itemOrigin(item, itemMenuCatalog, s), "surface");
+});
+
+test("itemOrigin: a world item is not menu-eligible (null)", () => {
+  const item: ItemInstance = { id: "it1", itemTypeId: "seed", location: { type: "world", zoneId: "z1", x: 2, y: 2 } };
+  const s = makeItemSnapshot({ items: [item] });
+  assert.equal(itemOrigin(item, itemMenuCatalog, s), null);
+});
+
+// --- buildItemMenu: R2 gating matrix + R3 ordering, per origin -------------
+
+test("buildItemMenu: bag origin, non-rotatable item -> [Equipar, Soltar, Examinar], no Rotar, Guardar never offered from bag", () => {
+  const item: ItemInstance = { id: "it1", itemTypeId: "seed", location: { type: "player_inventory", playerId: "p1", x: 1, y: 1, rotation: 0 } };
+  const s = makeItemSnapshot({ items: [item] });
+  const menu = buildItemMenu(item, itemMenuCatalog, s);
+  assert.deepEqual(menu.sections[0]?.items.map((i) => i.id), ["equipar", "soltar", "examinar"]);
+  assert.ok(!menu.sections[0]?.items.some((i) => i.id === "guardar"), "Guardar is never offered for bag origin (R2)");
+});
+
+test("buildItemMenu: bag origin, rotatable item -> [Equipar, Rotar, Soltar, Examinar]", () => {
+  const item: ItemInstance = { id: "it1", itemTypeId: "hacha", location: { type: "player_inventory", playerId: "p1", x: 1, y: 1, rotation: 0 } };
+  const s = makeItemSnapshot({ items: [item] });
+  const menu = buildItemMenu(item, itemMenuCatalog, s);
+  assert.deepEqual(menu.sections[0]?.items.map((i) => i.id), ["equipar", "rotar", "soltar", "examinar"]);
+});
+
+test("buildItemMenu: bag origin with both hands occupied -> Equipar is ABSENT (omitted at build time, not an unreachable rejection thought, spec R2.3)", () => {
+  const bagItem: ItemInstance = { id: "it1", itemTypeId: "seed", location: { type: "player_inventory", playerId: "p1", x: 1, y: 1, rotation: 0 } };
+  const leftHandItem: ItemInstance = { id: "it2", itemTypeId: "seed", location: { type: "player_inventory", playerId: "p1", x: 0, y: 0, rotation: 0 } };
+  const rightHandItem: ItemInstance = { id: "it3", itemTypeId: "seed", location: { type: "player_inventory", playerId: "p1", x: 3, y: 0, rotation: 0 } };
+  const s = makeItemSnapshot({ items: [bagItem, leftHandItem, rightHandItem] });
+  const menu = buildItemMenu(bagItem, itemMenuCatalog, s);
+  assert.deepEqual(menu.sections[0]?.items.map((i) => i.id), ["soltar", "examinar"], "Equipar simply omitted, remaining order unchanged");
+});
+
+test("buildItemMenu: hand origin never offers Rotar even for a rotatable item (D4) -> [Guardar, Soltar, Examinar]", () => {
+  const item: ItemInstance = { id: "it1", itemTypeId: "hacha", location: { type: "player_inventory", playerId: "p1", x: 0, y: 0, rotation: 0 } };
+  const s = makeItemSnapshot({ items: [item] });
+  const menu = buildItemMenu(item, itemMenuCatalog, s);
+  assert.deepEqual(menu.sections[0]?.items.map((i) => i.id), ["guardar", "soltar", "examinar"]);
+});
+
+test("buildItemMenu: hand origin, every OTHER cell occupied -> Guardar is still present, targeting the item's own current cell (exceptId excludes it from the occupied set, so it's the one slot always technically free for its own occupant)", () => {
+  const handItem: ItemInstance = { id: "it1", itemTypeId: "seed", location: { type: "player_inventory", playerId: "p1", x: 0, y: 0, rotation: 0 } };
+  const blockers = fillInventoryExcept([{ x: 0, y: 0 }]);
+  const s = makeItemSnapshot({ items: [handItem, ...blockers] });
+  const menu = buildItemMenu(handItem, itemMenuCatalog, s);
+  assert.deepEqual(menu.sections[0]?.items.map((i) => i.id), ["guardar", "soltar", "examinar"]);
+  const guardar = menu.sections[0]?.items.find((i) => i.id === "guardar");
+  assert.deepEqual(guardar?.command, { type: "MoveItem", itemInstanceId: "it1", to: { type: "inventory", ownerId: "p1", x: 0, y: 0, rotation: 0 } });
+});
+
+test("buildItemMenu: mesa origin, non-rotatable item -> [Guardar, Equipar, Examinar], Soltar unconditionally absent", () => {
+  const item: ItemInstance = { id: "it1", itemTypeId: "seed", location: { type: "surface", surfaceId: "table1", x: 0, y: 0, rotation: 0 } };
+  const s = makeItemSnapshot({ items: [item] });
+  const menu = buildItemMenu(item, itemMenuCatalog, s);
+  assert.deepEqual(menu.sections[0]?.items.map((i) => i.id), ["guardar", "equipar", "examinar"]);
+  assert.ok(!menu.sections[0]?.items.some((i) => i.id === "soltar"), "Soltar is NEVER offered for mesa origin (R2.4/R7.3)");
+});
+
+test("buildItemMenu: mesa origin, rotatable item -> [Guardar, Rotar, Equipar, Examinar] (D2/D5 resolved: Equipar included on mesa)", () => {
+  const item: ItemInstance = { id: "it1", itemTypeId: "hacha", location: { type: "surface", surfaceId: "table1", x: 0, y: 0, rotation: 0 } };
+  const s = makeItemSnapshot({ items: [item] });
+  const menu = buildItemMenu(item, itemMenuCatalog, s);
+  assert.deepEqual(menu.sections[0]?.items.map((i) => i.id), ["guardar", "rotar", "equipar", "examinar"]);
+});
+
+test("buildItemMenu: mesa origin with both hands occupied -> Equipar ABSENT, Soltar still absent", () => {
+  const mesaItem: ItemInstance = { id: "it1", itemTypeId: "seed", location: { type: "surface", surfaceId: "table1", x: 0, y: 0, rotation: 0 } };
+  const leftHandItem: ItemInstance = { id: "it2", itemTypeId: "seed", location: { type: "player_inventory", playerId: "p1", x: 0, y: 0, rotation: 0 } };
+  const rightHandItem: ItemInstance = { id: "it3", itemTypeId: "seed", location: { type: "player_inventory", playerId: "p1", x: 3, y: 0, rotation: 0 } };
+  const s = makeItemSnapshot({ items: [mesaItem, leftHandItem, rightHandItem] });
+  const menu = buildItemMenu(mesaItem, itemMenuCatalog, s);
+  assert.deepEqual(menu.sections[0]?.items.map((i) => i.id), ["guardar", "examinar"]);
+});
+
+test("buildItemMenu: mesa origin, inventory completely full -> Guardar AND Equipar both absent (only Examinar left for a non-rotatable item)", () => {
+  const mesaItem: ItemInstance = { id: "it1", itemTypeId: "seed", location: { type: "surface", surfaceId: "table1", x: 0, y: 0, rotation: 0 } };
+  const blockers = fillInventoryExcept([]);
+  const s = makeItemSnapshot({ items: [mesaItem, ...blockers] });
+  const menu = buildItemMenu(mesaItem, itemMenuCatalog, s);
+  assert.deepEqual(menu.sections[0]?.items.map((i) => i.id), ["examinar"]);
+});
+
+// --- Equipar payload (first free hand) --------------------------------------
+
+test("buildItemMenu: Equipar targets the first free hand (left before right)", () => {
+  const item: ItemInstance = { id: "it1", itemTypeId: "seed", location: { type: "player_inventory", playerId: "p1", x: 1, y: 1, rotation: 0 } };
+  const s = makeItemSnapshot({ items: [item] });
+  const menu = buildItemMenu(item, itemMenuCatalog, s);
+  const equipar = menu.sections[0]?.items.find((i) => i.id === "equipar");
+  assert.deepEqual(equipar?.command, { type: "MoveItem", itemInstanceId: "it1", to: { type: "hand", hand: "left" } });
+});
+
+test("buildItemMenu: Equipar targets the right hand when the left is already occupied", () => {
+  const bagItem: ItemInstance = { id: "it1", itemTypeId: "seed", location: { type: "player_inventory", playerId: "p1", x: 1, y: 1, rotation: 0 } };
+  const leftHandItem: ItemInstance = { id: "it2", itemTypeId: "seed", location: { type: "player_inventory", playerId: "p1", x: 0, y: 0, rotation: 0 } };
+  const s = makeItemSnapshot({ items: [bagItem, leftHandItem] });
+  const menu = buildItemMenu(bagItem, itemMenuCatalog, s);
+  const equipar = menu.sections[0]?.items.find((i) => i.id === "equipar");
+  assert.deepEqual(equipar?.command, { type: "MoveItem", itemInstanceId: "it1", to: { type: "hand", hand: "right" } });
+});
+
+// --- Soltar payload (dropTargetTile reuse) ----------------------------------
+
+test("buildItemMenu: Soltar dispatches DropItem to dropTargetTile(snapshot)'s heuristic target", () => {
+  const item: ItemInstance = { id: "it1", itemTypeId: "seed", location: { type: "player_inventory", playerId: "p1", x: 1, y: 1, rotation: 0 } };
+  const s = makeItemSnapshot({
+    items: [item],
+    tiles: [makeTile(5, 5, "sand", false), makeTile(6, 5, "sand", true)],
+  });
+  const menu = buildItemMenu(item, itemMenuCatalog, s);
+  const soltar = menu.sections[0]?.items.find((i) => i.id === "soltar");
+  assert.deepEqual(soltar?.command, { type: "DropItem", itemInstanceId: "it1", to: { x: 6, y: 5 } });
+});
+
+// --- Rotar payload (R6.1/R6.2) — own toggle logic, both directions ----------
+
+test("buildItemMenu: Rotar toggles inventory rotation 0 -> 90", () => {
+  const item: ItemInstance = { id: "it1", itemTypeId: "hacha", location: { type: "player_inventory", playerId: "p1", x: 1, y: 1, rotation: 0 } };
+  const s = makeItemSnapshot({ items: [item] });
+  const menu = buildItemMenu(item, itemMenuCatalog, s);
+  const rotar = menu.sections[0]?.items.find((i) => i.id === "rotar");
+  assert.deepEqual(rotar?.command, { type: "MoveItem", itemInstanceId: "it1", to: { type: "inventory", ownerId: "p1", x: 1, y: 1, rotation: 90 } });
+});
+
+test("buildItemMenu: Rotar toggles inventory rotation 90 -> 0", () => {
+  const item: ItemInstance = { id: "it1", itemTypeId: "hacha", location: { type: "player_inventory", playerId: "p1", x: 1, y: 1, rotation: 90 } };
+  const s = makeItemSnapshot({ items: [item] });
+  const menu = buildItemMenu(item, itemMenuCatalog, s);
+  const rotar = menu.sections[0]?.items.find((i) => i.id === "rotar");
+  assert.deepEqual(rotar?.command, { type: "MoveItem", itemInstanceId: "it1", to: { type: "inventory", ownerId: "p1", x: 1, y: 1, rotation: 0 } });
+});
+
+test("buildItemMenu: Rotar toggles surface rotation 0 -> 90", () => {
+  const item: ItemInstance = { id: "it1", itemTypeId: "hacha", location: { type: "surface", surfaceId: "table1", x: 2, y: 0, rotation: 0 } };
+  const s = makeItemSnapshot({ items: [item] });
+  const menu = buildItemMenu(item, itemMenuCatalog, s);
+  const rotar = menu.sections[0]?.items.find((i) => i.id === "rotar");
+  assert.deepEqual(rotar?.command, { type: "MoveItem", itemInstanceId: "it1", to: { type: "surface", surfaceId: "table1", x: 2, y: 0, rotation: 90 } });
+});
+
+test("buildItemMenu: Rotar toggles surface rotation 90 -> 0", () => {
+  const item: ItemInstance = { id: "it1", itemTypeId: "hacha", location: { type: "surface", surfaceId: "table1", x: 2, y: 0, rotation: 90 } };
+  const s = makeItemSnapshot({ items: [item] });
+  const menu = buildItemMenu(item, itemMenuCatalog, s);
+  const rotar = menu.sections[0]?.items.find((i) => i.id === "rotar");
+  assert.deepEqual(rotar?.command, { type: "MoveItem", itemInstanceId: "it1", to: { type: "surface", surfaceId: "table1", x: 2, y: 0, rotation: 0 } });
+});
+
+// --- firstFreeInventorySlot --------------------------------------------------
+
+test("firstFreeInventorySlot: fits rotation 0 first when it fits, without trying rotation 90", () => {
+  const s = makeItemSnapshot({ items: [] }); // fully empty 4x4, hands at (0,0)/(3,0)
+  const candidate: ItemInstance = { id: "candidate", itemTypeId: "hacha", location: { type: "world", zoneId: "z1", x: 0, y: 0 } };
+  const slot = firstFreeInventorySlot(s, itemMenuCatalog, candidate);
+  assert.deepEqual(slot, { x: 1, y: 0, rotation: 0 }, "first non-hand cell where a 1x2 vertical footprint fits");
+});
+
+test("firstFreeInventorySlot: falls back to rotation 90 when rotation 0 fits nowhere in the grid", () => {
+  // Only (2,3) and (3,3) are free — no vertical 1x2 pair fits anywhere (every
+  // (x,y)/(x,y+1) pair has at least one occupied cell), but the horizontal
+  // 2x1 pair at (2,3)-(3,3) does.
+  const blockers = fillInventoryExcept([{ x: 2, y: 3 }, { x: 3, y: 3 }]);
+  const s = makeItemSnapshot({ items: blockers });
+  const candidate: ItemInstance = { id: "candidate", itemTypeId: "hacha", location: { type: "world", zoneId: "z1", x: 0, y: 0 } };
+  const slot = firstFreeInventorySlot(s, itemMenuCatalog, candidate);
+  assert.deepEqual(slot, { x: 2, y: 3, rotation: 90 });
+});
+
+test("firstFreeInventorySlot: excludes the item's OWN currently-occupied cells (exceptId) so re-stowing doesn't collide with itself", () => {
+  const ownHacha: ItemInstance = { id: "it-hacha-self", itemTypeId: "hacha", location: { type: "player_inventory", playerId: "p1", x: 0, y: 1, rotation: 0 } };
+  const blockers = fillInventoryExcept([{ x: 0, y: 1 }, { x: 0, y: 2 }]);
+  const s = makeItemSnapshot({ items: [ownHacha, ...blockers] });
+  const slot = firstFreeInventorySlot(s, itemMenuCatalog, ownHacha);
+  assert.deepEqual(slot, { x: 0, y: 1, rotation: 0 }, "the item's own two cells are excluded from the occupied set, so its current slot is reported free");
+});
+
+test("firstFreeInventorySlot: returns null when the entire 4x4 grid is occupied by other items", () => {
+  const blockers = fillInventoryExcept([]);
+  const s = makeItemSnapshot({ items: blockers });
+  const candidate: ItemInstance = { id: "candidate", itemTypeId: "seed", location: { type: "world", zoneId: "z1", x: 0, y: 0 } };
+  assert.equal(firstFreeInventorySlot(s, itemMenuCatalog, candidate), null);
+});
+
+// --- Examinar fallback (R4.2) ------------------------------------------------
+
+test("buildItemMenu: Examinar uses the catalog's authored observation text, no Command attached", () => {
+  const item: ItemInstance = { id: "it1", itemTypeId: "seed", location: { type: "player_inventory", playerId: "p1", x: 1, y: 1, rotation: 0 } };
+  const s = makeItemSnapshot({ items: [item] });
+  const menu = buildItemMenu(item, itemMenuCatalog, s);
+  const examinar = menu.sections[0]?.items.find((i) => i.id === "examinar");
+  assert.equal(examinar?.kind, "info");
+  assert.equal(examinar?.thought, "Una semilla pequeña.");
+  assert.equal(examinar?.command, undefined, "Examinar is client-only, never dispatches a Command (R4.1)");
+});
+
+test("buildItemMenu: Examinar falls back to a generic thought when the catalog def has no authored observation (R4.2, synthetic fixture — no current catalog item exercises this)", () => {
+  const item: ItemInstance = { id: "it1", itemTypeId: "sin_obs", location: { type: "player_inventory", playerId: "p1", x: 1, y: 1, rotation: 0 } };
+  const s = makeItemSnapshot({ items: [item] });
+  const menu = buildItemMenu(item, itemMenuCatalog, s);
+  const examinar = menu.sections[0]?.items.find((i) => i.id === "examinar");
+  assert.equal(examinar?.thought, "Veo Cosa sin nombre de cerca.");
+});
+
+// --- dropTargetTile relocation parity ---------------------------------------
+
+test("dropTargetTile: returns the first walkable orthogonal neighbor of the player", () => {
+  const s = makeItemSnapshot({ tiles: [makeTile(5, 5, "sand", false), makeTile(6, 5, "sand", true), makeTile(4, 5, "sand", true)] });
+  assert.deepEqual(dropTargetTile(s), { x: 6, y: 5 });
+});
+
+test("dropTargetTile: falls back to the player's own tile when no orthogonal neighbor is walkable", () => {
+  const s = makeItemSnapshot({ tiles: [] }); // no tiles at all => no neighbor found walkable
+  assert.deepEqual(dropTargetTile(s), { x: 5, y: 5 });
 });
