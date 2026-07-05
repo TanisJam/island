@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { Catalog, ItemInstance, Thought } from "../contract";
+import type { Catalog, ItemInstance, Position, Thought } from "../contract";
 import type { ClientSnapshot } from "../state/snapshot";
 import {
   CELL_GAP_PX,
@@ -602,5 +602,46 @@ test("renderCrouchFrame: properties/tags are revealed on click when a matching k
     itemsArea.children[0]!.click();
     const infoStrip = frame.children.find((c) => c.classes.has("crouch-frame-info"))!;
     assert.ok(infoStrip.children.some((c) => c.classes.has("crouch-props")), "unlocked knowledge alone reveals properties, even with an empty observed set and no onObserve handler");
+  });
+});
+
+// --- "Probar combinación" button (crouch-crafting Slice B2, design.md
+// Decision 3 / amendment #2857) --------------------------------------------
+
+test("renderCrouchFrame: 'Probar combinación' is ABSENT when the tile has fewer than 2 items", () => {
+  withFakeDocument(() => {
+    const one = crouchSnapshot([worldItemAt("it1", "rama", 5, 5)]);
+    const frameWithOne = renderCrouchFrame(crouchCatalog, one, CROUCH_POS, noopHandlers, createObservedStore()) as unknown as FakeCellElement;
+    assert.ok(!frameWithOne.children.some((c) => c.classes.has("crouch-frame-try")), "1 item: no button");
+
+    const empty = crouchSnapshot([]);
+    const frameEmpty = renderCrouchFrame(crouchCatalog, empty, CROUCH_POS, noopHandlers, createObservedStore()) as unknown as FakeCellElement;
+    assert.ok(!frameEmpty.children.some((c) => c.classes.has("crouch-frame-try")), "0 items: no button");
+  });
+});
+
+test("renderCrouchFrame: 'Probar combinación' is PRESENT whenever the tile has >=2 items, regardless of whether they look related", () => {
+  withFakeDocument(() => {
+    const a = worldItemAt("it1", "small_stone", 5, 5);
+    const b = worldItemAt("it2", "rama", 5, 5);
+    const snapshot = crouchSnapshot([a, b]);
+    const frame = renderCrouchFrame(crouchCatalog, snapshot, CROUCH_POS, noopHandlers, createObservedStore()) as unknown as FakeCellElement;
+    const button = frame.children.find((c) => c.classes.has("crouch-frame-try"));
+    assert.ok(button, "2 unrelated pieces: the button is present and selectable");
+    assert.equal(button!.textContent, "Probar combinación");
+  });
+});
+
+test("renderCrouchFrame: clicking 'Probar combinación' dispatches handlers.onTryCombination with the EXAMINED tile's position", () => {
+  withFakeDocument(() => {
+    const a = worldItemAt("it1", "small_stone", 5, 5);
+    const b = worldItemAt("it2", "rama", 5, 5);
+    const snapshot = crouchSnapshot([a, b]);
+    const calls: Position[] = [];
+    const handlers: HudHandlers = { ...noopHandlers, onTryCombination: (pos) => calls.push(pos) };
+    const frame = renderCrouchFrame(crouchCatalog, snapshot, CROUCH_POS, handlers, createObservedStore()) as unknown as FakeCellElement;
+    const button = frame.children.find((c) => c.classes.has("crouch-frame-try"))!;
+    button.click();
+    assert.deepEqual(calls, [CROUCH_POS], "dispatches with the examined tile's own position, not the player's");
   });
 });

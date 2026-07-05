@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { Catalog, ItemInstance } from "../contract";
+import type { Catalog, Event, ItemInstance, Position } from "../contract";
 import type { ClientSnapshot } from "../state/snapshot";
 import { createStore } from "../state/store";
 import { createDomUi } from "./ui";
@@ -241,5 +241,56 @@ test("createDomUi + toggleCrouch: opening a fresh crouch window never carries ov
 
     const infoAfterReopen = findCrouchFrame(root).find((el) => el.classes.has("crouch-frame-info"))!;
     assert.ok(!infoAfterReopen.find((el) => el.classes.has("crouch-props")), "a freshly reopened window starts unselected, never bleeding a stale selection");
+  });
+});
+
+test("createDomUi + toggleCrouch integration: clicking 'Probar combinación' dispatches TryCombination-shaped feedback, the marco stays open, and the fed-back thought reaches the player (crouch-crafting Slice B2)", () => {
+  withFakeDom((root) => {
+    const a = worldItemAt("it1", "small_stone", CROUCH_POS.x, CROUCH_POS.y);
+    const b = worldItemAt("it2", "rama", CROUCH_POS.x, CROUCH_POS.y);
+    const snapshot = makeSnapshot([a, b]);
+    const store = createStore(snapshot);
+
+    const tryCalls: Position[] = [];
+    const handlers: HudHandlers = {
+      onEquip: () => {},
+      onDrop: () => {},
+      onObserve: () => {},
+      // Mirrors `game/game.ts`'s real wiring: dispatch `TryCombination`
+      // (recorded here instead of sent over a real Transport) and then
+      // `store.ingest` the command RESPONSE's events — exactly the sequence
+      // `sendCommand` runs after an accepted result.
+      onTryCombination: (pos) => {
+        tryCalls.push(pos);
+        const events: Event[] = [
+          { type: "ThoughtAdded", thought: { id: "t1", text: "Me falta algo: algo para atar.", kind: "observation", timestamp: 1 } },
+        ];
+        store.ingest(events);
+      },
+    };
+
+    const ui = createDomUi();
+    ui.mount(store, catalog, handlers);
+    ui.toggleCrouch(CROUCH_POS);
+
+    const button = findCrouchFrame(root).find((el) => el.classes.has("crouch-frame-try"))!;
+    fire(button, "click");
+
+    assert.deepEqual(tryCalls, [CROUCH_POS], "dispatches with method:crouch's target — the EXAMINED tile's position");
+
+    // The marco MUST still be open after the response's own store
+    // notification rerenders everything (same invariant `openCrouchAt`
+    // already guards for the Observe flow).
+    const frameAfter = findCrouchFrame(root);
+    assert.ok(frameAfter, "the crouch marco stays open across the TryCombination response");
+
+    // The graded feedback thought must be visible to the player — surfaced
+    // via the same thoughtLog the "Ver mis pensamientos" window renders.
+    ui.toggleThoughts();
+    const thoughtsList = root.find((el) => el.classes.has("thoughts-list"))!;
+    assert.ok(
+      thoughtsList.children.some((row) => row.textContent === "Me falta algo: algo para atar."),
+      "the graded feedback thought is reflected back to the player",
+    );
   });
 });

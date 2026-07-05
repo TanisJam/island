@@ -544,6 +544,16 @@ body {
   color: var(--recuerdo);
 }
 
+/* "Probar combinación" (crouch-crafting Slice B2) — reuses `.act`'s text/
+ * hover treatment but centered and bordered so it reads as a real button
+ * inside the marco, not a context-menu row. */
+.crouch-frame-try {
+  text-align: center;
+  border: 1px solid var(--linea);
+  border-radius: 6px;
+  background: rgba(240, 162, 78, 0.12);
+}
+
 .sect-h {
   font-family: "Silkscreen";
   font-size: 8px;

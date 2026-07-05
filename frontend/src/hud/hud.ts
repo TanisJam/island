@@ -25,6 +25,15 @@ export type HudHandlers = {
    * `renderCrouchFrame`'s per-glyph click affordance. Optional so callers/
    * tests that don't touch the crouch lens don't need to stub it. */
   onObserve?: (itemInstanceId: string) => void;
+  /** Dispatches `TryCombination { method: "crouch", target: { kind: "tile",
+   * x, y } }` for the framed tile (design.md Decision 3, crouch-crafting
+   * Slice B2) — only used by `renderCrouchFrame`'s "Probar combinación"
+   * button, which `game/game.ts` wires to `sendCommand`, mirroring
+   * `onObserve` exactly. Takes the tile `Position` rather than a pre-built
+   * target so `game.ts` stays the single place that knows the wire shape.
+   * Optional so callers/tests that don't touch the crouch lens don't need to
+   * stub it. */
+  onTryCombination?: (pos: Position) => void;
 };
 
 /** 4x4 player inventory grid dimensions (mirrors the backend's
@@ -496,6 +505,14 @@ function buildCrouchGlyph(catalog: Catalog, group: CrouchItemGroup, onPick: (rep
  * (`state/observed.ts`'s `isRevealed`), its `properties`/`tags`. Read-only —
  * no `s.inventories` entry, no item relocation, no new backend command.
  *
+ * Once this tile carries >=2 loose items, a "Probar combinación" button
+ * appears (design.md Decision 3, spec Slice B) dispatching
+ * `handlers.onTryCombination(pos)` — the backend grades the attempt and
+ * ALWAYS returns feedback (via `ThoughtAdded` events flowing through the
+ * normal command response -> `store.ingest` -> thought teletype), so the
+ * button is offered regardless of whether the pieces actually match a
+ * recipe; below 2 items there's nothing to combine and it's omitted.
+ *
  * `selectedItemTypeId` + `onSelect` persist WHICH item's info is shown ACROSS
  * re-renders (crouch-crafting fix): this function is called fresh on every
  * store notification, including the one the `Observe` command's OWN response
@@ -556,6 +573,20 @@ export function renderCrouchFrame(
       showCrouchInfo(catalog, snapshot, observed, infoStrip, representative);
     });
     itemsArea.appendChild(glyph);
+  }
+
+  // "Probar combinación" (design.md Decision 3, spec Slice B): ALWAYS offered
+  // once >=2 pieces sit on this tile, regardless of whether any recipe
+  // matches — the backend's `tryCombination` grades the attempt and always
+  // returns feedback, so the button must never disappear just because the
+  // pieces "don't look right" together. Below 2 pieces there's nothing to
+  // combine, so no button.
+  if (items.length >= 2) {
+    const tryButton = document.createElement("button");
+    tryButton.className = "act crouch-frame-try";
+    tryButton.textContent = "Probar combinación";
+    tryButton.addEventListener("click", () => handlers.onTryCombination?.(pos));
+    frame.appendChild(tryButton);
   }
 
   // Re-populate the info strip for the PERSISTED selection (see docstring

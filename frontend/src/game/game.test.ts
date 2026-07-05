@@ -4,6 +4,7 @@ import type { Catalog, CommandEnvelope, CommandResult, Event } from "../contract
 import type { PlayerStateResponse, ZoneSnapshotResponse } from "../net/api";
 import type { Transport } from "../net/transport";
 import type { Ui } from "../hud/ui";
+import type { HudHandlers } from "../hud/hud";
 import { createGame, loadSpriteAssets } from "./game";
 import { createEmojiAssets } from "../render/assets";
 
@@ -179,6 +180,106 @@ test("createGame().start(): boots, builds a store, and one loop tick renders wit
   try {
     const game = createGame({ canvas: fakeCanvas(), transport: fakeTransport(), ui: fakeUi() });
     await assert.doesNotReject(() => game.start());
+  } finally {
+    globalThis.fetch = ORIGINAL_FETCH;
+    globalThis.requestAnimationFrame = ORIGINAL_RAF;
+    globalThis.cancelAnimationFrame = ORIGINAL_CAF;
+    (globalThis as { window?: unknown }).window = ORIGINAL_WINDOW;
+  }
+});
+
+// --- sendCommand's TryCombination-scoped teletype hookup (crouch-crafting
+// Slice B2, fresh-context review fix). `fakeUi().mount` is a no-op, so these
+// tests capture the REAL `HudHandlers` game.ts builds by overriding `mount`
+// to stash it, then invoke a handler directly and flush the fire-and-forget
+// `sendCommand` promise it triggers (a single macrotask tick is enough since
+// `fakeTransport`-shaped sends here resolve immediately, with no real I/O
+// delay). -----------------------------------------------------------------
+
+function flushMicrotasks(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** Boots a `Game` with a transport whose accepted response is entirely
+ * driven by `respond`, and a `ui` that stashes the real `HudHandlers` (so the
+ * test can invoke one directly) and records every `showThought` call. */
+async function bootCapturing(respond: (env: CommandEnvelope) => CommandResult): Promise<{ handlers: HudHandlers; showThoughtCalls: string[] }> {
+  let handlers: HudHandlers | undefined;
+  const showThoughtCalls: string[] = [];
+  const ui: Ui = {
+    ...fakeUi(),
+    mount: (_store, _catalog, h) => {
+      handlers = h;
+    },
+    showThought: (text) => showThoughtCalls.push(text),
+  };
+  const transport: Transport = { send: async (env) => respond(env), onEvents: () => () => {} };
+  const game = createGame({ canvas: fakeCanvas(), transport, ui });
+  await game.start();
+  if (!handlers) throw new Error("Ui.mount was never called — boot must have failed silently");
+  return { handlers, showThoughtCalls };
+}
+
+test("game.ts sendCommand: a TryCombination accepted response's graded ThoughtAdded feedback reaches the teletype via ui.showThought", async () => {
+  stubBootFetch();
+  stubSingleTickRaf();
+  stubDocument();
+  stubWindowGlobal();
+  try {
+    const { handlers, showThoughtCalls } = await bootCapturing((env) =>
+      env.command.type === "TryCombination"
+        ? {
+            clientCommandId: env.clientCommandId,
+            accepted: true,
+            events: [{ type: "ThoughtAdded", thought: { id: "t1", text: "Me falta algo: algo para atar.", kind: "observation", timestamp: 1 } }],
+          }
+        : { clientCommandId: env.clientCommandId, accepted: true, events: [] },
+    );
+
+    handlers.onTryCombination?.({ x: 0, y: 0 });
+    await flushMicrotasks();
+
+    assert.deepEqual(showThoughtCalls, ["Me falta algo: algo para atar."], "the graded feedback thought is surfaced to the teletype");
+  } finally {
+    globalThis.fetch = ORIGINAL_FETCH;
+    globalThis.requestAnimationFrame = ORIGINAL_RAF;
+    globalThis.cancelAnimationFrame = ORIGINAL_CAF;
+    (globalThis as { window?: unknown }).window = ORIGINAL_WINDOW;
+  }
+});
+
+test("game.ts sendCommand REGRESSION GUARD: a non-TryCombination accepted command's ThoughtAdded is NOT written to the teletype by sendCommand itself — inventoryAddedMessage (ui.ts's own rerender) stays the sole teletype writer for those commands", async () => {
+  stubBootFetch();
+  stubSingleTickRaf();
+  stubDocument();
+  stubWindowGlobal();
+  try {
+    const { handlers, showThoughtCalls } = await bootCapturing((env) =>
+      env.command.type === "Observe"
+        ? {
+            clientCommandId: env.clientCommandId,
+            accepted: true,
+            // Shaped like a gather/craft action's real response (e.g.
+            // `cut_tree_crude`/`improvise_crude_tool`): pairs an inventory
+            // add with a success thought. Before the fix, game.ts's GENERAL
+            // accepted-path hookup would have shown this thought and
+            // clobbered `inventoryAddedMessage`'s "Guardé..." confirmation
+            // that `ui.ts`'s own rerender writes for the SAME response.
+            events: [
+              {
+                type: "ItemAddedToInventory",
+                item: { id: "it1", itemTypeId: "small_stone", location: { type: "player_inventory", playerId: "p1", x: 0, y: 0, rotation: 0 } },
+              },
+              { type: "ThoughtAdded", thought: { id: "t2", text: "Encontré algo útil.", kind: "observation", timestamp: 1 } },
+            ],
+          }
+        : { clientCommandId: env.clientCommandId, accepted: true, events: [] },
+    );
+
+    handlers.onObserve?.("it1");
+    await flushMicrotasks();
+
+    assert.deepEqual(showThoughtCalls, [], "sendCommand must not call showThought itself for a non-TryCombination command, even when its response carries a ThoughtAdded");
   } finally {
     globalThis.fetch = ORIGINAL_FETCH;
     globalThis.requestAnimationFrame = ORIGINAL_RAF;

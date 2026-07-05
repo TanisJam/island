@@ -1,4 +1,4 @@
-import type { Command, CommandEnvelope, CommandResult, Position } from "../contract";
+import type { Command, CommandEnvelope, CommandResult, Event, Position } from "../contract";
 import { fetchCatalog, fetchPlayerState, fetchZone } from "../net/api";
 import type { Transport } from "../net/transport";
 import { buildSnapshot, type ClientSnapshot } from "../state/snapshot";
@@ -129,6 +129,35 @@ export function createGame(deps: GameDeps): Game {
       // also what a future pushed-event Transport would call. No manual
       // renderHud call here — Ui reacts to Store notifications on its own.
       store.ingest(result.events);
+
+      // Surface `TryCombination`'s own `ThoughtAdded` feedback in the
+      // teletype (crouch-crafting Slice B2) — its graded hint ("Me falta
+      // algo...") or ready-craft success thought would otherwise only reach
+      // `thoughtLog` (visible later via "Ver mis pensamientos") with no
+      // immediate on-screen text after clicking "Probar combinación".
+      //
+      // DELIBERATELY SCOPED to `TryCombination` only (fresh-context review
+      // fix, crouch-crafting Slice B2): `store.ingest` above runs
+      // SYNCHRONOUSLY and re-renders every open window, including `ui.ts`'s
+      // `rerender()`, which already writes the teletype via
+      // `inventoryAddedMessage(...)` ("Guardé X en la mochila") whenever a
+      // command's events add an item to the inventory. `showThought` is
+      // last-write-wins (no queue) — a GENERAL accepted-path hook here (any
+      // command, any `ThoughtAdded`) would clobber that confirmation for the
+      // majority of gather/craft actions (`cut_tree_crude`,
+      // `improvise_crude_tool`, `separate_wreckage_crude`,
+      // `discover_binding`, ...), which all pair `add_item` with
+      // `thoughts.success` — a real regression to shipped `main` behavior.
+      // For a `TryCombination` READY craft that also adds its output to the
+      // inventory, showing the recipe's success thought OVER the
+      // inventory-added line is the desired outcome (arguably more
+      // informative), so no special-casing is needed within this branch.
+      if (command.type === "TryCombination") {
+        const isThoughtAdded = (e: Event): e is Extract<Event, { type: "ThoughtAdded" }> => e.type === "ThoughtAdded";
+        const thoughtEvents = result.events.filter(isThoughtAdded);
+        const lastThought = thoughtEvents[thoughtEvents.length - 1];
+        if (lastThought) deps.ui.showThought(lastThought.thought.text);
+      }
     };
 
     // Drag controller (design.md "Drag engine (pure + DOM)"): constructed
@@ -161,6 +190,9 @@ export function createGame(deps: GameDeps): Game {
       },
       onObserve: (itemInstanceId) => {
         void sendCommand({ type: "Observe", target: { kind: "item", id: itemInstanceId } });
+      },
+      onTryCombination: (pos) => {
+        void sendCommand({ type: "TryCombination", method: "crouch", target: { kind: "tile", x: pos.x, y: pos.y } });
       },
       bindDrag: dragController.bindCell,
       bindGrid: dragController.bindGrid,
