@@ -1,6 +1,7 @@
 import type { Catalog, Command, ItemInstance, Position, Tile, WorldObject } from "../contract";
 import { type ActionTarget } from "../actions/available";
 import { buildContextMenu, targetName, type WireTargetRef } from "../actions/context-menu";
+import { dispatchMenuItem } from "../actions/context-menu-dispatch";
 import { cameraOffset, screenToTile, type CanvasRect } from "../render/camera";
 import type { Frame } from "../view/viewstate";
 import type { ClientSnapshot } from "../state/snapshot";
@@ -258,45 +259,28 @@ export function createInputController(deps: InputDeps): InputController {
       return;
     }
 
-    deps.ui.openContextMenu(menu, at, (item) => {
-      try {
-        if ((item.kind === "action" || item.kind === "move") && item.command) {
-          if (item.kind === "move") selection = null;
-          void deps.sendCommand(item.command);
-          return;
-        }
-        if (item.kind === "ui") {
-          // Explicit switch (NOT a binary ternary) — deliberately restructured
-          // from the previous `thoughts ? toggleThoughts() : toggleInventory()`
-          // form, which would have silently misrouted `uiIntent === "surface"`
-          // into `toggleInventory()` if a "surface" branch had merely been
-          // appended to it (crafting-surface change, tasks.md Phase 12.2).
-          switch (item.uiIntent) {
-            case "thoughts":
-              deps.ui.toggleThoughts();
-              break;
-            case "surface":
-              if (item.surfaceId) deps.ui.toggleSurface(item.surfaceId);
-              break;
-            case "crouch":
-              // Per-tile trigger (crouch-crafting rework): `item.crouchAt`
-              // always carries the target tile position for this uiIntent
-              // (`context-menu.ts`'s `crouchLensItem`) — defensive guard
-              // mirrors the `surface` case's `item.surfaceId` check above.
-              if (item.crouchAt) deps.ui.toggleCrouch(item.crouchAt);
-              break;
-            case "inventory":
-            default:
-              deps.ui.toggleInventory();
-              break;
-          }
-        }
-        // item.kind === "mute" never reaches here — `hud/ui.ts`'s
-        // `renderContextMenuBody` never wires a click listener for it.
-      } catch {
-        showThought("Algo salió mal. Mejor intento otra cosa.");
-      }
-    });
+    // Dispatch extracted to `actions/context-menu-dispatch.ts` (item-context-menu
+    // change, design.md Component 2) so both this canvas menu and the new
+    // per-item menu share the exact same routing. Canvas menus never emit
+    // `"info"` entries, so this is byte-for-byte the same routing as before
+    // the extraction. NOTE the deliberate split: `onError` uses the raw
+    // `showThought` imported from `hud/hud.ts` (the pre-existing fallback
+    // path), NOT `deps.ui.showThought` — kept exactly as it was to avoid any
+    // behavior change during the extraction.
+    deps.ui.openContextMenu(menu, at, (item) =>
+      dispatchMenuItem(item, {
+        sendCommand: deps.sendCommand,
+        toggleInventory: deps.ui.toggleInventory,
+        toggleThoughts: deps.ui.toggleThoughts,
+        toggleSurface: deps.ui.toggleSurface,
+        toggleCrouch: deps.ui.toggleCrouch,
+        showThought: (t) => deps.ui.showThought(t),
+        onMove: () => {
+          selection = null;
+        },
+        onError: () => showThought("Algo salió mal. Mejor intento otra cosa."),
+      }),
+    );
   }
 
   async function onCanvasClick(ev: MouseEvent): Promise<void> {
