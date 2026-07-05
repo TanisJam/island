@@ -519,9 +519,9 @@ function inventoryOwnerId(item: ItemInstance, snapshot: ClientSnapshot): string 
 
 /** First hand slot NOT covered by any currently-placed inventory item, or
  * `null` when both are occupied — computed LOCALLY from `snapshot.handSlots`
- * + `inventoryCellsForItem`, deliberately NOT `game.ts`'s `handsOccupied`
- * (that helper lives in the DOM-composition layer; this pure builder must
- * not depend on it, design.md Component 1). */
+ * + `inventoryCellsForItem`, so this pure builder stays independent of the
+ * DOM-composition layer (game.ts) rather than reaching up into it
+ * (design.md Component 1). */
 function firstFreeHand(snapshot: ClientSnapshot, catalog: Catalog): "left" | "right" | null {
   const isHandOccupied = (slot: Position) => snapshot.items.some((it) => inventoryCellsForItem(it, catalog).some((c) => c.x === slot.x && c.y === slot.y));
   if (!isHandOccupied(snapshot.handSlots.left)) return "left";
