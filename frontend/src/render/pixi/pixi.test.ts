@@ -207,9 +207,12 @@ test("createTileScene falls back to forColor when the resolved visual has no .sp
 });
 
 test("createTileScene sets fog tint per tile visibility (visible/explored/unseen)", () => {
+  // explored = 0x8c8c8c (WU6 fog-parity fix): the tint factor must be
+  // `1 - overlayAlpha` (0.55, since canvas.ts's explored overlay is a
+  // 45%-alpha black `source-over` fill), not the overlay's own alpha value.
   const expectations: Array<[Visibility, number]> = [
     ["visible", 0xffffff],
-    ["explored", 0x737373],
+    ["explored", 0x8c8c8c],
     ["unseen", 0x000000],
   ];
   for (const [visibility, tint] of expectations) {

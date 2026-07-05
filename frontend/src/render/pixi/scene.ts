@@ -7,16 +7,24 @@ import type { TextureProvider } from "./textures";
 
 const FALLBACK_TERRAIN_COLOR = "#444";
 
-/** Fog tint per visibility state (design.md D1). `visible` = no tint
- * (`0xffffff` multiplies every channel by 1, a no-op); `explored` dims the
- * terrain to approximate `render/canvas.ts`'s 45%-black overlay; `unseen`
- * tints fully black, which reads identically to Canvas's solid black
- * fill-rect regardless of the underlying texture. Tiles are always drawn
- * (never hidden via `.visible`) — matches Canvas, which never skips a tile
- * draw, it only ever changes what color/overlay is drawn on top. */
+/** Fog tint per visibility state (design.md D1, tightened at WU6 — parity
+ * fix). `visible` = no tint (`0xffffff` multiplies every channel by 1, a
+ * no-op); `unseen` tints fully black, which reads identically to Canvas's
+ * solid black fill-rect regardless of the underlying texture.
+ *
+ * `explored` must match `render/canvas.ts`'s 45%-alpha black overlay drawn
+ * OVER the terrain via `source-over` compositing: `new = old*(1-0.45) +
+ * black*0.45 = old*0.55`. A multiplicative tint reproduces that exact
+ * per-channel scale ONLY if the tint factor is `1 - alpha` (`0.55`), not the
+ * overlay's own alpha value. WU2 originally set this to `0x737373`
+ * (`0x73/255 ≈ 0.451`), which is the overlay's alpha itself, not its
+ * complement — that tinted explored tiles roughly 10 percentage points
+ * darker than Canvas (a ~55%-black-equivalent overlay instead of 45%).
+ * `0x8c8c8c` (`0x8c/255 = 140/255 ≈ 0.549 ≈ 0.55`) is the corrected value —
+ * found and fixed during WU6's fog-parity pass. */
 const FOG_TINT: Record<Visibility, number> = {
   visible: 0xffffff,
-  explored: 0x737373,
+  explored: 0x8c8c8c,
   unseen: 0x000000,
 };
 
