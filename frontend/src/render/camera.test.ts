@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Frame, RenderEntity } from "../view/viewstate";
 import { cameraOffset, screenToTile, type CanvasRect } from "./camera";
-import { PX } from "./canvas";
+import { PX } from "./constants";
 
 function player(renderPos: { x: number; y: number }): RenderEntity {
   return { id: "p1", kind: "player", typeId: "player", renderPos, visibility: "visible" };

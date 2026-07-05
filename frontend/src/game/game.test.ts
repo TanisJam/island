@@ -6,8 +6,9 @@ import type { Transport } from "../net/transport";
 import type { Ui } from "../hud/ui";
 import type { HudHandlers } from "../hud/hud";
 import type { Store } from "../state/store";
-import { createGame, loadSpriteAssets } from "./game";
+import { createGame, loadSpriteAssets, type Game } from "./game";
 import { createEmojiAssets } from "../render/assets";
+import type { Renderer } from "../render/renderer";
 
 const ORIGINAL_FETCH = globalThis.fetch;
 const ORIGINAL_RAF = globalThis.requestAnimationFrame;
@@ -66,33 +67,22 @@ function stubSingleTickRaf(): void {
   globalThis.cancelAnimationFrame = (() => {}) as typeof cancelAnimationFrame;
 }
 
-function fakeCanvasContext(): CanvasRenderingContext2D {
-  const noop = () => {};
-  return {
-    canvas: { width: 64, height: 64 },
-    fillStyle: "",
-    strokeStyle: "",
-    lineWidth: 1,
-    globalAlpha: 1,
-    font: "",
-    textAlign: "left",
-    textBaseline: "alphabetic",
-    clearRect: noop,
-    fillRect: noop,
-    strokeRect: noop,
-    fillText: noop,
-    strokeText: noop,
-    beginPath: noop,
-    arc: noop,
-    fill: noop,
-    save: noop,
-    restore: noop,
-    translate: noop,
-  } as unknown as CanvasRenderingContext2D;
+function fakeCanvas(): HTMLCanvasElement {
+  return { addEventListener: () => {} } as unknown as HTMLCanvasElement;
 }
 
-function fakeCanvas(): HTMLCanvasElement {
-  return { getContext: () => fakeCanvasContext(), addEventListener: () => {} } as unknown as HTMLCanvasElement;
+/** Stub `Renderer`, injected via `GameDeps.createRenderer` (test-only DI
+ * seam, WU7). These tests exercise `Game`'s orchestration (command dispatch,
+ * action pacing) — not the renderer itself — so booting a real GL-backed
+ * Pixi `Application` here would need a real `document`/canvas Node doesn't
+ * have, for no test benefit. `pixi.test.ts` covers the real Pixi scene-graph
+ * reconciler directly, GL-free, via its own injectable `TextureProvider`. */
+function fakeRenderer(): Renderer {
+  return { resize: () => {}, render: () => {}, destroy: () => {} };
+}
+
+function createTestGame(deps: Omit<Parameters<typeof createGame>[0], "createRenderer">): Game {
+  return createGame({ ...deps, createRenderer: async () => fakeRenderer() });
 }
 
 /** `input/mouse.ts` registers a document-level click listener to close the
@@ -181,7 +171,7 @@ test("createGame().start(): boots, builds a store, and one loop tick renders wit
   stubDocument();
   stubWindowGlobal();
   try {
-    const game = createGame({ canvas: fakeCanvas(), transport: fakeTransport(), ui: fakeUi() });
+    const game = createTestGame({ canvas: fakeCanvas(), transport: fakeTransport(), ui: fakeUi() });
     await assert.doesNotReject(() => game.start());
   } finally {
     globalThis.fetch = ORIGINAL_FETCH;
@@ -229,7 +219,7 @@ async function bootCapturingFull(
     showThought: (text) => showThoughtCalls.push(text),
   };
   const transport: Transport = { send: async (env) => respond(env), onEvents: () => () => {} };
-  const game = createGame({ canvas: fakeCanvas(), transport, ui });
+  const game = createTestGame({ canvas: fakeCanvas(), transport, ui });
   await game.start();
   if (!handlers || !store) throw new Error("Ui.mount was never called — boot must have failed silently");
   return { handlers, showThoughtCalls, store };
@@ -438,7 +428,7 @@ test("game.ts sendCommand: a second command sent while busy is ignored (early-re
       },
       onEvents: () => () => {},
     };
-    const game = createGame({ canvas: fakeCanvas(), transport, ui });
+    const game = createTestGame({ canvas: fakeCanvas(), transport, ui });
     await game.start();
     if (!handlers) throw new Error("Ui.mount was never called");
 
@@ -502,7 +492,7 @@ test("game.ts sendCommand: a second command fired WHILE the first's transport.se
       },
       onEvents: () => () => {},
     };
-    const game = createGame({ canvas: fakeCanvas(), transport, ui });
+    const game = createTestGame({ canvas: fakeCanvas(), transport, ui });
     await game.start();
     if (!handlers) throw new Error("Ui.mount was never called");
 
@@ -550,7 +540,7 @@ test("game.ts sendCommand: the in-flight guard clears via finally even when tran
       },
       onEvents: () => () => {},
     };
-    const game = createGame({ canvas: fakeCanvas(), transport, ui });
+    const game = createTestGame({ canvas: fakeCanvas(), transport, ui });
     await game.start();
     if (!handlers) throw new Error("Ui.mount was never called");
 
