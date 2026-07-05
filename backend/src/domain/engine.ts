@@ -25,7 +25,10 @@ export type TargetRef =
   | { kind: "self" };
 
 export type EngineCtx = { state: GameState; index: CatalogIndex; rng: () => number; now: () => number };
-export type EngineResult = { events: Event[] } | { rejection: Rejection };
+// `durationMs` (Decision 1, engram #2854 — Slice C) is PLUMBING ONLY: it surfaces which
+// recipe/action resolved so `process-command.ts` can stamp `CommandResult.durationMs`.
+// It does NOT change outcome/success-roll/energy timing — those stay atomic and unchanged.
+export type EngineResult = { events: Event[]; durationMs?: number } | { rejection: Rejection };
 
 export type RTarget =
   | { kind: "world_object"; pos: Position; tags: string[]; obj: WorldObject }
@@ -167,18 +170,24 @@ export function executeAction(ctx: EngineCtx, actionId: string, ref: TargetRef):
     applyEvent(s, index, e);
   };
 
+  // Slice C (Decision 1, engram #2854): the attempt "took time" once we reach this
+  // point (past all rejections) — a failed success-roll still carries the action's
+  // durationMs, since the roll itself is the outcome of the time spent, not a reason
+  // to skip pacing. Absent/0 reproduces today's exact instant behavior.
+  const durationMs = action.durationMs ? { durationMs: action.durationMs } : {};
+
   // tirada de éxito (con penalización por energía baja)
   const base = action.successChance ?? 1;
   const success = ctx.rng() <= base * energyFactor(s);
   if (base < 1 && !success) {
     for (const e of action.effects) if (e.type === "consume_energy") emit({ type: "EnergyChanged", energy: Math.max(0, s.player.energy - e.amount) });
     emit({ type: "ActionFailed", actionId, ...(action.thoughts?.fail ? { thought: mkThought(ctx, action.thoughts.fail, "failure") } : {}) });
-    return { events };
+    return { events, ...durationMs };
   }
 
   for (const e of action.effects) applyEffect(ctx, e, t, resolved, emit);
   if (action.thoughts?.success) emit({ type: "ThoughtAdded", thought: mkThought(ctx, action.thoughts.success, "discovery") });
-  return { events };
+  return { events, ...durationMs };
 }
 
 /** "Probar combinación" (Decision 3, engram #2854 + per-tile amendment #2857): a
@@ -227,7 +236,9 @@ export function tryCombination(ctx: EngineCtx, ref: TargetRef, method: "crouch" 
     const { resolved } = resolveRecipeInputs(index, pieces, classification.recipe);
     for (const e of classification.recipe.effects) applyEffect(ctx, e, t, resolved, emit);
     if (classification.recipe.thoughts?.success) emit({ type: "ThoughtAdded", thought: mkThought(ctx, classification.recipe.thoughts.success, "discovery") });
-    return { events };
+    // Slice C: only a READY craft carries the matched recipe's durationMs — a failed
+    // attempt (below) is a quick glance, not a timed craft.
+    return { events, ...(classification.recipe.durationMs ? { durationMs: classification.recipe.durationMs } : {}) };
   }
 
   emit({ type: "CombinationAttempted", signature });

@@ -5,6 +5,7 @@ import type { PlayerStateResponse, ZoneSnapshotResponse } from "../net/api";
 import type { Transport } from "../net/transport";
 import type { Ui } from "../hud/ui";
 import type { HudHandlers } from "../hud/hud";
+import type { Store } from "../state/store";
 import { createGame, loadSpriteAssets } from "./game";
 import { createEmojiAssets } from "../render/assets";
 
@@ -12,6 +13,7 @@ const ORIGINAL_FETCH = globalThis.fetch;
 const ORIGINAL_RAF = globalThis.requestAnimationFrame;
 const ORIGINAL_CAF = globalThis.cancelAnimationFrame;
 const ORIGINAL_WINDOW = (globalThis as { window?: unknown }).window;
+const ORIGINAL_SET_TIMEOUT = globalThis.setTimeout;
 
 function emptyCatalog(): Catalog {
   return { catalogVersion: "v1", terrains: [], items: [], worldObjects: [], knowledge: [], actions: [], research: [] };
@@ -204,20 +206,60 @@ function flushMicrotasks(): Promise<void> {
  * driven by `respond`, and a `ui` that stashes the real `HudHandlers` (so the
  * test can invoke one directly) and records every `showThought` call. */
 async function bootCapturing(respond: (env: CommandEnvelope) => CommandResult): Promise<{ handlers: HudHandlers; showThoughtCalls: string[] }> {
+  const { handlers, showThoughtCalls } = await bootCapturingFull(respond);
+  return { handlers, showThoughtCalls };
+}
+
+/** Same as `bootCapturing`, but also stashes the real `Store` `Ui.mount`
+ * receives — needed by the Slice C (action-pacing) tests below to assert
+ * whether `store.ingest` has actually run yet. */
+async function bootCapturingFull(
+  respond: (env: CommandEnvelope) => CommandResult,
+): Promise<{ handlers: HudHandlers; showThoughtCalls: string[]; store: Store }> {
   let handlers: HudHandlers | undefined;
+  let store: Store | undefined;
   const showThoughtCalls: string[] = [];
   const ui: Ui = {
     ...fakeUi(),
-    mount: (_store, _catalog, h) => {
+    mount: (s, _catalog, h) => {
       handlers = h;
+      store = s;
     },
     showThought: (text) => showThoughtCalls.push(text),
   };
   const transport: Transport = { send: async (env) => respond(env), onEvents: () => () => {} };
   const game = createGame({ canvas: fakeCanvas(), transport, ui });
   await game.start();
-  if (!handlers) throw new Error("Ui.mount was never called — boot must have failed silently");
-  return { handlers, showThoughtCalls };
+  if (!handlers || !store) throw new Error("Ui.mount was never called — boot must have failed silently");
+  return { handlers, showThoughtCalls, store };
+}
+
+/** Deterministic fake timer for game.ts's action-pacing wiring (Slice C,
+ * engram #2854): intercepts non-zero `setTimeout` delays (the ones
+ * `action-pacing.ts`'s default scheduler uses for a real `durationMs`) and
+ * captures them instead of running them, so a test can assert "not yet
+ * applied" before manually firing the callback. `ms === 0` calls (this
+ * file's own `flushMicrotasks`) are passed through to the REAL `setTimeout`
+ * unchanged, so both mechanisms can coexist in the same test. */
+function stubFakeTimers(): { fire: () => void; pending: number } {
+  const calls: Array<() => void> = [];
+  const originalRaw = ORIGINAL_SET_TIMEOUT as unknown as (cb: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => unknown;
+  const fake = ((cb: (...args: unknown[]) => void, ms?: number, ...args: unknown[]): unknown => {
+    if (!ms) return originalRaw(cb, ms, ...args);
+    calls.push(() => cb(...args));
+    return 0;
+  }) as typeof setTimeout;
+  globalThis.setTimeout = fake;
+  return {
+    fire: () => {
+      const cb = calls.shift();
+      if (!cb) throw new Error("stubFakeTimers.fire(): no pending scheduled call");
+      cb();
+    },
+    get pending() {
+      return calls.length;
+    },
+  };
 }
 
 test("game.ts sendCommand: a TryCombination accepted response's graded ThoughtAdded feedback reaches the teletype via ui.showThought", async () => {
@@ -285,5 +327,260 @@ test("game.ts sendCommand REGRESSION GUARD: a non-TryCombination accepted comman
     globalThis.requestAnimationFrame = ORIGINAL_RAF;
     globalThis.cancelAnimationFrame = ORIGINAL_CAF;
     (globalThis as { window?: unknown }).window = ORIGINAL_WINDOW;
+  }
+});
+
+// --- Slice C (Decision 1, engram #2854): sendCommand's action-pacing wiring ---
+
+test("game.ts sendCommand: durationMs>0 DEFERS store.ingest until the fake timer fires — energy stays 100 during the gate, updates only after", async () => {
+  stubBootFetch();
+  stubSingleTickRaf();
+  stubDocument();
+  stubWindowGlobal();
+  const timers = stubFakeTimers();
+  try {
+    const { handlers, store } = await bootCapturingFull((env) =>
+      env.command.type === "Observe"
+        ? { clientCommandId: env.clientCommandId, accepted: true, events: [{ type: "EnergyChanged", energy: 42 }], durationMs: 900 }
+        : { clientCommandId: env.clientCommandId, accepted: true, events: [] },
+    );
+
+    assert.equal(store.getState().player.energy, 100, "unchanged before the command even resolves");
+    handlers.onObserve?.("it1");
+    await flushMicrotasks(); // let the fire-and-forget sendCommand run up to actionPacing.handleResult
+
+    assert.equal(store.getState().player.energy, 100, "NOT yet applied — durationMs>0 must gate ingest before the timer fires");
+    assert.equal(timers.pending, 1, "the 900ms window was scheduled");
+
+    timers.fire();
+
+    assert.equal(store.getState().player.energy, 42, "applied once the scheduled duration elapses");
+  } finally {
+    globalThis.fetch = ORIGINAL_FETCH;
+    globalThis.requestAnimationFrame = ORIGINAL_RAF;
+    globalThis.cancelAnimationFrame = ORIGINAL_CAF;
+    (globalThis as { window?: unknown }).window = ORIGINAL_WINDOW;
+    globalThis.setTimeout = ORIGINAL_SET_TIMEOUT;
+  }
+});
+
+test("game.ts sendCommand: durationMs absent/0 applies immediately — no regression for non-timed commands", async () => {
+  stubBootFetch();
+  stubSingleTickRaf();
+  stubDocument();
+  stubWindowGlobal();
+  const timers = stubFakeTimers();
+  try {
+    const { handlers, store } = await bootCapturingFull((env) =>
+      env.command.type === "Observe" ? { clientCommandId: env.clientCommandId, accepted: true, events: [{ type: "EnergyChanged", energy: 77 }] } : { clientCommandId: env.clientCommandId, accepted: true, events: [] },
+    );
+
+    handlers.onObserve?.("it1");
+    await flushMicrotasks();
+
+    assert.equal(store.getState().player.energy, 77, "instant application, exactly like before Slice C");
+    assert.equal(timers.pending, 0, "nothing scheduled for an untimed command");
+  } finally {
+    globalThis.fetch = ORIGINAL_FETCH;
+    globalThis.requestAnimationFrame = ORIGINAL_RAF;
+    globalThis.cancelAnimationFrame = ORIGINAL_CAF;
+    (globalThis as { window?: unknown }).window = ORIGINAL_WINDOW;
+    globalThis.setTimeout = ORIGINAL_SET_TIMEOUT;
+  }
+});
+
+test("game.ts sendCommand: a second command sent while busy is ignored (early-return, no transport call)", async () => {
+  stubBootFetch();
+  stubSingleTickRaf();
+  stubDocument();
+  stubWindowGlobal();
+  const timers = stubFakeTimers();
+  try {
+    let sendCount = 0;
+    let handlers: HudHandlers | undefined;
+    const ui: Ui = {
+      ...fakeUi(),
+      mount: (_store, _catalog, h) => {
+        handlers = h;
+      },
+    };
+    const transport: Transport = {
+      send: async (env) => {
+        sendCount++;
+        return env.command.type === "Observe"
+          ? { clientCommandId: env.clientCommandId, accepted: true, events: [], durationMs: 900 }
+          : { clientCommandId: env.clientCommandId, accepted: true, events: [] };
+      },
+      onEvents: () => () => {},
+    };
+    const game = createGame({ canvas: fakeCanvas(), transport, ui });
+    await game.start();
+    if (!handlers) throw new Error("Ui.mount was never called");
+
+    handlers.onObserve?.("it1"); // starts a 900ms-gated command -> busy
+    await flushMicrotasks();
+    assert.equal(sendCount, 1);
+    assert.equal(timers.pending, 1, "still busy, timer pending");
+
+    handlers.onObserve?.("it2"); // sent while busy -> must be ignored BEFORE calling transport
+    await flushMicrotasks();
+    assert.equal(sendCount, 1, "sendCommand's isBusy() early-return prevented a second transport.send call");
+
+    timers.fire(); // clears busy
+    await flushMicrotasks();
+    handlers.onObserve?.("it3"); // now allowed again
+    await flushMicrotasks();
+    assert.equal(sendCount, 2, "a new command is accepted once busy clears");
+  } finally {
+    globalThis.fetch = ORIGINAL_FETCH;
+    globalThis.requestAnimationFrame = ORIGINAL_RAF;
+    globalThis.cancelAnimationFrame = ORIGINAL_CAF;
+    (globalThis as { window?: unknown }).window = ORIGINAL_WINDOW;
+    globalThis.setTimeout = ORIGINAL_SET_TIMEOUT;
+  }
+});
+
+// --- Fresh-context-review hardening: the in-flight guard closes a race the
+// original isBusy()-only gate missed (busy used to only get set AFTER a
+// result with durationMs>0 came back — nothing gated the network round-trip
+// itself). ------------------------------------------------------------------
+
+test("game.ts sendCommand: a second command fired WHILE the first's transport.send is still PENDING (not yet resolved) is dropped — the in-flight race", async () => {
+  stubBootFetch();
+  stubSingleTickRaf();
+  stubDocument();
+  stubWindowGlobal();
+  try {
+    let sendCount = 0;
+    let resolveFirst: ((result: CommandResult) => void) | undefined;
+    let handlers: HudHandlers | undefined;
+    const ui: Ui = {
+      ...fakeUi(),
+      mount: (_store, _catalog, h) => {
+        handlers = h;
+      },
+    };
+    const transport: Transport = {
+      send: (env) => {
+        sendCount++;
+        if (sendCount === 1) {
+          // Deliberately never resolves until the test calls `resolveFirst`
+          // — simulates a real network round-trip that's still in flight,
+          // as opposed to the fakeTransport-style instant resolution the
+          // OTHER "second command while busy" test above exercises (which
+          // only covers the SEQUENTIAL/post-response case).
+          return new Promise<CommandResult>((resolve) => {
+            resolveFirst = resolve;
+          });
+        }
+        return Promise.resolve({ clientCommandId: env.clientCommandId, accepted: true, events: [] });
+      },
+      onEvents: () => () => {},
+    };
+    const game = createGame({ canvas: fakeCanvas(), transport, ui });
+    await game.start();
+    if (!handlers) throw new Error("Ui.mount was never called");
+
+    handlers.onObserve?.("it1"); // starts the round-trip — does NOT resolve yet
+    handlers.onObserve?.("it2"); // fired WHILE the first is still pending -> must be dropped
+    await flushMicrotasks();
+
+    assert.equal(sendCount, 1, "the second command never reached transport.send — beginDispatch() dropped it synchronously, before any await");
+
+    resolveFirst?.({ clientCommandId: "c1", accepted: true, events: [] });
+    await flushMicrotasks();
+
+    handlers.onObserve?.("it3"); // now allowed again — the first command's lifecycle fully completed
+    await flushMicrotasks();
+    assert.equal(sendCount, 2, "a new command is accepted once the in-flight command's lifecycle fully completes");
+  } finally {
+    globalThis.fetch = ORIGINAL_FETCH;
+    globalThis.requestAnimationFrame = ORIGINAL_RAF;
+    globalThis.cancelAnimationFrame = ORIGINAL_CAF;
+    (globalThis as { window?: unknown }).window = ORIGINAL_WINDOW;
+  }
+});
+
+test("game.ts sendCommand: the in-flight guard clears via finally even when transport.send REJECTS — no stuck freeze", async () => {
+  stubBootFetch();
+  stubSingleTickRaf();
+  stubDocument();
+  stubWindowGlobal();
+  try {
+    let sendCount = 0;
+    let handlers: HudHandlers | undefined;
+    const showThoughtCalls: string[] = [];
+    const ui: Ui = {
+      ...fakeUi(),
+      mount: (_store, _catalog, h) => {
+        handlers = h;
+      },
+      showThought: (t) => showThoughtCalls.push(t),
+    };
+    const transport: Transport = {
+      send: async (env) => {
+        sendCount++;
+        if (sendCount === 1) throw new Error("network down");
+        return { clientCommandId: env.clientCommandId, accepted: true, events: [] };
+      },
+      onEvents: () => () => {},
+    };
+    const game = createGame({ canvas: fakeCanvas(), transport, ui });
+    await game.start();
+    if (!handlers) throw new Error("Ui.mount was never called");
+
+    handlers.onObserve?.("it1"); // transport.send rejects
+    await flushMicrotasks();
+
+    assert.equal(sendCount, 1);
+    assert.ok(showThoughtCalls[0]?.includes("No pude hablar con el backend"), "the transport-error thought still surfaces");
+
+    handlers.onObserve?.("it2"); // must NOT be stuck — the finally must have cleared the guard even on rejection
+    await flushMicrotasks();
+    assert.equal(sendCount, 2, "a subsequent command goes through — no stuck-busy freeze after a transport rejection");
+  } finally {
+    globalThis.fetch = ORIGINAL_FETCH;
+    globalThis.requestAnimationFrame = ORIGINAL_RAF;
+    globalThis.cancelAnimationFrame = ORIGINAL_CAF;
+    (globalThis as { window?: unknown }).window = ORIGINAL_WINDOW;
+  }
+});
+
+test("game.ts sendCommand: a TryCombination's teletype feedback surfaces AFTER the deferred ingest, not before (durationMs>0)", async () => {
+  stubBootFetch();
+  stubSingleTickRaf();
+  stubDocument();
+  stubWindowGlobal();
+  const timers = stubFakeTimers();
+  try {
+    const { handlers, showThoughtCalls, store } = await bootCapturingFull((env) =>
+      env.command.type === "TryCombination"
+        ? {
+            clientCommandId: env.clientCommandId,
+            accepted: true,
+            events: [{ type: "EnergyChanged", energy: 50 }, { type: "ThoughtAdded", thought: { id: "t1", text: "Esto debería funcionar.", kind: "discovery", timestamp: 1 } }],
+            durationMs: 1200,
+          }
+        : { clientCommandId: env.clientCommandId, accepted: true, events: [] },
+    );
+
+    handlers.onTryCombination?.({ x: 0, y: 0 });
+    await flushMicrotasks();
+
+    // "Trabajando…" is the busy-gate affordance itself (action-pacing.ts's
+    // showBusy) — the craft's OWN graded/success feedback must not appear yet.
+    assert.deepEqual(showThoughtCalls, ["Trabajando…"], "only the busy affordance shows — the craft is still 'in progress'");
+    assert.equal(store.getState().player.energy, 100, "events not yet applied either");
+
+    timers.fire();
+
+    assert.equal(store.getState().player.energy, 50, "events applied once the craft's duration elapses");
+    assert.deepEqual(showThoughtCalls, ["Trabajando…", "Esto debería funcionar."], "feedback surfaces AFTER the deferred ingest, matching the craft's actual completion");
+  } finally {
+    globalThis.fetch = ORIGINAL_FETCH;
+    globalThis.requestAnimationFrame = ORIGINAL_RAF;
+    globalThis.cancelAnimationFrame = ORIGINAL_CAF;
+    (globalThis as { window?: unknown }).window = ORIGINAL_WINDOW;
+    globalThis.setTimeout = ORIGINAL_SET_TIMEOUT;
   }
 });

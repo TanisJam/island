@@ -139,3 +139,36 @@ test("light_campfire: target es una fogata sin surfaceGrid — el scope 'surface
   assert.ok("events" in r, JSON.stringify(r));
   assert.ok(evs.some((e) => e.type === "ItemRemovedFromWorld"), "consume el fuel encontrado por proximidad (fallback), no por grid real");
 });
+
+// --- Slice C (Decision 1, engram #2854): durationMs surfaced on the EngineResult ---
+
+test("executeAction: una acción con durationMs authored lo surfa en el resultado (pull_branches: 500ms)", () => {
+  const s = seedState(index, template);
+  const tree = s.objects.find((o) => o.objectTypeId === "tree")!;
+  s.player.position = { x: tree.position.x, y: tree.position.y + 1 };
+  const r = executeAction(ctx(s), "pull_branches", { kind: "world_object", id: tree.id });
+  assert.ok("events" in r, JSON.stringify(r));
+  assert.equal(r.durationMs, 500);
+});
+
+test("executeAction: una acción SIN durationMs authored no lo incluye en el resultado (comportamiento instantáneo preservado)", () => {
+  const s = seedState(index, template);
+  s.player.position = { x: 0, y: 11 }; // shallow_water tile (wet_hands' appliesTo)
+  const r = executeAction(ctx(s), "wet_hands", { kind: "tile", x: 0, y: 11 });
+  assert.ok("events" in r, JSON.stringify(r));
+  assert.equal(r.durationMs, undefined);
+});
+
+test("executeAction: un roll de éxito fallido igual surfa el durationMs de la acción (el intento tomó tiempo)", () => {
+  const s = seedState(index, template);
+  const campfire: WorldObject = { id: "wo_fire_dur", objectTypeId: "campfire", position: { x: 9, y: 9 }, state: { lit: false, fuel: 0 }, tags: [], visibility: "visible" };
+  s.objects.push(campfire);
+  s.player.position = { x: 9, y: 8 };
+  addInHand(s, "crude_tool", 20);
+  addOnGround(s, "dry_branch", 9, 9);
+  const failingCtx: EngineCtx = { ...ctx(s), rng: () => 1 }; // successChance 0.6 -> ctx.rng()<=0.6 is false -> falla la tirada
+  const r = executeAction(failingCtx, "light_campfire", { kind: "world_object", id: campfire.id });
+  assert.ok("events" in r, JSON.stringify(r));
+  assert.ok(r.events.some((e) => e.type === "ActionFailed"), "la tirada falló");
+  assert.equal(r.durationMs, 1000, "light_campfire declara 1000ms — se surfa incluso en el fallo");
+});

@@ -3,6 +3,7 @@
     "id": "pull_branches",
     "label": "Arrancar ramas",
     "priority": 20,
+    "durationMs": 500,
     "appliesTo": { "kind": "world_object", "anyTags": ["tree"] },
     "requirements": [
       { "type": "distance", "max": 1 },
@@ -19,6 +20,7 @@
     "id": "strike_tree_stone",
     "label": "Golpear con piedra",
     "priority": 30,
+    "durationMs": 500,
     "appliesTo": { "kind": "world_object", "anyTags": ["tree"] },
     "requirements": [
       { "type": "distance", "max": 1 },
@@ -36,6 +38,7 @@
     "id": "discover_binding",
     "label": "Probar a atar",
     "priority": 40,
+    "durationMs": 400,
     "appliesTo": { "kind": "world_object", "anyTags": ["tree", "stick", "wreckage"] },
     "requirements": [
       { "type": "distance", "max": 1 },
@@ -50,6 +53,7 @@
     "id": "cut_tree_crude",
     "label": "Cortar madera pobre",
     "priority": 50,
+    "durationMs": 900,
     "appliesTo": { "kind": "world_object", "anyTags": ["tree"] },
     "requirements": [
       { "type": "distance", "max": 1 },
@@ -71,6 +75,7 @@
     "id": "cut_tree_axe",
     "label": "Cortar madera",
     "priority": 60,
+    "durationMs": 900,
     "appliesTo": { "kind": "world_object", "anyTags": ["tree"] },
     "requirements": [
       { "type": "distance", "max": 1 },
@@ -91,6 +96,7 @@
     "id": "search_grass",
     "label": "Rebuscar",
     "priority": 20,
+    "durationMs": 400,
     "appliesTo": { "kind": "world_object", "anyTags": ["grass"] },
     "requirements": [
       { "type": "distance", "max": 1 },
@@ -108,6 +114,7 @@
     "id": "pull_fiber",
     "label": "Arrancar fibra",
     "priority": 25,
+    "durationMs": 400,
     "appliesTo": { "kind": "world_object", "anyTags": ["grass"] },
     "requirements": [
       { "type": "distance", "max": 1 },
@@ -124,6 +131,7 @@
     "id": "cut_grass_crude",
     "label": "Cortar pasto",
     "priority": 40,
+    "durationMs": 600,
     "appliesTo": { "kind": "world_object", "anyTags": ["grass"] },
     "requirements": [
       { "type": "distance", "max": 1 },
@@ -142,6 +150,7 @@
     "id": "strike_rock_stone",
     "label": "Golpear con piedra",
     "priority": 30,
+    "durationMs": 500,
     "appliesTo": { "kind": "world_object", "anyTags": ["rock"] },
     "requirements": [
       { "type": "distance", "max": 1 },
@@ -158,6 +167,7 @@
     "id": "break_rock_crude",
     "label": "Romper fragmentos",
     "priority": 45,
+    "durationMs": 700,
     "appliesTo": { "kind": "world_object", "anyTags": ["rock"] },
     "requirements": [
       { "type": "distance", "max": 1 },
@@ -175,6 +185,7 @@
     "id": "search_wreckage",
     "label": "Rebuscar",
     "priority": 20,
+    "durationMs": 400,
     "appliesTo": { "kind": "world_object", "anyTags": ["wreckage"] },
     "requirements": [
       { "type": "distance", "max": 1 },
@@ -192,6 +203,7 @@
     "id": "separate_wreckage_crude",
     "label": "Separar piezas",
     "priority": 40,
+    "durationMs": 700,
     "appliesTo": { "kind": "world_object", "anyTags": ["wreckage"] },
     "requirements": [
       { "type": "distance", "max": 1 },
@@ -210,6 +222,7 @@
     "id": "cut_jungle_surface_crude",
     "label": "Cortar ramas superficiales",
     "priority": 30,
+    "durationMs": 700,
     "appliesTo": { "kind": "tile", "anyTerrain": ["dense_jungle"] },
     "requirements": [
       { "type": "distance", "max": 1 },
@@ -228,6 +241,7 @@
     "id": "clear_jungle",
     "label": "Despejar camino",
     "priority": 70,
+    "durationMs": 1800,
     "appliesTo": { "kind": "tile", "anyTerrain": ["dense_jungle"] },
     "requirements": [
       { "type": "distance", "max": 1 },
@@ -263,6 +277,7 @@
     "id": "search_sand",
     "label": "Rebuscar",
     "priority": 15,
+    "durationMs": 400,
     "appliesTo": { "kind": "tile", "anyTerrain": ["sand"] },
     "requirements": [
       { "type": "distance", "max": 0 },
@@ -281,6 +296,7 @@
     "label": "Improvisar herramienta",
     "priority": 55,
     "combinable": true,
+    "durationMs": 1200,
     "appliesTo": { "kind": "tile", "anyTags": ["ground"] },
     "requirements": [{ "type": "distance", "max": 0 }],
     "inputs": [
@@ -306,6 +322,7 @@
     "id": "build_campfire",
     "label": "Armar fogata",
     "priority": 55,
+    "durationMs": 1500,
     "appliesTo": { "kind": "tile", "anyTags": ["ground"] },
     "requirements": [
       { "type": "distance", "max": 0 },
@@ -331,6 +348,7 @@
     "id": "build_table",
     "label": "Armar mesa rústica",
     "priority": 50,
+    "durationMs": 1500,
     "appliesTo": { "kind": "tile", "anyTags": ["ground"] },
     "requirements": [
       { "type": "distance", "max": 0 },
@@ -356,6 +374,7 @@
     "label": "Fabricar hacha simple",
     "priority": 60,
     "combinable": true,
+    "durationMs": 1300,
     "appliesTo": { "kind": "world_object", "anyTags": ["surface"] },
     "requirements": [{ "type": "distance", "max": 1 }],
     "inputs": [
@@ -378,6 +397,7 @@
     "id": "add_fuel_campfire",
     "label": "Añadir combustible",
     "priority": 40,
+    "durationMs": 500,
     "appliesTo": { "kind": "world_object", "anyTags": ["fire"] },
     "requirements": [{ "type": "distance", "max": 1 }],
     "inputs": [
@@ -393,6 +413,7 @@
     "id": "light_campfire",
     "label": "Intentar encender",
     "priority": 60,
+    "durationMs": 1000,
     "appliesTo": { "kind": "world_object", "anyTags": ["fire"] },
     "requirements": [
       { "type": "distance", "max": 1 },

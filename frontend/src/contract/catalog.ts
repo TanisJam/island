@@ -174,6 +174,7 @@ export interface ContextActionDef {
   effects: [Effect, ...Effect[]];
   successChance?: number;
   combinable?: boolean;
+  durationMs?: number;
   thoughts?: {
     preview?: string;
     success?: string;

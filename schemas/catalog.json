@@ -193,6 +193,7 @@
         "effects": { "type": "array", "items": { "$ref": "#/definitions/Effect" }, "minItems": 1 },
         "successChance": { "type": "number", "minimum": 0, "maximum": 1 },
         "combinable": { "type": "boolean" },
+        "durationMs": { "type": "number", "minimum": 0 },
         "thoughts": {
           "type": "object",
           "additionalProperties": false,

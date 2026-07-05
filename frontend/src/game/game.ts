@@ -8,6 +8,7 @@ import { createEmojiAssets, createSpriteAssets, parseAtlas } from "../render/ass
 import type { AssetResolver } from "../render/assets";
 import { createCanvasRenderer } from "../render/canvas";
 import { canvasToTile, createInputController } from "../input/mouse";
+import { createActionPacing } from "../input/action-pacing";
 import type { Ui } from "../hud/ui";
 import type { HudHandlers } from "../hud/hud";
 import { createDragController } from "../hud/drag";
@@ -112,51 +113,101 @@ export function createGame(deps: GameDeps): Game {
     renderer.resize(window.innerWidth, window.innerHeight);
     window.addEventListener("resize", () => renderer.resize(window.innerWidth, window.innerHeight));
 
-    const sendCommand = async (command: Command): Promise<void> => {
-      const env: CommandEnvelope = { playerId: PLAYER_ID, clientCommandId: crypto.randomUUID(), command };
-      let result: CommandResult;
-      try {
-        result = await deps.transport.send(env);
-      } catch (e) {
-        deps.ui.showThought(`No pude hablar con el backend: ${e instanceof Error ? e.message : String(e)}`);
-        return;
-      }
-      if (!result.accepted) {
-        if (result.rejection?.thought) deps.ui.showThought(result.rejection.thought.text);
-        return;
-      }
-      // Single merge point (design.md "Event merge point"): Store.ingest is
-      // also what a future pushed-event Transport would call. No manual
-      // renderHud call here — Ui reacts to Store notifications on its own.
-      store.ingest(result.events);
+    // Slice C — Action Duration (Decision 1, engram #2854): gates input and
+    // defers `store.ingest` for the window a `CommandResult.durationMs > 0`
+    // reports, showing "Trabajando…" via the existing teletype meanwhile.
+    // `durationMs` absent/0 is untouched — `applyResult` ingests immediately,
+    // reproducing today's exact instant behavior.
+    //
+    // Fresh-context-review hardening: `beginDispatch()` is called
+    // SYNCHRONOUSLY, before `await transport.send(...)` — this closes a race
+    // the original `isBusy()`-only gate missed, where a second command fired
+    // WHILE the first's network round-trip was still pending (not yet
+    // deferred, not yet even resolved) slipped through untouched, since
+    // `busy` used to only get set once a result with `durationMs>0` came
+    // back. `endDispatch()` runs in a `finally` so busy ALWAYS clears — even
+    // on a transport rejection, a not-accepted result, or a synchronous
+    // throw inside `applyResult` itself — except on the one path that must
+    // NOT clear yet: `applyResult` returning `true` (deferred), where the
+    // module's own scheduled callback owns clearing busy once the duration
+    // actually elapses.
+    const actionPacing = createActionPacing({
+      ingest: store.ingest,
+      showBusy: deps.ui.showThought,
+    });
 
-      // Surface `TryCombination`'s own `ThoughtAdded` feedback in the
-      // teletype (crouch-crafting Slice B2) — its graded hint ("Me falta
-      // algo...") or ready-craft success thought would otherwise only reach
-      // `thoughtLog` (visible later via "Ver mis pensamientos") with no
-      // immediate on-screen text after clicking "Probar combinación".
-      //
-      // DELIBERATELY SCOPED to `TryCombination` only (fresh-context review
-      // fix, crouch-crafting Slice B2): `store.ingest` above runs
-      // SYNCHRONOUSLY and re-renders every open window, including `ui.ts`'s
-      // `rerender()`, which already writes the teletype via
-      // `inventoryAddedMessage(...)` ("Guardé X en la mochila") whenever a
-      // command's events add an item to the inventory. `showThought` is
-      // last-write-wins (no queue) — a GENERAL accepted-path hook here (any
-      // command, any `ThoughtAdded`) would clobber that confirmation for the
-      // majority of gather/craft actions (`cut_tree_crude`,
-      // `improvise_crude_tool`, `separate_wreckage_crude`,
-      // `discover_binding`, ...), which all pair `add_item` with
-      // `thoughts.success` — a real regression to shipped `main` behavior.
-      // For a `TryCombination` READY craft that also adds its output to the
-      // inventory, showing the recipe's success thought OVER the
-      // inventory-added line is the desired outcome (arguably more
-      // informative), so no special-casing is needed within this branch.
-      if (command.type === "TryCombination") {
-        const isThoughtAdded = (e: Event): e is Extract<Event, { type: "ThoughtAdded" }> => e.type === "ThoughtAdded";
-        const thoughtEvents = result.events.filter(isThoughtAdded);
-        const lastThought = thoughtEvents[thoughtEvents.length - 1];
-        if (lastThought) deps.ui.showThought(lastThought.thought.text);
+    const sendCommand = async (command: Command): Promise<void> => {
+      // Input gate: a command is DROPPED (never queued) if one is already
+      // in flight — covers the network round-trip AND any deferred duration
+      // window. `input/mouse.ts` additionally suppresses click dispatch for
+      // the same reason, as a second line of defense for paths that don't go
+      // through `sendCommand` at all (e.g. the "select" click decision).
+      if (!actionPacing.beginDispatch()) return;
+
+      let deferred = false;
+      try {
+        const env: CommandEnvelope = { playerId: PLAYER_ID, clientCommandId: crypto.randomUUID(), command };
+        let result: CommandResult;
+        try {
+          result = await deps.transport.send(env);
+        } catch (e) {
+          deps.ui.showThought(`No pude hablar con el backend: ${e instanceof Error ? e.message : String(e)}`);
+          return;
+        }
+        if (!result.accepted) {
+          if (result.rejection?.thought) deps.ui.showThought(result.rejection.thought.text);
+          return;
+        }
+
+        // Single merge point (design.md "Event merge point"): `actionPacing`
+        // is what calls `store.ingest` — immediately when `durationMs` is
+        // absent/0, or after the gated window elapses otherwise. Either way
+        // it's the same `store.ingest` a future pushed-event Transport would
+        // also call. No manual renderHud call here — Ui reacts to Store
+        // notifications on its own.
+        deferred = actionPacing.applyResult(result, () => {
+          // Surface `TryCombination`'s own `ThoughtAdded` feedback in the
+          // teletype (crouch-crafting Slice B2) — its graded hint ("Me falta
+          // algo...") or ready-craft success thought would otherwise only reach
+          // `thoughtLog` (visible later via "Ver mis pensamientos") with no
+          // immediate on-screen text after clicking "Probar combinación".
+          // `onApplied` here ALWAYS runs after the events were actually
+          // applied (instant or deferred), which is why it's wired through
+          // `actionPacing.applyResult` rather than run unconditionally right
+          // after `sendCommand`'s await — a Slice C timed craft must show this
+          // feedback when the craft COMPLETES, not the instant it was accepted.
+          //
+          // DELIBERATELY SCOPED to `TryCombination` only (fresh-context review
+          // fix, crouch-crafting Slice B2): the applied `store.ingest` runs
+          // SYNCHRONOUSLY and re-renders every open window, including `ui.ts`'s
+          // `rerender()`, which already writes the teletype via
+          // `inventoryAddedMessage(...)` ("Guardé X en la mochila") whenever a
+          // command's events add an item to the inventory. `showThought` is
+          // last-write-wins (no queue) — a GENERAL post-apply hook here (any
+          // command, any `ThoughtAdded`) would clobber that confirmation for the
+          // majority of gather/craft actions (`cut_tree_crude`,
+          // `improvise_crude_tool`, `separate_wreckage_crude`,
+          // `discover_binding`, ...), which all pair `add_item` with
+          // `thoughts.success` — a real regression to shipped `main` behavior.
+          // For a `TryCombination` READY craft that also adds its output to the
+          // inventory, showing the recipe's success thought OVER the
+          // inventory-added line is the desired outcome (arguably more
+          // informative), so no special-casing is needed within this branch.
+          if (command.type === "TryCombination") {
+            const isThoughtAdded = (e: Event): e is Extract<Event, { type: "ThoughtAdded" }> => e.type === "ThoughtAdded";
+            const thoughtEvents = result.events.filter(isThoughtAdded);
+            const lastThought = thoughtEvents[thoughtEvents.length - 1];
+            if (lastThought) deps.ui.showThought(lastThought.thought.text);
+          }
+        });
+      } finally {
+        // Every non-deferred exit (transport rejection, not-accepted result,
+        // instantly-applied result, or a synchronous throw anywhere above)
+        // clears busy here. The ONE case that must NOT clear here is a
+        // deferred `applyResult` — busy stays set until its own scheduled
+        // callback fires and clears it, so a new command can't slip in
+        // during the "Trabajando…" window either.
+        if (!deferred) actionPacing.endDispatch();
       }
     };
 
@@ -206,6 +257,7 @@ export function createGame(deps: GameDeps): Game {
       getFrame: viewState.frame,
       sendCommand,
       ui: deps.ui,
+      isBusy: actionPacing.isBusy,
     });
 
     // `Ui.mount` already renders once immediately and subscribes to future

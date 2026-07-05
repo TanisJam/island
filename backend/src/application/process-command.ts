@@ -16,7 +16,12 @@ const intersects = (a: string[], b: string[]): boolean => a.some((x) => b.includ
 export function processCommand(ctx: EngineCtx, env: CommandEnvelope): CommandResult {
   const cmd = env.command as Command;
   const thought = (text: string, kind: Thought["kind"]): Thought => ({ id: newId("th"), text, kind, timestamp: ctx.now() });
-  const ok = (events: Event[]): CommandResult => ({ clientCommandId: env.clientCommandId, accepted: true, events });
+  const ok = (events: Event[], durationMs?: number): CommandResult => ({
+    clientCommandId: env.clientCommandId,
+    accepted: true,
+    events,
+    ...(durationMs ? { durationMs } : {}),
+  });
   const no = (rejection: Rejection): CommandResult => ({ clientCommandId: env.clientCommandId, accepted: false, events: [], rejection });
 
   const events: Event[] = [];
@@ -34,7 +39,7 @@ export function processCommand(ctx: EngineCtx, env: CommandEnvelope): CommandRes
   switch (cmd.type) {
     case "ExecuteAction": {
       const res = executeAction(ctx, cmd.actionId, cmd.target as TargetRef);
-      return "rejection" in res ? no(res.rejection) : ok(res.events);
+      return "rejection" in res ? no(res.rejection) : ok(res.events, res.durationMs);
     }
 
     case "MovePlayer": {
@@ -129,7 +134,7 @@ export function processCommand(ctx: EngineCtx, env: CommandEnvelope): CommandRes
 
     case "TryCombination": {
       const res = tryCombination(ctx, cmd.target as TargetRef, cmd.method);
-      return "rejection" in res ? no(res.rejection) : ok(res.events);
+      return "rejection" in res ? no(res.rejection) : ok(res.events, res.durationMs);
     }
 
     default:

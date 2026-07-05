@@ -37,6 +37,7 @@ export interface CommandResult {
   accepted: boolean;
   events: Event[];
   rejection?: Rejection;
+  durationMs?: number;
 }
 export interface PlayerMoved {
   type: "PlayerMoved";

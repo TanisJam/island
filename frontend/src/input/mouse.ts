@@ -26,6 +26,14 @@ export type InputDeps = {
   getFrame: () => Frame;
   sendCommand: (command: Command) => Promise<void>;
   ui: Ui;
+  /** Slice C (Decision 1, engram #2854): true while a timed action's
+   * `store.ingest` is deferred — a second line of defense alongside
+   * `sendCommand`'s own busy check, since a "select" click decision below
+   * never calls `sendCommand` at all (it only moves the selection ring and
+   * shows an inspect thought) yet must still be suppressed mid-action.
+   * Optional/defaults to never-busy so existing callers/tests keep working
+   * unchanged. */
+  isBusy?: () => boolean;
 };
 
 export type InputController = {
@@ -302,6 +310,8 @@ export function createInputController(deps: InputDeps): InputController {
     // menu inside this same handler (the "menu" branch below) — a plain
     // select or a double-click move never opens anything, so they let the
     // click bubble to the outside-click dismiss listener as before.
+    if (deps.isBusy?.()) return; // Slice C: no clicks accepted mid-action (see InputDeps.isBusy doc)
+
     const { x, y } = canvasToTile(ev.clientX, ev.clientY, deps.canvas, deps.getFrame());
     const snapshot = deps.getSnapshot();
     const resolved = resolveClickTarget(deps.catalog, snapshot, x, y);

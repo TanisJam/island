@@ -236,3 +236,55 @@ test("TryCombination (surface): reúne piezas de la grilla de la superficie, no 
   assert.ok(result.events.some((e) => e.type === "ItemAddedToInventory" && e.item.itemTypeId === "crude_tool"), "crea el output vía la mejor receta lista");
   assert.equal(result.events.filter((e) => e.type === "ItemRemovedFromWorld").length, 0, "los inputs vivían en la superficie, no deberían salir como ItemRemovedFromWorld");
 });
+
+// --- Slice C (Decision 1, engram #2854): durationMs propagated onto CommandResult ---
+
+test("ExecuteAction: el resultado aceptado incluye durationMs de la acción resuelta (pull_branches: 500ms)", () => {
+  const s = seedState(index, template);
+  const tree = s.objects.find((o) => o.objectTypeId === "tree")!;
+  s.player.position = { x: tree.position.x, y: tree.position.y + 1 };
+  const env: CommandEnvelope = { playerId: s.player.id, clientCommandId: "dur1", command: { type: "ExecuteAction", actionId: "pull_branches", target: { kind: "world_object", id: tree.id } } };
+  const result = processCommand(ctx(s), env);
+  assert.equal(result.accepted, true, JSON.stringify(result));
+  assert.equal(result.durationMs, 500);
+});
+
+test("ExecuteAction: una acción sin durationMs authored no incluye el campo en el resultado (57 tests preexistentes: campo opcional invisible)", () => {
+  const s = seedState(index, template);
+  s.player.position = { x: 0, y: 11 }; // shallow_water tile (wet_hands' appliesTo)
+  const env: CommandEnvelope = { playerId: s.player.id, clientCommandId: "dur2", command: { type: "ExecuteAction", actionId: "wet_hands", target: { kind: "tile", x: 0, y: 11 } } };
+  const result = processCommand(ctx(s), env);
+  assert.equal(result.accepted, true, JSON.stringify(result));
+  assert.equal(result.durationMs, undefined);
+});
+
+test("ExecuteAction: un rechazo (rejection) nunca incluye durationMs — el intento nunca empezó", () => {
+  const s = seedState(index, template);
+  const env: CommandEnvelope = { playerId: s.player.id, clientCommandId: "dur3", command: { type: "ExecuteAction", actionId: "no_existe", target: { kind: "self" } } };
+  const result = processCommand(ctx(s), env);
+  assert.equal(result.accepted, false);
+  assert.equal(result.durationMs, undefined);
+});
+
+test("TryCombination (crouch, ready): el resultado incluye durationMs de la receta craftada (craft_simple_axe/improvise_crude_tool: 1200ms)", () => {
+  const s = seedState(index, template);
+  const p = s.player.position;
+  s.items.push({ id: "dcc1", itemTypeId: "small_stone", location: { type: "world", zoneId: s.zone.id, x: p.x, y: p.y } });
+  s.items.push({ id: "dcc2", itemTypeId: "dry_branch", location: { type: "world", zoneId: s.zone.id, x: p.x, y: p.y } });
+  s.items.push({ id: "dcc3", itemTypeId: "plant_fiber", location: { type: "world", zoneId: s.zone.id, x: p.x, y: p.y } });
+  const env: CommandEnvelope = { playerId: s.player.id, clientCommandId: "dur4", command: { type: "TryCombination", method: "crouch", target: { kind: "tile", x: p.x, y: p.y } } };
+  const result = processCommand(ctx(s), env);
+  assert.equal(result.accepted, true, JSON.stringify(result));
+  assert.equal(result.durationMs, 1200);
+});
+
+test("TryCombination (crouch, no listo): un intento fallido NO incluye durationMs — sólo el craft real lo hace", () => {
+  const s = seedState(index, template);
+  const p = s.player.position;
+  s.items.push({ id: "dcf1", itemTypeId: "small_stone", location: { type: "world", zoneId: s.zone.id, x: p.x, y: p.y } });
+  s.items.push({ id: "dcf2", itemTypeId: "dry_branch", location: { type: "world", zoneId: s.zone.id, x: p.x, y: p.y } });
+  const env: CommandEnvelope = { playerId: s.player.id, clientCommandId: "dur5", command: { type: "TryCombination", method: "crouch", target: { kind: "tile", x: p.x, y: p.y } } };
+  const result = processCommand(ctx(s), env);
+  assert.equal(result.accepted, true, JSON.stringify(result));
+  assert.equal(result.durationMs, undefined);
+});

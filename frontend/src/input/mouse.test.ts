@@ -299,3 +299,78 @@ test("uiIntent routing: 'crouch' with no crouchAt is a defensive no-op (never fa
 
   assert.deepEqual(calls, [], "no crouchAt means no dispatch at all — defensive guard, not a misroute to toggleInventory");
 });
+
+// --- Slice C (Decision 1, engram #2854): isBusy suppresses ALL click
+// dispatch, including the "select" decision, which never calls sendCommand
+// at all (this is why mouse.ts needs its own isBusy check, not just
+// game.ts's sendCommand). -------------------------------------------------
+
+test("onCanvasClick: while isBusy() is true, a click is a total no-op — no thought, no selection, no menu", () => {
+  let clickHandler: ((ev: FakeClickEvent) => void) | null = null;
+  const canvas = fakeCanvas(4 * PX, (cb) => (clickHandler = cb));
+  const thoughts: string[] = [];
+  let menuOpened = false;
+
+  const ui: Ui = {
+    mount: () => {},
+    showThought: (t: string) => thoughts.push(t),
+    destroy: () => {},
+    toggleInventory: () => {},
+    toggleThoughts: () => {},
+    toggleSurface: () => {},
+    toggleCrouch: () => {},
+    openContextMenu: () => {
+      menuOpened = true;
+    },
+    closeContextMenu: () => {},
+  };
+
+  createInputController({
+    canvas,
+    catalog: routingCatalog(),
+    getSnapshot: routingSnapshot,
+    getFrame: routingFrame,
+    sendCommand: async (_command: Command) => {},
+    ui,
+    isBusy: () => true,
+  });
+
+  const point = screenPointForTile(2, 1); // the rustic_table's tile — a normal click here would select it
+  clickHandler!(point);
+
+  assert.deepEqual(thoughts, [], "no inspect thought — the select decision itself never ran");
+  assert.equal(menuOpened, false);
+});
+
+test("onCanvasClick: isBusy defaults to never-busy when omitted — clicks behave exactly as before Slice C", () => {
+  let clickHandler: ((ev: FakeClickEvent) => void) | null = null;
+  const canvas = fakeCanvas(4 * PX, (cb) => (clickHandler = cb));
+  const thoughts: string[] = [];
+
+  const ui: Ui = {
+    mount: () => {},
+    showThought: (t: string) => thoughts.push(t),
+    destroy: () => {},
+    toggleInventory: () => {},
+    toggleThoughts: () => {},
+    toggleSurface: () => {},
+    toggleCrouch: () => {},
+    openContextMenu: () => {},
+    closeContextMenu: () => {},
+  };
+
+  createInputController({
+    canvas,
+    catalog: routingCatalog(),
+    getSnapshot: routingSnapshot,
+    getFrame: routingFrame,
+    sendCommand: async (_command: Command) => {},
+    ui,
+    // isBusy intentionally omitted
+  });
+
+  const point = screenPointForTile(2, 1);
+  clickHandler!(point);
+
+  assert.equal(thoughts.length, 1, "a normal select-decision inspect thought still fires when isBusy is not provided");
+});

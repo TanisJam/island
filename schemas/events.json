@@ -199,7 +199,8 @@
         "clientCommandId": { "type": "string" },
         "accepted": { "type": "boolean" },
         "events": { "type": "array", "items": { "$ref": "#/definitions/Event" } },
-        "rejection": { "$ref": "#/definitions/Rejection" }
+        "rejection": { "$ref": "#/definitions/Rejection" },
+        "durationMs": { "type": "number", "minimum": 0 }
       }
     }
   },
