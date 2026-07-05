@@ -19,6 +19,7 @@ import {
   type HudHandlers,
 } from "./hud";
 import type { CellDescriptor } from "./drag";
+import type { ScreenPoint } from "./window-manager";
 import { createObservedStore } from "../state/observed";
 
 /**
@@ -174,6 +175,12 @@ test("surfaceCellMessage: names the occupant, or reports an empty cell", () => {
 // tests run under plain node:test, no jsdom — same pattern as
 // window-manager.test.ts's FakeElement). ----------------------------------
 
+/** Minimal fake `ClickEvent` — only `stopPropagation` is ever called by
+ * production code against a fake-DOM click (item-context-menu WU3: mesa's
+ * `renderSurfaceGrid` click listener stopPropagation's an occupied cell's
+ * click). */
+type FakeClickEvent = { stopPropagation: () => void };
+
 class FakeCellElement {
   classes = new Set<string>();
   children: FakeCellElement[] = [];
@@ -181,7 +188,12 @@ class FakeCellElement {
   textContent = "";
   title = "";
   attrs: Record<string, string> = {};
-  listeners = new Map<string, Array<() => void>>();
+  listeners = new Map<string, Array<(ev: FakeClickEvent) => void>>();
+  /** Configurable per-test (item-context-menu WU3: `onTap`/the mesa click
+   * listener read `cell.getBoundingClientRect()` at tap/click time) —
+   * defaults to a fixed, non-zero rect so a test asserting the exact anchor
+   * point doesn't accidentally pass against an all-zero default. */
+  rect = { left: 10, top: 20, right: 30, bottom: 40, width: 20, height: 20 };
 
   get className(): string {
     return [...this.classes].join(" ");
@@ -202,14 +214,24 @@ class FakeCellElement {
     this.attrs[name] = value;
   }
 
-  addEventListener(type: string, cb: () => void): void {
+  getBoundingClientRect(): { left: number; top: number; right: number; bottom: number; width: number; height: number } {
+    return this.rect;
+  }
+
+  addEventListener(type: string, cb: (ev: FakeClickEvent) => void): void {
     const arr = this.listeners.get(type) ?? [];
     arr.push(cb);
     this.listeners.set(type, arr);
   }
 
-  click(): void {
-    for (const cb of this.listeners.get("click") ?? []) cb();
+  /** Returns whether any registered `click` listener called `stopPropagation`
+   * on the synthesized event — item-context-menu WU3 needs this to assert the
+   * mesa's occupied/empty stopPropagation split. */
+  click(): { stoppedPropagation: boolean } {
+    let stoppedPropagation = false;
+    const ev: FakeClickEvent = { stopPropagation: () => { stoppedPropagation = true; } };
+    for (const cb of this.listeners.get("click") ?? []) cb(ev);
+    return { stoppedPropagation };
   }
 }
 
@@ -228,9 +250,13 @@ test("renderSurfaceGrid: renders exactly width*height cells and places the occup
     const placed = surfaceItem("it1", "small_stone", "wo_table", 2, 1);
     const snapshot = snapshotWithItems([placed, surfaceItem("it2", "small_stone", "wo_other_table", 0, 0)]);
     const clicks: Array<ItemInstance | undefined> = [];
+    const ats: ScreenPoint[] = [];
 
     const grid = renderSurfaceGrid(surfaceCatalog, snapshot, "wo_table", { width: 3, height: 2 }, {
-      onCellClick: (item) => clicks.push(item),
+      onCellClick: (item, at) => {
+        clicks.push(item);
+        ats.push(at);
+      },
     }) as unknown as FakeCellElement;
 
     assert.equal(grid.children.length, 6, "3x2 grid renders exactly 6 cells");
@@ -242,10 +268,20 @@ test("renderSurfaceGrid: renders exactly width*height cells and places the occup
     assert.ok(filledCell.classes.has("filled"));
     assert.equal(filledCell.title, "Piedra");
 
-    filledCell.click();
+    // Item-context-menu change (WU3): an occupied cell's click stops
+    // propagation (so it never reaches the document outside-click dismiss
+    // and closes its own just-opened menu); an empty cell's click does not
+    // (so outside-click dismiss still works for empty-cell clicks).
+    const filledResult = filledCell.click();
+    assert.equal(filledResult.stoppedPropagation, true, "an occupied cell's click stops propagation");
     const emptyCell = grid.children[0]!;
-    emptyCell.click();
+    const emptyResult = emptyCell.click();
+    assert.equal(emptyResult.stoppedPropagation, false, "an empty cell's click does NOT stop propagation");
     assert.deepEqual(clicks, [placed, undefined], "clicking reports the real occupant, or undefined for an empty cell");
+    assert.deepEqual(ats, [
+      { x: filledCell.rect.left, y: filledCell.rect.bottom },
+      { x: emptyCell.rect.left, y: emptyCell.rect.bottom },
+    ], "at is the cell's getBoundingClientRect()-derived anchor (left, bottom)");
   });
 });
 
@@ -343,28 +379,31 @@ test("renderInventoryGrid: registers every cell (occupied, empty, hand) via hand
   });
 });
 
-test("renderInventoryGrid: a non-hand occupied cell's onTap calls onEquip; an occupied hand cell's onTap calls onDrop", () => {
+test("renderInventoryGrid: an occupied cell's onTap opens the item menu at the cell's rect (bag and hand alike) — item-context-menu WU3, replaces the old onEquip/onDrop wiring", () => {
   withFakeDocument(() => {
     const bagItem = inventoryItemAt("bag1", "small_stone", 2, 2);
     const handItem = inventoryItemAt("hand1", "small_stone", 0, 0); // left hand slot
     const snapshot = fullInventorySnapshot([bagItem, handItem]);
-    const equipped: string[] = [];
-    const dropped: string[] = [];
-    const byItemId = new Map<string, CellDescriptor>();
+    const opened: Array<{ item: ItemInstance; at: ScreenPoint; source: "tap" | "click" }> = [];
+    const byItemId = new Map<string, { cell: FakeCellElement; descriptor: CellDescriptor }>();
     const handlers: HudHandlers = {
-      onEquip: (id) => equipped.push(id),
-      onDrop: (id) => dropped.push(id),
-      bindDrag: (_cell, descriptor) => {
-        if (descriptor.occupant) byItemId.set(descriptor.occupant.id, descriptor);
+      onEquip: () => {},
+      onDrop: () => {},
+      openItemMenu: (item, at, source) => opened.push({ item, at, source }),
+      bindDrag: (cell, descriptor) => {
+        if (descriptor.occupant) byItemId.set(descriptor.occupant.id, { cell: cell as unknown as FakeCellElement, descriptor });
       },
     };
     renderInventoryGrid(surfaceCatalog, snapshot, handlers);
 
-    byItemId.get("bag1")?.onTap?.();
-    byItemId.get("hand1")?.onTap?.();
+    const bag = byItemId.get("bag1")!;
+    const hand = byItemId.get("hand1")!;
+    bag.descriptor.onTap?.();
+    hand.descriptor.onTap?.();
 
-    assert.deepEqual(equipped, ["bag1"]);
-    assert.deepEqual(dropped, ["hand1"]);
+    assert.equal(opened.length, 2, "onEquip/onDrop are no longer called — openItemMenu is called once per tap instead");
+    assert.deepEqual(opened[0], { item: bagItem, at: { x: bag.cell.rect.left, y: bag.cell.rect.bottom }, source: "tap" });
+    assert.deepEqual(opened[1], { item: handItem, at: { x: hand.cell.rect.left, y: hand.cell.rect.bottom }, source: "tap" });
   });
 });
 

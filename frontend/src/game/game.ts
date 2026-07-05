@@ -1,5 +1,6 @@
 import type { Command, CommandEnvelope, CommandResult, Event } from "../contract";
-import { dropTargetTile } from "../actions/context-menu";
+import { buildItemMenu, dropTargetTile, type ContextMenuItem } from "../actions/context-menu";
+import { dispatchMenuItem, type MenuDispatchDeps } from "../actions/context-menu-dispatch";
 import { fetchCatalog, fetchPlayerState, fetchZone } from "../net/api";
 import type { Transport } from "../net/transport";
 import { buildSnapshot, type ClientSnapshot } from "../state/snapshot";
@@ -237,6 +238,30 @@ export function createGame(deps: GameDeps): Game {
       },
       onTryCombinationSurface: (surfaceId) => {
         void sendCommand({ type: "TryCombination", method: "surface", target: { kind: "world_object", id: surfaceId } });
+      },
+      // Item-context-menu change (WU3, design.md Component 3/Component 5):
+      // builds the property/origin-gated menu for the tapped/clicked item and
+      // dispatches the selected entry through the shared `dispatchMenuItem`
+      // (extracted in WU2). No `onMove` — the item menu has no selection
+      // concept to clear, unlike the canvas menu's `input/mouse.ts` caller.
+      // `dispatchDeps` deliberately re-reads `store.getState()`/`catalog` at
+      // SELECTION time (not menu-build time) via the closures below, same
+      // "always current" discipline as every other `sendCommand`-backed
+      // handler in this file.
+      openItemMenu: (item, at, source) => {
+        const menu = buildItemMenu(item, catalog, store.getState());
+        const dispatchDeps: MenuDispatchDeps = {
+          sendCommand,
+          toggleInventory: deps.ui.toggleInventory,
+          toggleThoughts: deps.ui.toggleThoughts,
+          toggleSurface: deps.ui.toggleSurface,
+          toggleCrouch: deps.ui.toggleCrouch,
+          showThought: deps.ui.showThought,
+          onError: () => deps.ui.showThought("Algo salió mal. Mejor intento otra cosa."),
+        };
+        const onSelect = (menuItem: ContextMenuItem): void => dispatchMenuItem(menuItem, dispatchDeps);
+        if (source === "tap") deps.ui.openItemMenu(menu, at, onSelect);
+        else deps.ui.openContextMenu(menu, at, onSelect);
       },
       bindDrag: dragController.bindCell,
       bindGrid: dragController.bindGrid,

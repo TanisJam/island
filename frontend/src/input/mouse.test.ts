@@ -217,6 +217,7 @@ function captureMenuOnSelect(uiOverrides: Partial<Ui> = {}): (item: ContextMenuI
       capturedOnSelect = onSelect;
     },
     closeContextMenu: () => {},
+    openItemMenu: () => {},
     ...uiOverrides,
   };
 
@@ -323,6 +324,7 @@ test("onCanvasClick: while isBusy() is true, a click is a total no-op — no tho
       menuOpened = true;
     },
     closeContextMenu: () => {},
+    openItemMenu: () => {},
   };
 
   createInputController({
@@ -357,6 +359,7 @@ test("onCanvasClick: isBusy defaults to never-busy when omitted — clicks behav
     toggleCrouch: () => {},
     openContextMenu: () => {},
     closeContextMenu: () => {},
+    openItemMenu: () => {},
   };
 
   createInputController({

@@ -4,10 +4,25 @@ import { findCraftable } from "../actions/available";
 import { createEmojiAssets } from "../render/assets";
 import { isRevealed, type ObservedStore } from "../state/observed";
 import type { CellDescriptor, GridContext } from "./drag";
+import type { ScreenPoint } from "./window-manager";
 
 export type HudHandlers = {
+  /** DEPRECATED (item-context-menu WU3): superseded by `openItemMenu` below.
+   * Kept declared + wired through `game.ts` for THIS work-unit only — dead
+   * but harmless, since `renderInventoryGrid`'s `onTap` no longer calls it.
+   * Removal is deferred to WU5 cleanup (tasks.md Phase 6.1). */
   onEquip: (itemInstanceId: string) => void;
+  /** DEPRECATED (item-context-menu WU3): see `onEquip` above — same deferred
+   * removal in WU5. */
   onDrop: (itemInstanceId: string) => void;
+  /** Opens the per-item context menu (item-context-menu change, design.md
+   * Component 3/5) for `item`, anchored at `at` (the tapped/clicked cell's
+   * `getBoundingClientRect()`). `source` picks which `Ui` opener to use:
+   * `"tap"` (bag/hand pointerup) needs the synth-click swallow
+   * (`Ui.openItemMenu`); `"click"` (mesa, a real click listener that already
+   * `stopPropagation`s) uses the existing `Ui.openContextMenu`. Optional so
+   * callers/tests that don't touch the item menu don't need to stub it. */
+  openItemMenu?: (item: ItemInstance, at: ScreenPoint, source: "tap" | "click") => void;
   /** Registers a rendered cell with the drag engine (design.md "Drag
    * wiring") — optional so callers/tests that don't care about drag (yet)
    * don't need to stub it; `game/game.ts` is the only real caller that sets
@@ -289,8 +304,15 @@ export function renderInventoryGrid(catalog: Catalog, snapshot: ClientSnapshot, 
           cell.textContent = itemGlyph(occupant.itemTypeId) || name;
         }
         cell.title = `${name} — ${isHandSlot ? "equipado, click para soltar" : "en la mochila, click para equipar"}`;
-        const occupantId = occupant.id;
-        onTap = isHandSlot ? () => handlers.onDrop(occupantId) : () => handlers.onEquip(occupantId);
+        // Item-context-menu change (WU3): tapping an occupied cell (bag or
+        // hand) opens the per-item menu instead of directly equipping/
+        // dropping — `rect` is read HERE, at tap time, not at render time, so
+        // it reflects the cell's actual on-screen position (design.md
+        // Component 3). `onEquip`/`onDrop` are no longer wired from here.
+        onTap = () => {
+          const rect = cell.getBoundingClientRect();
+          handlers.openItemMenu?.(occupant, { x: rect.left, y: rect.bottom }, "tap");
+        };
       } else if (isHandSlot) {
         // Empty hand slot: dashed border + "mano" label (style.css), no tap
         // action — nothing to equip/drop from an empty slot.
@@ -337,8 +359,10 @@ export function occupiedCellsForItem(item: ItemInstance, catalog: Catalog): Posi
 export type SurfaceGridHandlers = {
   /** Fired when a grid cell is clicked; `item` is the occupant at that cell,
    * or `undefined` for an empty cell — same "always react, never silently
-   * ignore a click" pattern used across this module. */
-  onCellClick: (item: ItemInstance | undefined) => void;
+   * ignore a click" pattern used across this module. `at` is the cell's
+   * `getBoundingClientRect()`-derived anchor point (item-context-menu
+   * change, design.md Component 3), read at click time. */
+  onCellClick: (item: ItemInstance | undefined, at: ScreenPoint) => void;
   /** Same drag registration as `HudHandlers.bindDrag` — the mesa is a valid
    * drop target (inventory/hand -> surface) AND its occupied cells are drag
    * sources (surface -> inventory), design.md "Registration covers ...
@@ -415,7 +439,19 @@ export function renderSurfaceGrid(
         }
         cell.title = name;
       }
-      cell.addEventListener("click", () => handlers.onCellClick(occupant));
+      // Item-context-menu change (WU3): an occupied mesa cell opens the
+      // per-item menu via a REAL click listener (unlike bag/hand's onTap
+      // pointer path), so it can `stopPropagation()` its own opening click —
+      // this is why the mesa needs no synth-click swallow (design.md
+      // Component 3/5). An empty cell click must still reach the document's
+      // outside-click dismiss listener, so `stopPropagation` is ONLY called
+      // when occupied.
+      cell.addEventListener("click", (ev) => {
+        const rect = cell.getBoundingClientRect();
+        const at: ScreenPoint = { x: rect.left, y: rect.bottom };
+        if (occupant) ev.stopPropagation();
+        handlers.onCellClick(occupant, at);
+      });
       handlers.bindDrag?.(cell, { kind: "surface", surfaceId, x, y, occupant });
       cellMap.set(`${x},${y}`, cell);
       grid.appendChild(cell);

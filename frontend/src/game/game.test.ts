@@ -127,6 +127,7 @@ function fakeUi(): Ui {
     toggleCrouch: () => {},
     openContextMenu: () => {},
     closeContextMenu: () => {},
+    openItemMenu: () => {},
   };
 }
 

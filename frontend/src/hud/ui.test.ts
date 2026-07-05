@@ -5,6 +5,7 @@ import type { ClientSnapshot } from "../state/snapshot";
 import { createStore } from "../state/store";
 import { createDomUi } from "./ui";
 import type { HudHandlers } from "./hud";
+import type { ContextMenu, ContextMenuItem } from "../actions/context-menu";
 
 /**
  * Minimal fake DOM (same pattern as `window-manager.test.ts`'s `FakeElement`/
@@ -110,20 +111,31 @@ function fire(el: FakeElement, type: string, ev: Record<string, unknown> = {}): 
   for (const cb of el.listeners.get(type) ?? []) cb(ev);
 }
 
-function withFakeDom(run: (body: FakeElement) => void): void {
+/** Recorded shape of a `document.addEventListener("click", ..., opts)` call
+ * — item-context-menu WU3's `ui.test.ts` smoke test needs this to assert
+ * `Ui.openItemMenu` REGISTERS the capture-phase, one-shot swallow listener
+ * (this fake DOM has no capture phase or real event dispatch, so whether the
+ * swallow actually FIRES against a synthesized click is NOT assertable here
+ * — see Phase 7 manual QA). */
+type DocListenerCall = { type: string; capture?: boolean; once?: boolean };
+
+function withFakeDom(run: (body: FakeElement, docListenerCalls: DocListenerCall[]) => void): void {
   const originalDocument = (globalThis as { document?: unknown }).document;
   const originalWindow = (globalThis as { window?: unknown }).window;
   const body = new FakeElement();
+  const docListenerCalls: DocListenerCall[] = [];
   (globalThis as { document?: unknown }).document = {
     createElement: () => new FakeElement(),
     getElementById: () => null,
-    addEventListener: () => {},
+    addEventListener: (type: string, _cb: unknown, opts?: { capture?: boolean; once?: boolean }) => {
+      docListenerCalls.push({ type, capture: opts?.capture, once: opts?.once });
+    },
     removeEventListener: () => {},
     body,
   };
   (globalThis as { window?: unknown }).window = { innerWidth: 1024, innerHeight: 768 };
   try {
-    run(body);
+    run(body, docListenerCalls);
   } finally {
     (globalThis as { document?: unknown }).document = originalDocument;
     (globalThis as { window?: unknown }).window = originalWindow;
@@ -328,5 +340,44 @@ test("createDomUi + toggleSurface integration: la mesa muestra 'Probar combinaci
     fire(button!, "click");
 
     assert.deepEqual(tryCalls, ["wo_table"], "dispatchea TryCombination con method:'surface' contra el surfaceId de la mesa, no el de crouch");
+  });
+});
+
+// --- Ui.openItemMenu (item-context-menu WU3, design.md Component 5) ------
+// Smoke only: this fake DOM has no capture phase or real event bubbling, so
+// the actual synth-click swallow behavior (does it neutralize a trailing
+// browser click after tap?) is NOT assertable here — only that the menu
+// opens and that a capture-phase, one-shot document click listener gets
+// REGISTERED. The real behavior is Phase 7 manual/Playwright QA.
+
+test("Ui.openItemMenu: opens a single CONTEXT_MENU window (.win.menu) and registers a capture-phase, one-shot document click swallower", () => {
+  withFakeDom((root, docListenerCalls) => {
+    const snapshot = makeSnapshot([]);
+    const store = createStore(snapshot);
+    const handlers: HudHandlers = { onEquip: () => {}, onDrop: () => {} };
+
+    const ui = createDomUi();
+    ui.mount(store, catalog, handlers);
+
+    const menu: ContextMenu = {
+      title: "Rama",
+      sections: [{ title: "Rama", items: [{ id: "examinar", label: "Examinar", kind: "info", thought: "Veo una rama." }] }],
+    };
+    const selected: ContextMenuItem[] = [];
+    const callsBefore = docListenerCalls.length;
+
+    ui.openItemMenu(menu, { x: 10, y: 20 }, (item) => selected.push(item));
+
+    const menuWindow = root.find((el) => el.classes.has("menu"));
+    assert.ok(menuWindow, "opens a single CONTEXT_MENU window (.win.menu variant)");
+
+    const swallowRegistrations = docListenerCalls.slice(callsBefore).filter((c) => c.type === "click" && c.capture === true && c.once === true);
+    assert.equal(swallowRegistrations.length, 1, "arms exactly one capture-phase, one-shot document click listener when opening via the tap path");
+
+    // Selecting the only entry still routes through the same onSelect wiring
+    // `openContextMenu` uses — `openItemMenu` is not a fork of that behavior.
+    const button = menuWindow!.find((el) => el.classes.has("act"))!;
+    fire(button, "click", { stopPropagation: () => {} });
+    assert.deepEqual(selected.map((i) => i.id), ["examinar"], "menu selection dispatches through the same onSelect callback");
   });
 });

@@ -80,6 +80,15 @@ export interface Ui {
    * and invokes `onSelect` when a non-mute item is clicked. */
   openContextMenu(menu: ContextMenu, at: ScreenPoint, onSelect: (item: ContextMenuItem) => void): void;
   closeContextMenu(): void;
+  /** Same as `openContextMenu`, PLUS a one-shot capture-phase document
+   * `click` swallower armed before the menu opens (item-context-menu change,
+   * design.md Component 5). Used ONLY by the bag/hand tap path: a pointerup-
+   * driven `onTap` is followed by the browser's own synthesized trailing
+   * `click`, which would otherwise (a) raise the inventory window above the
+   * just-opened menu and (b) trip the document dismiss listener and close
+   * the menu it just opened. The canvas/mesa paths use `openContextMenu`
+   * directly instead — they `stopPropagation()` their own opening click. */
+  openItemMenu(menu: ContextMenu, at: ScreenPoint, onSelect: (item: ContextMenuItem) => void): void;
 }
 
 /** Renders a `ContextMenu` data model (actions/context-menu.ts, PURE) into
@@ -194,7 +203,12 @@ export function createDomUi(): Ui {
     const dims = resolveSurfaceDims(catalog, snapshot, surfaceId);
     if (!dims) return null;
     return renderSurfaceGrid(catalog, snapshot, surfaceId, dims, {
-      onCellClick: (item) => showThoughtDom(surfaceCellMessage(catalog, item)),
+      // Item-context-menu change (WU3): an occupied mesa cell opens the
+      // per-item menu (real click listener, already `stopPropagation`'d by
+      // `renderSurfaceGrid` — no swallow needed, hence `openContextMenu` not
+      // `openItemMenu`); an empty cell keeps the existing inspect-message
+      // path (design.md Component 3).
+      onCellClick: (item, at) => (item ? handlers.openItemMenu?.(item, at, "click") : showThoughtDom(surfaceCellMessage(catalog, item))),
       bindDrag: handlers.bindDrag,
       bindGrid: handlers.bindGrid,
       onTryCombination: () => handlers.onTryCombinationSurface?.(surfaceId),
@@ -355,6 +369,43 @@ export function createDomUi(): Ui {
 
     closeContextMenu(): void {
       windows.close(CONTEXT_MENU_ID);
+    },
+
+    openItemMenu(menu: ContextMenu, at: ScreenPoint, onSelect: (item: ContextMenuItem) => void): void {
+      // Arms a ONE-SHOT capture-phase document click swallower BEFORE
+      // delegating to the same open path `openContextMenu` uses (design.md
+      // Component 5). Capture phase runs top-down, before the tapped cell's
+      // own bubble handlers, neutralizing both the inventory-window-raise
+      // race and the outside-click-dismiss race in one shot. Scoped to
+      // exactly the trailing synthesized click: `once: true` removes the
+      // listener the moment it fires, and the `setTimeout(0)` is a safety
+      // net that removes it anyway if no synth click ever arrives — so it
+      // never contaminates a later real user click.
+      // `doc` is captured HERE (not re-read as the bare global inside the
+      // `setTimeout` callback below) so the removal always targets the exact
+      // `document` this listener was armed on — defensive against any
+      // environment where the global binding could be swapped between arming
+      // and the deferred removal (e.g. this module's own fake-DOM test
+      // harness); a real browser's `document` never changes identity either
+      // way, so this is a no-op difference there.
+      const doc = document;
+      const swallow = (ev: Event): void => {
+        ev.stopImmediatePropagation();
+        ev.preventDefault();
+      };
+      doc.addEventListener("click", swallow, { capture: true, once: true });
+      setTimeout(() => doc.removeEventListener("click", swallow, { capture: true }), 0);
+      // Delegates to the SAME open logic as `openContextMenu` — duplicated
+      // inline (rather than calling `this.openContextMenu(...)`) so this
+      // method stays safe to extract as a bare function reference, matching
+      // every other `Ui` method's "closes over locals, never reads `this`"
+      // convention (none of `toggleInventory`/`toggleSurface`/`showThought`/
+      // etc. depend on `this` either).
+      const body = renderContextMenuBody(menu, (item) => {
+        onSelect(item);
+        if (!windows.get(CONTEXT_MENU_ID)?.isPinned()) windows.close(CONTEXT_MENU_ID);
+      });
+      windows.open({ id: CONTEXT_MENU_ID, title: menu.title, body, at, variant: "menu", closable: true, draggable: true });
     },
   };
 }
