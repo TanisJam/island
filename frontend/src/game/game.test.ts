@@ -290,6 +290,30 @@ test("game.ts sendCommand: a TryCombination accepted response's graded ThoughtAd
   }
 });
 
+test("game.ts hudHandlers.onTryCombinationSurface: dispatches TryCombination with method:'surface' against the mesa's world_object target (crouch-crafting Slice D, Decision 6)", async () => {
+  stubBootFetch();
+  stubSingleTickRaf();
+  stubDocument();
+  stubWindowGlobal();
+  try {
+    let captured: CommandEnvelope["command"] | undefined;
+    const { handlers } = await bootCapturing((env) => {
+      captured = env.command;
+      return { clientCommandId: env.clientCommandId, accepted: true, events: [] };
+    });
+
+    handlers.onTryCombinationSurface?.("wo_table_1");
+    await flushMicrotasks();
+
+    assert.deepEqual(captured, { type: "TryCombination", method: "surface", target: { kind: "world_object", id: "wo_table_1" } });
+  } finally {
+    globalThis.fetch = ORIGINAL_FETCH;
+    globalThis.requestAnimationFrame = ORIGINAL_RAF;
+    globalThis.cancelAnimationFrame = ORIGINAL_CAF;
+    (globalThis as { window?: unknown }).window = ORIGINAL_WINDOW;
+  }
+});
+
 test("game.ts sendCommand REGRESSION GUARD: a non-TryCombination accepted command's ThoughtAdded is NOT written to the teletype by sendCommand itself — inventoryAddedMessage (ui.ts's own rerender) stays the sole teletype writer for those commands", async () => {
   stubBootFetch();
   stubSingleTickRaf();

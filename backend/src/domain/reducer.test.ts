@@ -40,6 +40,19 @@ test("seedState: inicializa combinationAttempts vacío", () => {
   assert.deepEqual(s.combinationAttempts, {});
 });
 
+test("seedState: inicializa crouchCraftCount en 0", () => {
+  const s = seedState(index, template);
+  assert.equal(s.crouchCraftCount, 0);
+});
+
+test("CrouchCraftPerformed: incrementa el contador de fatiga (Slice D, Decision 6)", () => {
+  const s = seedState(index, template);
+  applyEvent(s, index, { type: "CrouchCraftPerformed" });
+  assert.equal(s.crouchCraftCount, 1);
+  applyEvent(s, index, { type: "CrouchCraftPerformed" });
+  assert.equal(s.crouchCraftCount, 2);
+});
+
 test("CombinationAttempted: incrementa el contador por firma", () => {
   const s = seedState(index, template);
   applyEvent(s, index, { type: "CombinationAttempted", signature: "poor_wood|small_stone" });

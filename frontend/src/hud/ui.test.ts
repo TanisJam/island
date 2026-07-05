@@ -294,3 +294,39 @@ test("createDomUi + toggleCrouch integration: clicking 'Probar combinación' dis
     );
   });
 });
+
+test("createDomUi + toggleSurface integration: la mesa muestra 'Probar combinación' con >=2 items colocados y dispatchea method:'surface' contra el surfaceId (crouch-crafting Slice D, Decision 6)", () => {
+  withFakeDom((root) => {
+    const surfaceCat: Catalog = {
+      ...catalog,
+      items: [...catalog.items, { id: "small_stone", name: "Piedra", description: "", shape: { w: 1, h: 1 }, rotatable: false, properties: {}, tags: [] }],
+      worldObjects: [{ id: "rustic_table", name: "Mesa rústica", description: "", tags: ["surface"], blocksMovement: true, surfaceGrid: { w: 3, h: 2 } }],
+    };
+    const a: ItemInstance = { id: "s1", itemTypeId: "small_stone", location: { type: "surface", surfaceId: "wo_table", x: 0, y: 0, rotation: 0 } };
+    const b: ItemInstance = { id: "s2", itemTypeId: "small_stone", location: { type: "surface", surfaceId: "wo_table", x: 1, y: 0, rotation: 0 } };
+    const snapshot: ClientSnapshot = {
+      ...makeSnapshot([a, b]),
+      objects: [{ id: "wo_table", objectTypeId: "rustic_table", position: { x: 1, y: 1 }, state: {}, tags: [], visibility: "visible" }],
+    };
+    const store = createStore(snapshot);
+
+    const tryCalls: string[] = [];
+    const handlers: HudHandlers = {
+      onEquip: () => {},
+      onDrop: () => {},
+      onTryCombinationSurface: (surfaceId) => tryCalls.push(surfaceId),
+    };
+
+    const ui = createDomUi();
+    ui.mount(store, surfaceCat, handlers);
+    ui.toggleSurface("wo_table");
+
+    const grid = root.find((el) => el.classes.has("grid"));
+    assert.ok(grid, "la ventana 'LA MESA' está abierta");
+    const button = grid!.find((el) => el.classes.has("surface-grid-try"));
+    assert.ok(button, "el botón 'Probar combinación' aparece con >=2 items colocados en la mesa");
+    fire(button!, "click");
+
+    assert.deepEqual(tryCalls, ["wo_table"], "dispatchea TryCombination con method:'surface' contra el surfaceId de la mesa, no el de crouch");
+  });
+});

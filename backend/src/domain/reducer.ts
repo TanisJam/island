@@ -108,6 +108,10 @@ export function applyEvent(s: GameState, index: CatalogIndex, e: Event): void {
       s.combinationAttempts[e.signature] = (s.combinationAttempts[e.signature] ?? 0) + 1;
       return;
     }
+    case "CrouchCraftPerformed": {
+      s.crouchCraftCount += 1;
+      return;
+    }
   }
 }
 

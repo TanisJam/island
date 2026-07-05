@@ -197,6 +197,7 @@ export function createDomUi(): Ui {
       onCellClick: (item) => showThoughtDom(surfaceCellMessage(catalog, item)),
       bindDrag: handlers.bindDrag,
       bindGrid: handlers.bindGrid,
+      onTryCombination: () => handlers.onTryCombinationSurface?.(surfaceId),
     });
   }
 

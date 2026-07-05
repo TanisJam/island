@@ -193,6 +193,26 @@ test("TryCombination: method='crouch' con un target de tipo 'world_object' se re
   assert.equal(result.rejection?.code, "invalid_target");
 });
 
+test("TryCombination: method='surface' contra un world_object que NO declara surfaceGrid (ej. un árbol) se rechaza — no cae al fallback de proximidad de gatherCandidates (fresh-context review fix)", () => {
+  const s = seedState(index, template);
+  const p = s.player.position;
+  const treePos = { x: p.x, y: p.y - 1 };
+  const tree: WorldObject = { id: "wo_tree_nonsurface", objectTypeId: "tree", position: treePos, state: {}, tags: [], visibility: "visible" };
+  s.objects.push(tree);
+  // Pieces that WOULD satisfy craft_simple_axe (full quality, no fatigue, fast)
+  // if the proximity fallback fired — proves the rejection happens BEFORE any
+  // gathering, not merely "nothing nearby to combine".
+  s.items.push({ id: "nt1", itemTypeId: "small_stone", location: { type: "world", zoneId: s.zone.id, x: treePos.x, y: treePos.y } });
+  s.items.push({ id: "nt2", itemTypeId: "poor_wood", location: { type: "world", zoneId: s.zone.id, x: treePos.x, y: treePos.y } });
+  s.items.push({ id: "nt3", itemTypeId: "plant_fiber", location: { type: "world", zoneId: s.zone.id, x: treePos.x, y: treePos.y } });
+  const env: CommandEnvelope = { playerId: s.player.id, clientCommandId: "nosurf1", command: { type: "TryCombination", method: "surface", target: { kind: "world_object", id: tree.id } } };
+  const result = processCommand(ctx(s), env);
+  assert.equal(result.accepted, false, JSON.stringify(result));
+  assert.equal(result.rejection?.code, "invalid_target");
+  assert.equal(result.events.length, 0, "rechazado antes de gatherear/craftear — ningún evento se emite");
+  assert.equal(s.items.length, 4, "small_stone del seed + los 3 items sembrados siguen intactos, nada se consumió");
+});
+
 test("TryCombination (crouch, ready): craftea, consume las 3 piezas del tile, desbloquea conocimiento y NO registra el intento (sólo cuenta fallos)", () => {
   const s = seedState(index, template);
   const p = s.player.position;
@@ -287,4 +307,171 @@ test("TryCombination (crouch, no listo): un intento fallido NO incluye durationM
   const result = processCommand(ctx(s), env);
   assert.equal(result.accepted, true, JSON.stringify(result));
   assert.equal(result.durationMs, undefined);
+});
+
+// --- Slice D (Decision 5, engram #2854): quality by method -> starting durability ---
+
+test("TryCombination (crouch): craftea con quality 0.5 -> durability reducida (simple_axe: base 40 -> 20)", () => {
+  const s = seedState(index, template);
+  const p = s.player.position;
+  s.items.push({ id: "qc1", itemTypeId: "small_stone", location: { type: "world", zoneId: s.zone.id, x: p.x, y: p.y } });
+  s.items.push({ id: "qc2", itemTypeId: "poor_wood", location: { type: "world", zoneId: s.zone.id, x: p.x, y: p.y } });
+  s.items.push({ id: "qc3", itemTypeId: "plant_fiber", location: { type: "world", zoneId: s.zone.id, x: p.x, y: p.y } });
+  const env: CommandEnvelope = { playerId: s.player.id, clientCommandId: "qc", command: { type: "TryCombination", method: "crouch", target: { kind: "tile", x: p.x, y: p.y } } };
+  const result = processCommand(ctx(s), env);
+  assert.equal(result.accepted, true, JSON.stringify(result));
+  const added = result.events.find((e) => e.type === "ItemAddedToInventory" && e.item.itemTypeId === "simple_axe");
+  assert.ok(added, JSON.stringify(result));
+  const item = (added as Extract<typeof added, { type: "ItemAddedToInventory" }>).item;
+  assert.equal(item.quality, 0.5, "método crouch -> quality 0.5");
+  assert.equal(item.durability, 20, "quality crouch (0.5) * base 40 = 20 — coincide con el ejemplo del diseño (engram #2854)");
+});
+
+test("TryCombination (surface): craftea con quality 1.0 -> durability completa (simple_axe: 40)", () => {
+  const s = seedState(index, template);
+  withTableNear(s);
+  addOnSurface(s, "small_stone", TABLE_ID, 0, 0);
+  addOnSurface(s, "poor_wood", TABLE_ID, 0, 1, 90);
+  addOnSurface(s, "plant_fiber", TABLE_ID, 2, 0);
+  const env: CommandEnvelope = { playerId: s.player.id, clientCommandId: "qs", command: { type: "TryCombination", method: "surface", target: { kind: "world_object", id: TABLE_ID } } };
+  const result = processCommand(ctx(s), env);
+  assert.equal(result.accepted, true, JSON.stringify(result));
+  const added = result.events.find((e) => e.type === "ItemAddedToInventory" && e.item.itemTypeId === "simple_axe");
+  assert.ok(added, JSON.stringify(result));
+  const item = (added as Extract<typeof added, { type: "ItemAddedToInventory" }>).item;
+  assert.equal(item.quality, 1, "método surface (mesa) -> quality 1.0");
+  assert.equal(item.durability, 40, "quality mesa (1.0) * base 40 = durability completa");
+});
+
+test("TryCombination (surface, ready): la mesa craftea MÁS RÁPIDO que agachado (Decision 6 — la mesa es un upgrade, nunca un gate)", () => {
+  const s = seedState(index, template);
+  withTableNear(s);
+  addOnSurface(s, "small_stone", TABLE_ID, 0, 0);
+  addOnSurface(s, "poor_wood", TABLE_ID, 0, 1, 90);
+  addOnSurface(s, "plant_fiber", TABLE_ID, 2, 0);
+  const env: CommandEnvelope = { playerId: s.player.id, clientCommandId: "durf", command: { type: "TryCombination", method: "surface", target: { kind: "world_object", id: TABLE_ID } } };
+  const result = processCommand(ctx(s), env);
+  assert.equal(result.accepted, true, JSON.stringify(result));
+  assert.equal(result.durationMs, Math.round(1300 * 0.6), "craft_simple_axe declara 1300ms; la mesa aplica el factor de velocidad (0.6)");
+});
+
+// --- Slice D (Decision 6, engram #2854): fatigue thought every N crouch crafts ---
+
+function craftCrudeToolCrouchAt(s: GameState, suffix: string) {
+  const p = s.player.position;
+  s.items.push({ id: `fs_stone_${suffix}`, itemTypeId: "small_stone", location: { type: "world", zoneId: s.zone.id, x: p.x, y: p.y } });
+  s.items.push({ id: `fs_branch_${suffix}`, itemTypeId: "dry_branch", location: { type: "world", zoneId: s.zone.id, x: p.x, y: p.y } });
+  s.items.push({ id: `fs_fiber_${suffix}`, itemTypeId: "plant_fiber", location: { type: "world", zoneId: s.zone.id, x: p.x, y: p.y } });
+  return processCommand(ctx(s), { playerId: s.player.id, clientCommandId: `fs_${suffix}`, command: { type: "TryCombination", method: "crouch", target: { kind: "tile", x: p.x, y: p.y } } });
+}
+
+test("TryCombination (crouch): cada 3er craft dispara un pensamiento de fatiga (Decision 6), sin bloquear el craft", () => {
+  const s = seedState(index, template);
+  const r1 = craftCrudeToolCrouchAt(s, "a");
+  const r2 = craftCrudeToolCrouchAt(s, "b");
+  const r3 = craftCrudeToolCrouchAt(s, "c");
+  for (const r of [r1, r2, r3]) assert.equal(r.accepted, true, JSON.stringify(r));
+  const fatigueIn = (r: typeof r1) => r.events.some((e) => e.type === "ThoughtAdded" && e.thought.text.includes("cansa"));
+  assert.ok(!fatigueIn(r1), "1er craft: sin fatiga");
+  assert.ok(!fatigueIn(r2), "2do craft: sin fatiga");
+  assert.ok(fatigueIn(r3), "3er craft: dispara la fatiga (N=3)");
+  assert.ok(r3.events.some((e) => e.type === "ItemAddedToInventory" && e.item.itemTypeId === "crude_tool"), "la fatiga NUNCA bloquea el craft — sigue disponible");
+  assert.equal(s.crouchCraftCount, 3);
+});
+
+test("TryCombination (surface): los crafts en la mesa NUNCA incrementan crouchCraftCount ni disparan fatiga", () => {
+  const s = seedState(index, template);
+  withTableNear(s);
+  for (let i = 0; i < 3; i++) {
+    addOnSurface(s, "small_stone", TABLE_ID, 0, 0);
+    addOnSurface(s, "dry_branch", TABLE_ID, 0, 1, 90);
+    addOnSurface(s, "plant_fiber", TABLE_ID, 2, 0);
+    const r = processCommand(ctx(s), { playerId: s.player.id, clientCommandId: `srf_fatigue_${i}`, command: { type: "TryCombination", method: "surface", target: { kind: "world_object", id: TABLE_ID } } });
+    assert.equal(r.accepted, true, JSON.stringify(r));
+    assert.ok(!r.events.some((e) => e.type === "ThoughtAdded" && e.thought.text.includes("cansa")), `craft ${i}: la mesa nunca fatiga`);
+  }
+  assert.equal(s.crouchCraftCount, 0, "los crafts vía mesa jamás incrementan el contador de fatiga");
+});
+
+// --- MANDATORY (Slice D, Decision 5 criterio #6): completion guarantee ---
+
+test("MANDATORY: hacha crouch-crafteada (durability 20) sobrevive despejar un tile de dense_jungle", () => {
+  const s = seedState(index, template);
+  const p = s.player.position;
+  s.items.push({ id: "ax_head", itemTypeId: "small_stone", location: { type: "world", zoneId: s.zone.id, x: p.x, y: p.y } });
+  s.items.push({ id: "ax_handle", itemTypeId: "poor_wood", location: { type: "world", zoneId: s.zone.id, x: p.x, y: p.y } });
+  s.items.push({ id: "ax_binder", itemTypeId: "plant_fiber", location: { type: "world", zoneId: s.zone.id, x: p.x, y: p.y } });
+  const craft = processCommand(ctx(s), { playerId: s.player.id, clientCommandId: "ax1", command: { type: "TryCombination", method: "crouch", target: { kind: "tile", x: p.x, y: p.y } } });
+  assert.equal(craft.accepted, true, JSON.stringify(craft));
+  const axeEv = craft.events.find((e) => e.type === "ItemAddedToInventory" && e.item.itemTypeId === "simple_axe");
+  assert.ok(axeEv, "craftea el hacha agachado");
+  const axe = (axeEv as Extract<typeof axeEv, { type: "ItemAddedToInventory" }>).item;
+  assert.equal(axe.durability, 20, "quality crouch (0.5) * base 40 = 20");
+
+  const equip = processCommand(ctx(s), { playerId: s.player.id, clientCommandId: "ax2", command: { type: "MoveItem", itemInstanceId: axe.id, to: { type: "hand", hand: "left" } } });
+  assert.equal(equip.accepted, true, JSON.stringify(equip));
+
+  s.player.position = { x: 8, y: 3 };
+  const clear = processCommand(ctx(s), { playerId: s.player.id, clientCommandId: "ax3", command: { type: "ExecuteAction", actionId: "clear_jungle", target: { kind: "tile", x: 8, y: 2 } } });
+  assert.equal(clear.accepted, true, JSON.stringify(clear));
+  assert.ok(clear.events.some((e) => e.type === "TileChanged" && e.terrain === "dirt"), "el tile despeja con margen (20 durability - 8 de daño = 12)");
+  const toolDamaged = clear.events.find((e) => e.type === "ToolDamaged");
+  assert.ok(toolDamaged, "la herramienta se dañó pero sobrevivió");
+  assert.ok((toolDamaged as Extract<typeof toolDamaged, { type: "ToolDamaged" }>).durability >= 0);
+});
+
+test("MANDATORY: la cadena de 20 min se completa AGACHADO-SOLO — crude tool -> madera pobre -> hacha simple -> despejar un tile de jungla, SIN mesa", () => {
+  const s = seedState(index, template);
+  const p = s.player.position;
+
+  // 1. Crouch-craft crude_tool on the player's spawn tile — no mesa involved.
+  s.items.push({ id: "ch_stone", itemTypeId: "small_stone", location: { type: "world", zoneId: s.zone.id, x: p.x, y: p.y } });
+  s.items.push({ id: "ch_branch", itemTypeId: "dry_branch", location: { type: "world", zoneId: s.zone.id, x: p.x, y: p.y } });
+  s.items.push({ id: "ch_fiber1", itemTypeId: "plant_fiber", location: { type: "world", zoneId: s.zone.id, x: p.x, y: p.y } });
+  const craftTool = processCommand(ctx(s), { playerId: s.player.id, clientCommandId: "ch1", command: { type: "TryCombination", method: "crouch", target: { kind: "tile", x: p.x, y: p.y } } });
+  assert.equal(craftTool.accepted, true, JSON.stringify(craftTool));
+  const toolAdded = craftTool.events.find((e) => e.type === "ItemAddedToInventory" && e.item.itemTypeId === "crude_tool");
+  assert.ok(toolAdded, "paso 1: crafteó la herramienta rudimentaria agachado");
+  const crudeTool = (toolAdded as Extract<typeof toolAdded, { type: "ItemAddedToInventory" }>).item;
+  assert.equal(crudeTool.durability, 10, "quality crouch (0.5) * base 20 = 10");
+
+  // 2. Equip it in the active hand so cut_tree_crude's `hand` requirement is met.
+  const equip1 = processCommand(ctx(s), { playerId: s.player.id, clientCommandId: "ch2", command: { type: "MoveItem", itemInstanceId: crudeTool.id, to: { type: "hand", hand: "left" } } });
+  assert.equal(equip1.accepted, true, JSON.stringify(equip1));
+
+  // 3. Cut a tree with it -> madera pobre.
+  const tree = s.objects.find((o) => o.objectTypeId === "tree")!;
+  s.player.position = { x: tree.position.x, y: tree.position.y + 1 };
+  const cut = processCommand(ctx(s), { playerId: s.player.id, clientCommandId: "ch3", command: { type: "ExecuteAction", actionId: "cut_tree_crude", target: { kind: "world_object", id: tree.id } } });
+  assert.equal(cut.accepted, true, JSON.stringify(cut));
+  const woodAdded = cut.events.find((e) => e.type === "ItemAddedToInventory" && e.item.itemTypeId === "poor_wood");
+  assert.ok(woodAdded, "paso 3: obtiene madera pobre con la herramienta rudimentaria");
+  const poorWood = (woodAdded as Extract<typeof woodAdded, { type: "ItemAddedToInventory" }>).item;
+  assert.ok(cut.events.some((e) => e.type === "ToolDamaged"), "la herramienta (ahora dañable, fix #2853) se dañó al cortar");
+
+  // 4. Gather crude_tool + poor_wood + a fresh plant_fiber onto ONE tile's ground
+  //    (crouch method reads ONLY that tile's ground items — per-tile amendment
+  //    #2857) and crouch-craft the simple_axe. Back at the original spawn tile.
+  const combineAt = { x: p.x, y: p.y };
+  s.items.find((i) => i.id === crudeTool.id)!.location = { type: "world", zoneId: s.zone.id, x: combineAt.x, y: combineAt.y };
+  s.items.find((i) => i.id === poorWood.id)!.location = { type: "world", zoneId: s.zone.id, x: combineAt.x, y: combineAt.y };
+  s.items.push({ id: "ch_fiber2", itemTypeId: "plant_fiber", location: { type: "world", zoneId: s.zone.id, x: combineAt.x, y: combineAt.y } });
+  s.player.position = combineAt;
+
+  const craftAxe = processCommand(ctx(s), { playerId: s.player.id, clientCommandId: "ch4", command: { type: "TryCombination", method: "crouch", target: { kind: "tile", x: combineAt.x, y: combineAt.y } } });
+  assert.equal(craftAxe.accepted, true, JSON.stringify(craftAxe));
+  const axeAdded = craftAxe.events.find((e) => e.type === "ItemAddedToInventory" && e.item.itemTypeId === "simple_axe");
+  assert.ok(axeAdded, "paso 4: crafteó el hacha simple agachado (sin mesa)");
+  const simpleAxe = (axeAdded as Extract<typeof axeAdded, { type: "ItemAddedToInventory" }>).item;
+  assert.equal(simpleAxe.durability, 20, "quality crouch (0.5) * base 40 = 20 — coincide con el ejemplo del diseño");
+
+  // 5. Equip the axe and clear one dense_jungle tile — criterio #6.
+  const equip2 = processCommand(ctx(s), { playerId: s.player.id, clientCommandId: "ch5", command: { type: "MoveItem", itemInstanceId: simpleAxe.id, to: { type: "hand", hand: "left" } } });
+  assert.equal(equip2.accepted, true, JSON.stringify(equip2));
+
+  s.player.position = { x: 8, y: 3 };
+  const clear = processCommand(ctx(s), { playerId: s.player.id, clientCommandId: "ch6", command: { type: "ExecuteAction", actionId: "clear_jungle", target: { kind: "tile", x: 8, y: 2 } } });
+  assert.equal(clear.accepted, true, JSON.stringify(clear));
+  assert.ok(clear.events.some((e) => e.type === "TileChanged" && e.terrain === "dirt"), "paso 5: el tile de jungla se despeja — la cadena completa AGACHADO-SOLO, sin mesa");
+  assert.equal(s.crouchCraftCount, 2, "2 crafts agachados en toda la cadena (crude_tool + simple_axe) — no alcanza el umbral de fatiga (N=3)");
 });

@@ -152,6 +152,12 @@
         "signature": { "type": "string" }
       }
     },
+    "CrouchCraftPerformed": {
+      "type": "object", "required": ["type"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "CrouchCraftPerformed" }
+      }
+    },
     "Event": {
       "oneOf": [
         { "$ref": "#/definitions/PlayerMoved" },
@@ -173,7 +179,8 @@
         { "$ref": "#/definitions/KnowledgeUnlocked" },
         { "$ref": "#/definitions/ThoughtAdded" },
         { "$ref": "#/definitions/ActionFailed" },
-        { "$ref": "#/definitions/CombinationAttempted" }
+        { "$ref": "#/definitions/CombinationAttempted" },
+        { "$ref": "#/definitions/CrouchCraftPerformed" }
       ]
     },
     "RejectionCode": {

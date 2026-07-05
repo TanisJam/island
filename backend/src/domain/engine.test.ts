@@ -159,6 +159,49 @@ test("executeAction: una acción SIN durationMs authored no lo incluye en el res
   assert.equal(r.durationMs, undefined);
 });
 
+// --- Slice D (Decision 5, engram #2854 + discovery #2853): add_item stamps
+// catalog durability onto crafted items (previously undefined -> indestructible) ---
+
+test("[fix #2853] add_item estampa durability desde el catálogo al craftear (antes: undefined -> herramienta indestructible)", () => {
+  const s = seedState(index, template);
+  const p = s.player.position;
+  addOnGround(s, "small_stone", p.x, p.y);
+  addOnGround(s, "dry_branch", p.x, p.y);
+  addOnGround(s, "plant_fiber", p.x, p.y);
+  const r = executeAction(ctx(s), "improvise_crude_tool", { kind: "tile", x: p.x, y: p.y });
+  const evs = events(r);
+  const added = evs.find((e) => e.type === "ItemAddedToInventory" && e.item.itemTypeId === "crude_tool");
+  assert.ok(added, JSON.stringify(r));
+  const item = (added as Extract<typeof added, { type: "ItemAddedToInventory" }>).item;
+  assert.equal(item.durability, 20, "quality 1.0 (ExecuteAction/mesa path) * base 20 = 20 — antes era undefined");
+  assert.equal(item.quality, 1, "el item crafteado por este camino lleva quality completa");
+});
+
+test("[fix #2853] una herramienta crafteada por ExecuteAction ahora es dañable end-to-end (durability real -> damage_active_tool la reduce)", () => {
+  const s = seedState(index, template);
+  const p = s.player.position;
+  addOnGround(s, "small_stone", p.x, p.y);
+  addOnGround(s, "dry_branch", p.x, p.y);
+  addOnGround(s, "plant_fiber", p.x, p.y);
+  const craftEvs = events(executeAction(ctx(s), "improvise_crude_tool", { kind: "tile", x: p.x, y: p.y }));
+  const crafted = craftEvs.find((e) => e.type === "ItemAddedToInventory" && e.item.itemTypeId === "crude_tool");
+  assert.ok(crafted, JSON.stringify(craftEvs));
+  const item = (crafted as Extract<typeof crafted, { type: "ItemAddedToInventory" }>).item;
+
+  // Move it into an active hand slot manually (state is already authoritative here;
+  // no need to go through MoveItem/processCommand for this domain-level test).
+  const it = s.items.find((i) => i.id === item.id)!;
+  it.location = { type: "player_inventory", playerId: s.player.id, x: 0, y: 0, rotation: 0 };
+
+  const tree = s.objects.find((o) => o.objectTypeId === "tree")!;
+  s.player.position = { x: tree.position.x, y: tree.position.y + 1 };
+  const r = executeAction(ctx(s), "cut_tree_crude", { kind: "world_object", id: tree.id });
+  const evs = events(r);
+  const dmg = evs.find((e) => e.type === "ToolDamaged");
+  assert.ok(dmg, "antes del fix, durability undefined => damage_active_tool nunca encontraba la herramienta activa (find() de typeof==='number' fallaba)");
+  assert.equal((dmg as Extract<typeof dmg, { type: "ToolDamaged" }>).durability, 18, "20 (durability estampada) - 2 (damage_active_tool de cut_tree_crude)");
+});
+
 test("executeAction: un roll de éxito fallido igual surfa el durationMs de la acción (el intento tomó tiempo)", () => {
   const s = seedState(index, template);
   const campfire: WorldObject = { id: "wo_fire_dur", objectTypeId: "campfire", position: { x: 9, y: 9 }, state: { lit: false, fuel: 0 }, tags: [], visibility: "visible" };

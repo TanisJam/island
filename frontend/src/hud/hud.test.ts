@@ -453,13 +453,51 @@ test("renderSurfaceGrid: mesa parity — multi-cell items get exactly one overla
     const snapshot = snapshotWithItems([single, multi]);
     const grid = renderSurfaceGrid(surfaceCatalog, snapshot, "wo_table", { width: 3, height: 2 }, { onCellClick: () => {} }) as unknown as FakeCellElement;
 
-    assert.equal(grid.children.length, 3 * 2 + 1, "6 per-coordinate cells + exactly 1 overlay for the one multi-cell item");
+    // crouch-crafting Slice D: >=2 placed items also appends the "Probar
+    // combinación" button (`.surface-grid-try`) — accounted for in the +1 below,
+    // alongside the one multi-cell overlay.
+    assert.equal(grid.children.length, 3 * 2 + 1 + 1, "6 per-coordinate cells + 1 overlay for the multi-cell item + 1 'Probar combinación' button (>=2 items placed)");
     const overlays = overlaysOf(grid);
     assert.equal(overlays.length, 1);
     assert.equal(overlays[0]?.textContent, "🪵");
 
     const singleCell = grid.children[0 * 3 + 0]!; // (0,0)
     assert.equal(singleCell.textContent, "🪨", "single-cell item keeps its glyph directly on the cell — no overlay");
+  });
+});
+
+// --- "Probar combinación" on the mesa (crouch-crafting Slice D, Decision 6 —
+// deferred from Slice B2) -----------------------------------------------------
+
+function findByClass(grid: FakeCellElement, cls: string): FakeCellElement | undefined {
+  return grid.children.find((c) => c.classes.has(cls));
+}
+
+test("renderSurfaceGrid: NO muestra 'Probar combinación' con menos de 2 items colocados", () => {
+  withFakeDocument(() => {
+    const snapshot = snapshotWithItems([surfaceItem("it1", "small_stone", "wo_table", 0, 0)]);
+    const grid = renderSurfaceGrid(surfaceCatalog, snapshot, "wo_table", { width: 3, height: 2 }, { onCellClick: () => {} }) as unknown as FakeCellElement;
+    assert.equal(findByClass(grid, "surface-grid-try"), undefined, "con 0 o 1 items no hay nada que combinar");
+  });
+});
+
+test("renderSurfaceGrid: muestra 'Probar combinación' con >=2 items colocados y dispatchea onTryCombination al click", () => {
+  withFakeDocument(() => {
+    const a = surfaceItem("it1", "small_stone", "wo_table", 0, 0);
+    const b = surfaceItem("it2", "poor_wood", "wo_table", 1, 0);
+    const snapshot = snapshotWithItems([a, b]);
+    let calls = 0;
+    const grid = renderSurfaceGrid(surfaceCatalog, snapshot, "wo_table", { width: 3, height: 2 }, {
+      onCellClick: () => {},
+      onTryCombination: () => {
+        calls += 1;
+      },
+    }) as unknown as FakeCellElement;
+
+    const button = findByClass(grid, "surface-grid-try");
+    assert.ok(button, "el botón aparece con >=2 items colocados en la mesa");
+    button!.click();
+    assert.equal(calls, 1, "clickear el botón dispatchea onTryCombination exactamente una vez");
   });
 });
 

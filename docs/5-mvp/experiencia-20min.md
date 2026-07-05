@@ -48,8 +48,14 @@ Resultado: **herramienta rudimentaria**.
 ```
 Herramienta rudimentaria + árbol bajo: "Ahora puedo cortar algo más que ramas."
 → madera pobre, corteza.
-Luego puede fabricar: hacha simple.
 ```
+
+Fabrica el hacha simple AGACHADO, con "Examinar de cerca" + "Probar combinación"
+sobre la madera pobre + la piedra + la fibra — no necesita construir fogata ni
+mesa para llegar al cierre del MVP. Si ya construyó una mesa, puede craftear ahí
+en cambio para mejor calidad, sin fatiga y más rápido (ver
+[Research: UX de crafteo](../1-diseno/crafting-ux-research.md)), pero es una
+mejora opcional, nunca un requisito.
 
 Primer cierre del MVP:
 

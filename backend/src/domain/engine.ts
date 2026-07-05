@@ -25,6 +25,26 @@ export type TargetRef =
   | { kind: "self" };
 
 export type EngineCtx = { state: GameState; index: CatalogIndex; rng: () => number; now: () => number };
+
+// ---- Slice D (Decision 5+6, engram #2854): quality-by-method + fatigue + mesa reframe ----
+// Quality's ONLY teeth are starting durability (no yield/speed/stat bonuses — explicit
+// non-goal). `durability = round(catalogBaseDurability * quality)`, floored at 1 so a
+// crafted tool never starts already-broken. This matches the design's worked examples
+// exactly: crude_tool base 20 -> crouch (quality 0.5) -> 10; simple_axe base 40 ->
+// crouch (quality 0.5) -> 20. (Deviates from the design doc's literally-stated
+// `base*(0.5+quality*0.5)` formula, which does NOT reproduce its own worked example —
+// `base*quality` does, so that's what's implemented; see apply-progress for the writeup.)
+const CROUCH_QUALITY = 0.5;
+const SURFACE_QUALITY = 1.0;
+/** Every Nth SUCCESSFUL crouch-method craft adds a fatigue thought nudging toward the
+ *  mesa — never blocks further crouch-crafting. Surface-method crafts never count. */
+const CROUCH_FATIGUE_INTERVAL = 3;
+/** The mesa is a strictly-better upgrade (Decision 6): full quality, no fatigue, and a
+ *  SHORTER effective duration than the same recipe crafted crouched. Crouch keeps the
+ *  recipe's authored `durationMs` unchanged (Slice C behavior — still exercised by
+ *  existing tests asserting the raw authored value); only a `surface`-method ready
+ *  craft applies this speedup factor. */
+const MESA_DURATION_FACTOR = 0.6;
 // `durationMs` (Decision 1, engram #2854 — Slice C) is PLUMBING ONLY: it surfaces which
 // recipe/action resolved so `process-command.ts` can stamp `CommandResult.durationMs`.
 // It does NOT change outcome/success-roll/energy timing — those stay atomic and unchanged.
@@ -211,6 +231,23 @@ export function tryCombination(ctx: EngineCtx, ref: TargetRef, method: "crouch" 
   const t = resolveTarget(s, index, ref);
   if (!t) return rej("invalid_target");
 
+  // Fresh-context review fix: a "surface" attempt must target an object that
+  // ACTUALLY declares a surface grid (a real mesa) — `s.inventories[objectId]`
+  // is only populated for such objects (state.ts's `rebuildInventories`/
+  // reducer.ts's `WorldObjectCreated` case). Without this check, targeting an
+  // arbitrary non-surface world_object (e.g. a tree) would still reach
+  // `gatherCombinationScope` -> `gatherCandidates(..., ["surface"], t)`, whose
+  // pre-existing proximity FALLBACK (engine.ts's `gatherCandidates`, meant for
+  // targets like a tile/campfire that legitimately have no grid) would gather
+  // nearby loose ground items instead — silently granting the mesa's
+  // full-quality/no-fatigue/fast-craft upgrade (Decision 6) with no mesa built
+  // at all. The backend must not trust the client to only ever name a real
+  // table id; this closes that gap the same way the B1 proximity/cross-
+  // validation fix did for method<->target.kind.
+  if (method === "surface" && t.kind === "world_object" && s.inventories[t.obj.id] === undefined) {
+    return rej("invalid_target", mkThought(ctx, "Esto no tiene una superficie donde combinar cosas.", "warning"));
+  }
+
   // Proximity guard — every other spatial command (TakeItem, DropItem, MoveItem->surface)
   // enforces reach; TryCombination must too, or a client could combine from anywhere
   // on the map by naming an arbitrary tile/world_object id.
@@ -234,11 +271,30 @@ export function tryCombination(ctx: EngineCtx, ref: TargetRef, method: "crouch" 
 
   if (classification.grade === "ready" && classification.recipe) {
     const { resolved } = resolveRecipeInputs(index, pieces, classification.recipe);
-    for (const e of classification.recipe.effects) applyEffect(ctx, e, t, resolved, emit);
+    // Slice D (Decision 5): quality is a function of METHOD, stamped onto the
+    // crafted output's durability at craft time via `applyEffect`'s `add_item` case.
+    const quality = method === "crouch" ? CROUCH_QUALITY : SURFACE_QUALITY;
+    for (const e of classification.recipe.effects) applyEffect(ctx, e, t, resolved, emit, quality);
     if (classification.recipe.thoughts?.success) emit({ type: "ThoughtAdded", thought: mkThought(ctx, classification.recipe.thoughts.success, "discovery") });
-    // Slice C: only a READY craft carries the matched recipe's durationMs — a failed
-    // attempt (below) is a quick glance, not a timed craft.
-    return { events, ...(classification.recipe.durationMs ? { durationMs: classification.recipe.durationMs } : {}) };
+
+    // Slice D (Decision 6): crouch fatigue — nudges toward the mesa every Nth
+    // SUCCESSFUL crouch craft, never blocking further crouch-crafting. Surface
+    // (mesa) crafts never increment the counter and never fatigue.
+    if (method === "crouch") {
+      emit({ type: "CrouchCraftPerformed" });
+      if (s.crouchCraftCount % CROUCH_FATIGUE_INTERVAL === 0) {
+        emit({ type: "ThoughtAdded", thought: mkThought(ctx, "Hacer esto agachado me cansa bastante. Una mesa lo haría más llevadero.", "observation") });
+      }
+    }
+
+    // Slice C carries the matched recipe's durationMs; Slice D (Decision 6) makes
+    // the mesa a strictly-better upgrade by shortening it for method:"surface" —
+    // crouch keeps the recipe's raw authored value (unchanged from Slice C, still
+    // exercised by existing tests). A failed attempt (below) is a quick glance,
+    // never a timed craft, so it never carries durationMs.
+    const rawDurationMs = classification.recipe.durationMs;
+    const durationMs = rawDurationMs ? Math.round(rawDurationMs * (method === "surface" ? MESA_DURATION_FACTOR : 1)) : undefined;
+    return { events, ...(durationMs ? { durationMs } : {}) };
   }
 
   emit({ type: "CombinationAttempted", signature });
@@ -247,7 +303,18 @@ export function tryCombination(ctx: EngineCtx, ref: TargetRef, method: "crouch" 
   return { events };
 }
 
-function applyEffect(ctx: EngineCtx, e: Effect, t: RTarget, resolved: Record<string, ItemInstance[]>, emit: (e: Event) => void): void {
+function applyEffect(
+  ctx: EngineCtx,
+  e: Effect,
+  t: RTarget,
+  resolved: Record<string, ItemInstance[]>,
+  emit: (e: Event) => void,
+  // Slice D (Decision 5, engram #2854): quality defaults to full (1) — every
+  // `executeAction` craft path (the mesa/ExecuteAction route, e.g. `craft_simple_axe`
+  // targeted directly at the rustic_table) keeps producing FULL-durability output
+  // unchanged. Only `tryCombination`'s `ready` branch passes a method-derived quality.
+  quality: number = 1,
+): void {
   const { state: s, index } = ctx;
   switch (e.type) {
     case "consume_energy":
@@ -266,20 +333,30 @@ function applyEffect(ctx: EngineCtx, e: Effect, t: RTarget, resolved: Record<str
     }
     case "add_item": {
       const n = e.amount ?? 1;
+      // Fix (discovery #2853): stamp starting durability from the catalog onto every
+      // created item — previously `add_item` never read it, so crafted tools got
+      // `durability: undefined` and `damage_active_tool` (which only damages items
+      // with a NUMERIC durability) silently never touched them, making crafted tools
+      // effectively indestructible. Raw materials with no catalog `durability` (e.g.
+      // poor_wood) stay `undefined` — correct, they don't degrade. `quality` is only
+      // stamped alongside a defined durability (it has no meaning otherwise).
+      const def = index.itemById.get(e.itemTypeId);
+      const stampedDurability = def?.durability !== undefined ? Math.max(1, Math.round(def.durability * quality)) : undefined;
+      const extra: Partial<ItemInstance> = stampedDurability !== undefined ? { durability: stampedDurability, quality } : {};
       for (let k = 0; k < n; k++) {
         if (typeof e.chance === "number" && ctx.rng() > e.chance) continue;
         const id = newId("it");
         if (e.to === "inventory") {
           const slot = findFreeInventorySlot(s, index, e.itemTypeId, s.player.id);
           if (slot) {
-            emit({ type: "ItemAddedToInventory", item: { id, itemTypeId: e.itemTypeId, location: slot } });
+            emit({ type: "ItemAddedToInventory", item: { id, itemTypeId: e.itemTypeId, location: slot, ...extra } });
           } else {
-            emit({ type: "ItemPlacedInWorld", item: { id, itemTypeId: e.itemTypeId, location: { type: "world", zoneId: s.zone.id, x: s.player.position.x, y: s.player.position.y } }, position: s.player.position });
+            emit({ type: "ItemPlacedInWorld", item: { id, itemTypeId: e.itemTypeId, location: { type: "world", zoneId: s.zone.id, x: s.player.position.x, y: s.player.position.y }, ...extra }, position: s.player.position });
             emit({ type: "ThoughtAdded", thought: mkThought(ctx, "No tengo espacio para acomodar eso.", "system") });
           }
         } else {
           const pos = t.pos;
-          emit({ type: "ItemPlacedInWorld", item: { id, itemTypeId: e.itemTypeId, location: { type: "world", zoneId: s.zone.id, x: pos.x, y: pos.y } }, position: pos });
+          emit({ type: "ItemPlacedInWorld", item: { id, itemTypeId: e.itemTypeId, location: { type: "world", zoneId: s.zone.id, x: pos.x, y: pos.y }, ...extra }, position: pos });
         }
       }
       return;

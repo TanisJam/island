@@ -53,6 +53,11 @@ export type GameState = {
    *  unidos con "|"). Autoritativo: alimenta la escalación de pistas del clasificador
    *  de combinaciones (Slice B1). */
   combinationAttempts: Record<string, number>;
+  /** Conteo autoritativo de crafts EXITOSOS vía `TryCombination{method:"crouch"}`
+   *  (Slice D, Decision 6, engram #2854). Alimenta el pensamiento de fatiga cada
+   *  `CROUCH_FATIGUE_INTERVAL` crafts — nunca bloquea, sólo empuja hacia la mesa.
+   *  Los crafts vía `method:"surface"` (mesa) NUNCA lo incrementan. */
+  crouchCraftCount: number;
 };
 
 /** Reconstruye `s.inventories` a partir de `s.objects` y el catálogo: cada world

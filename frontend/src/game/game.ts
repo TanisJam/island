@@ -245,6 +245,9 @@ export function createGame(deps: GameDeps): Game {
       onTryCombination: (pos) => {
         void sendCommand({ type: "TryCombination", method: "crouch", target: { kind: "tile", x: pos.x, y: pos.y } });
       },
+      onTryCombinationSurface: (surfaceId) => {
+        void sendCommand({ type: "TryCombination", method: "surface", target: { kind: "world_object", id: surfaceId } });
+      },
       bindDrag: dragController.bindCell,
       bindGrid: dragController.bindGrid,
       unbindGrid: dragController.unbindGrid,

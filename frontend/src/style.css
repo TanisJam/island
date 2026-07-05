@@ -554,6 +554,18 @@ body {
   background: rgba(240, 162, 78, 0.12);
 }
 
+/* "Probar combinación" on the mesa (crouch-crafting Slice D, Decision 6) —
+ * `.grid` is a real CSS grid with `dims.width` columns, so this button spans
+ * every column and sits on its own row below the per-coordinate cells,
+ * instead of occupying a single grid cell. */
+.surface-grid-try {
+  grid-column: 1 / -1;
+  text-align: center;
+  border: 1px solid var(--linea);
+  border-radius: 6px;
+  background: rgba(240, 162, 78, 0.12);
+}
+
 .sect-h {
   font-family: "Silkscreen";
   font-size: 8px;

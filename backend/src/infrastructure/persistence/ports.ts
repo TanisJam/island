@@ -20,5 +20,6 @@ export function deserialize(json: string): GameState {
     discovered: new Set<string>(o.discovered ?? []),
     inventories: o.inventories ?? {},
     combinationAttempts: o.combinationAttempts ?? {},
+    crouchCraftCount: o.crouchCraftCount ?? 0,
   };
 }

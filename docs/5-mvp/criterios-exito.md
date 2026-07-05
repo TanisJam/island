@@ -35,12 +35,22 @@ Esta es la secuencia que el prototipo debe permitir completar:
 11. Creo herramienta rudimentaria.
 12. Uso herramienta en árbol.
 13. Obtengo madera pobre.
-14. Construyo fogata o mesa.
-15. Creo hacha simple.
+14. Creo hacha simple agachado ("Examinar de cerca" + "Probar combinación" sobre
+    piedra + madera + fibra) — NO hace falta construir fogata ni mesa para esto.
+15. (Opcional) Si construyo una mesa, puedo craftear ahí en cambio: mejor
+    calidad (más durabilidad), sin fatiga y más rápido — ver
+    [Research: UX de crafteo](../1-diseno/crafting-ux-research.md).
 16. Clickeo jungla espesa.
 17. Uso hacha para despejar camino.
 18. Veo nueva zona.
 ```
+
+> **Nota (crouch-crafting, Slice D):** la mesa dejó de ser un paso obligatorio del
+> paso 14 original ("Construyo fogata o mesa") — ahora es un UPGRADE opcional
+> (mejor calidad, sin fatiga, más rápido), nunca un gate. La cadena crítica
+> completa hasta el paso 18 sin construir nada. Craftear agachado repetidamente
+> también genera un pensamiento de fatiga cada tantos usos, que empuja
+> (sin bloquear) hacia construir una mesa.
 
 ## 25. Bugs aceptables en prototipo
 

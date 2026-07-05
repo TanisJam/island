@@ -34,6 +34,14 @@ export type HudHandlers = {
    * Optional so callers/tests that don't touch the crouch lens don't need to
    * stub it. */
   onTryCombination?: (pos: Position) => void;
+  /** Dispatches `TryCombination { method: "surface", target: { kind:
+   * "world_object", id: surfaceId } }` for the mesa (crouch-crafting Slice D,
+   * Decision 6 — the deferred "Probar combinación" button on the "Usar la
+   * mesa" window) — only used by `renderSurfaceGrid`'s button. Takes the
+   * `surfaceId` rather than a pre-built target, mirroring `onTryCombination`'s
+   * "game.ts stays the single place that knows the wire shape" rationale.
+   * Optional so callers/tests that don't touch the mesa don't need to stub it. */
+  onTryCombinationSurface?: (surfaceId: string) => void;
 };
 
 /** 4x4 player inventory grid dimensions (mirrors the backend's
@@ -335,6 +343,15 @@ export type SurfaceGridHandlers = {
   /** Same grid registration as `HudHandlers.bindGrid` (tasks.md T4) — called
    * once per surface render, wired to `createDragController(...).bindGrid`. */
   bindGrid?: (ctx: GridContext) => void;
+  /** Fired when the mesa's "Probar combinación" button (crouch-crafting Slice
+   * D, Decision 6) is clicked — dispatches `TryCombination { method:
+   * "surface", target: { kind: "world_object", id: surfaceId } }`. `surfaceId`
+   * is already known by the caller (it built this grid for one specific
+   * surface), so the button itself takes no argument — mirrors
+   * `HudHandlers.onTryCombination`'s "caller stays the single place that
+   * knows the wire shape" rationale. Optional so existing callers/tests that
+   * don't touch the mesa's combination button don't need to stub it. */
+  onTryCombination?: () => void;
 };
 
 /** First-person cell-inspect line for the "Usar la mesa" window (mirrors
@@ -402,6 +419,23 @@ export function renderSurfaceGrid(
   for (const item of multiCellItems.values()) grid.appendChild(buildItemOverlay(item, catalog));
 
   handlers.bindGrid?.({ kind: "surface", surfaceId, dims, cells: cellMap });
+
+  // "Probar combinación" (crouch-crafting Slice D, Decision 6 — deferred from
+  // Slice B2): the mesa reframe means this button was always meant to land
+  // here too, mirroring `renderCrouchFrame`'s crouch button. Appended as a
+  // full-width grid item (`grid-column: 1 / -1` via `.surface-grid-try`) so
+  // it sits below the per-coordinate cells instead of occupying one of them
+  // (`.grid` is a real CSS grid with `dims.width` columns). Offered once
+  // >= 2 items are placed on the surface, regardless of whether any recipe
+  // matches — same "always graded, never silently disappears" rule as the
+  // crouch lens's button.
+  if (placed.length >= 2) {
+    const tryButton = document.createElement("button");
+    tryButton.className = "act surface-grid-try";
+    tryButton.textContent = "Probar combinación";
+    tryButton.addEventListener("click", () => handlers.onTryCombination?.());
+    grid.appendChild(tryButton);
+  }
 
   return grid;
 }

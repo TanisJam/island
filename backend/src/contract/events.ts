@@ -20,7 +20,8 @@ export type Event =
   | KnowledgeUnlocked
   | ThoughtAdded
   | ActionFailed
-  | CombinationAttempted;
+  | CombinationAttempted
+  | CrouchCraftPerformed;
 export type RejectionCode =
   | "out_of_range"
   | "not_walkable"
@@ -244,6 +245,9 @@ export interface ActionFailed {
 export interface CombinationAttempted {
   type: "CombinationAttempted";
   signature: string;
+}
+export interface CrouchCraftPerformed {
+  type: "CrouchCraftPerformed";
 }
 export interface Rejection {
   code: RejectionCode;

@@ -34,3 +34,20 @@ test("deserialize: un snapshot legacy sin 'combinationAttempts' se completa con 
   const restored = deserialize(JSON.stringify(legacy));
   assert.deepEqual(restored.combinationAttempts, {});
 });
+
+test("serialize/deserialize: round-trips 'crouchCraftCount'", () => {
+  const s = seedState(index, template);
+  s.crouchCraftCount = 4;
+  const json = serialize(s);
+  const restored = deserialize(json);
+  assert.equal(restored.crouchCraftCount, 4);
+});
+
+test("deserialize: un snapshot legacy sin 'crouchCraftCount' se completa con 0", () => {
+  const s = seedState(index, template);
+  const json = JSON.stringify({ ...s, discovered: [...s.discovered] });
+  const legacy = JSON.parse(json);
+  delete legacy.crouchCraftCount;
+  const restored = deserialize(JSON.stringify(legacy));
+  assert.equal(restored.crouchCraftCount, 0);
+});
