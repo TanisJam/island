@@ -9,7 +9,6 @@ import { createViewState } from "../view/viewstate";
 import { createEmojiAssets, createSpriteAssets, parseAtlas } from "../render/assets";
 import type { AssetResolver } from "../render/assets";
 import { createCanvasRenderer } from "../render/canvas";
-import { createPixiRenderer } from "../render/pixi/renderer";
 import type { Renderer } from "../render/renderer";
 import { canvasToTile, createInputController } from "../input/mouse";
 import { createActionPacing } from "../input/action-pacing";
@@ -117,9 +116,18 @@ export function createGame(deps: GameDeps): Game {
     const store = createStore(snapshot);
     const viewState = createViewState(store);
 
-    const createdRenderer: Renderer = usePixi
-      ? await createPixiRenderer(deps.canvas, assets)
-      : createCanvasRenderer(getCanvas2dContext(deps.canvas), assets);
+    let createdRenderer: Renderer;
+    if (usePixi) {
+      // Pixi is dynamically imported (NOT a static top-level import) so Vite
+      // code-splits pixi.js into a lazy chunk fetched ONLY on the
+      // `?renderer=pixi` path — Canvas-default users never download it
+      // (~144 kB gzip), honoring "Canvas the default at every step" until the
+      // renderer is retired at parity (WU7).
+      const { createPixiRenderer } = await import("../render/pixi/renderer");
+      createdRenderer = await createPixiRenderer(deps.canvas, assets);
+    } else {
+      createdRenderer = createCanvasRenderer(getCanvas2dContext(deps.canvas), assets);
+    }
 
     if (stopped) {
       // `stop()` fired while the awaits above (in particular Pixi's async
