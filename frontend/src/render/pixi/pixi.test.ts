@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Texture } from "pixi.js";
-import { createTileScene } from "./scene";
+import { Container, Sprite, Text, Texture } from "pixi.js";
+import { createEntityScene, createTileScene } from "./scene";
 import type { TextureProvider } from "./textures";
 import type { AssetResolver, SpriteRegion } from "../assets";
-import type { Frame, Visibility } from "../../view/viewstate";
-import { PX } from "../constants";
+import type { Frame, RenderEntity, Visibility } from "../../view/viewstate";
+import { PX, SCALE } from "../constants";
 
 // `pixi.test.ts` runs under bare `node --test` (design.md D6 / spec "Test
 // Coverage Without GPU Dependency"): NO `app.init()`, no real GL context, no
@@ -42,6 +42,30 @@ function frameWithTiles(width: number, height: number): Frame {
 function frameWithVisibility(visibility: Visibility): Frame {
   const tiles: Frame["tiles"] = [{ x: 0, y: 0, terrain: "sand", walkable: true, tags: [], visibility }];
   return { zone: { width: 1, height: 1 }, tiles, entities: [], clockMs: 0 };
+}
+
+/** Entity-pool test frame (no tiles) — `createEntityScene.sync` never reads
+ * `frame.tiles`, so it's fine to leave that empty for these tests. */
+function frameWithEntities(entities: RenderEntity[]): Frame {
+  return { zone: { width: 1, height: 1 }, tiles: [], entities, clockMs: 0 };
+}
+
+/** Builds a `RenderEntity` fixture with sane defaults (`visible`, tile
+ * origin), overridable per test. */
+function entity(overrides: Partial<RenderEntity> & Pick<RenderEntity, "id" | "kind" | "typeId">): RenderEntity {
+  return { renderPos: { x: 0, y: 0 }, visibility: "visible", ...overrides };
+}
+
+/** Resolves every entity to a plain glyph fallback — enough for tests that
+ * only care about pool add/remove/badge behavior, not asset resolution. */
+function stubEntityAssets(): AssetResolver {
+  return { resolve: () => ({ glyph: "❔", scale: 1 }) };
+}
+
+/** Sums children across the three ordered sub-containers (object/pile/item)
+ * `createEntityScene` groups its pool into — the total live node count. */
+function totalEntityNodes(scene: { container: Container }): number {
+  return scene.container.children.reduce((sum, layer) => sum + (layer as Container).children.length, 0);
 }
 
 const STUB_REGION: SpriteRegion = {
@@ -204,4 +228,181 @@ test("createTileScene skips redundant .texture/.tint writes when the frame is un
 
   assert.equal(textureWrites.count(), 0);
   assert.equal(tintWrites.count(), 0);
+});
+
+// --- createEntityScene (WU3: object/item/pile entity pool) ---
+
+test("createEntityScene creates one display node per new entity id", () => {
+  const scene = createEntityScene({ textures: stubTextures(), assets: stubEntityAssets() });
+  scene.sync(
+    frameWithEntities([
+      entity({ id: "a", kind: "object", typeId: "tree" }),
+      entity({ id: "b", kind: "item", typeId: "bark" }),
+    ]),
+  );
+  assert.equal(totalEntityNodes(scene), 2);
+});
+
+test("createEntityScene reuses pooled nodes across frames instead of duplicating them", () => {
+  const scene = createEntityScene({ textures: stubTextures(), assets: stubEntityAssets() });
+  const frame = frameWithEntities([entity({ id: "a", kind: "object", typeId: "tree" })]);
+
+  scene.sync(frame);
+  scene.sync(frame); // second sync, same entity: pool must be reused
+
+  assert.equal(totalEntityNodes(scene), 1);
+});
+
+test("createEntityScene removes the display node once an id no longer appears in the frame", () => {
+  const scene = createEntityScene({ textures: stubTextures(), assets: stubEntityAssets() });
+  scene.sync(frameWithEntities([entity({ id: "a", kind: "object", typeId: "tree" })]));
+  assert.equal(totalEntityNodes(scene), 1);
+
+  scene.sync(frameWithEntities([])); // "a" no longer present in the frame
+  assert.equal(totalEntityNodes(scene), 0);
+});
+
+test("createEntityScene ignores player entities (WU4 scope, not WU3)", () => {
+  const scene = createEntityScene({ textures: stubTextures(), assets: stubEntityAssets() });
+  scene.sync(frameWithEntities([entity({ id: "p", kind: "player", typeId: "player" })]));
+  assert.equal(totalEntityNodes(scene), 0);
+});
+
+test("createEntityScene hides (not destroys) a node while the entity is 'unseen'", () => {
+  const scene = createEntityScene({ textures: stubTextures(), assets: stubEntityAssets() });
+  scene.sync(frameWithEntities([entity({ id: "a", kind: "object", typeId: "tree", visibility: "visible" })]));
+  scene.sync(frameWithEntities([entity({ id: "a", kind: "object", typeId: "tree", visibility: "unseen" })]));
+
+  assert.equal(totalEntityNodes(scene), 1, "node stays pooled while unseen, not destroyed");
+  const objectLayer = scene.container.children[0] as Container;
+  const root = objectLayer.children[0] as Container;
+  assert.equal(root.visible, false);
+});
+
+test("createEntityScene draws a sprite region (forRegion) when the resolved visual has a .sprite", () => {
+  const regionCalls: SpriteRegion[] = [];
+  const glyphCalls: string[] = [];
+  const regionTexture = new Texture();
+  const textures: TextureProvider = {
+    forColor: () => Texture.EMPTY,
+    forRegion: (region) => {
+      regionCalls.push(region);
+      return regionTexture;
+    },
+    forGlyph: (glyph) => {
+      glyphCalls.push(glyph);
+      return Texture.EMPTY;
+    },
+    destroy: () => {},
+  };
+  const assets: AssetResolver = { resolve: () => ({ sprite: STUB_REGION }) };
+  const scene = createEntityScene({ textures, assets });
+  scene.sync(frameWithEntities([entity({ id: "a", kind: "object", typeId: "tree" })]));
+
+  assert.deepEqual(regionCalls, [STUB_REGION]);
+  assert.equal(glyphCalls.length, 0);
+});
+
+test("createEntityScene falls back to forGlyph when the resolved visual has no .sprite", () => {
+  const regionCalls: SpriteRegion[] = [];
+  const glyphCalls: string[] = [];
+  const textures: TextureProvider = {
+    forColor: () => Texture.EMPTY,
+    forRegion: (region) => {
+      regionCalls.push(region);
+      return Texture.EMPTY;
+    },
+    forGlyph: (glyph) => {
+      glyphCalls.push(glyph);
+      return Texture.EMPTY;
+    },
+    destroy: () => {},
+  };
+  const assets: AssetResolver = { resolve: () => ({ glyph: "🌳", scale: 0.72 }) };
+  const scene = createEntityScene({ textures, assets });
+  scene.sync(frameWithEntities([entity({ id: "a", kind: "object", typeId: "tree" })]));
+
+  assert.equal(regionCalls.length, 0);
+  assert.deepEqual(glyphCalls, ["🌳"]);
+
+  const objectLayer = scene.container.children[0] as Container;
+  const root = objectLayer.children[0] as Container;
+  const sprite = root.children[0] as Sprite;
+  assert.equal(sprite.width, PX * 0.72);
+  assert.equal(sprite.height, PX * 0.72);
+  assert.deepEqual([sprite.anchor.x, sprite.anchor.y], [0.5, 0.5]);
+});
+
+test("createEntityScene sizes a sprite-region entity via the region's OWN sw/sh * SCALE, not visual.scale (regression: a tall multi-cell sprite must keep its full height, bottom-left anchored)", () => {
+  const tallRegion: SpriteRegion = { image: {} as CanvasImageSource, sx: 0, sy: 0, sw: 48, sh: 96 };
+  const regionTexture = new Texture();
+  const textures: TextureProvider = {
+    forColor: () => Texture.EMPTY,
+    forRegion: () => regionTexture,
+    forGlyph: () => Texture.EMPTY,
+    destroy: () => {},
+  };
+  // `scale` deliberately present alongside `.sprite` — a sprite-backed visual
+  // never has `.scale` in real `createSpriteAssets` output, but if a bug
+  // resurfaces and this field ever gets read for the sprite path, this
+  // fixture ensures the test catches it (it MUST be ignored here).
+  const assets: AssetResolver = { resolve: () => ({ sprite: tallRegion, scale: 0.1 }) };
+  const scene = createEntityScene({ textures, assets });
+  scene.sync(frameWithEntities([entity({ id: "a", kind: "object", typeId: "tree" })]));
+
+  const objectLayer = scene.container.children[0] as Container;
+  const root = objectLayer.children[0] as Container;
+  const sprite = root.children[0] as Sprite;
+  assert.equal(sprite.width, tallRegion.sw * SCALE);
+  assert.equal(sprite.height, tallRegion.sh * SCALE);
+  assert.deepEqual([sprite.anchor.x, sprite.anchor.y], [0, 1]);
+  assert.equal(sprite.x, 0);
+  assert.equal(sprite.y, PX);
+});
+
+test("createEntityScene shows and updates a pile-count badge, reconciled by id", () => {
+  const scene = createEntityScene({ textures: stubTextures(), assets: stubEntityAssets() });
+  scene.sync(frameWithEntities([entity({ id: "pile1", kind: "pile", typeId: "small_stone", count: 3 })]));
+
+  const pileLayer = scene.container.children[1] as Container; // object, PILE, item
+  const root = pileLayer.children[0] as Container;
+  const badge = root.children.find((child) => child instanceof Text) as Text;
+  assert.ok(badge, "expected a Text badge child under the pile's node");
+  assert.equal(badge.text, "×3");
+
+  scene.sync(frameWithEntities([entity({ id: "pile1", kind: "pile", typeId: "small_stone", count: 5 })]));
+  assert.equal(root.children.filter((child) => child instanceof Text).length, 1, "badge reused, not duplicated");
+  assert.equal(badge.text, "×5");
+});
+
+test("createEntityScene removes the pile badge once count is no longer defined", () => {
+  const scene = createEntityScene({ textures: stubTextures(), assets: stubEntityAssets() });
+  scene.sync(frameWithEntities([entity({ id: "pile1", kind: "pile", typeId: "small_stone", count: 2 })]));
+  scene.sync(frameWithEntities([entity({ id: "pile1", kind: "pile", typeId: "small_stone", count: undefined })]));
+
+  const pileLayer = scene.container.children[1] as Container;
+  const root = pileLayer.children[0] as Container;
+  assert.equal(root.children.filter((child) => child instanceof Text).length, 0);
+});
+
+test("createEntityScene skips redundant .texture writes when the frame is unchanged", () => {
+  const regionTexture = new Texture();
+  const textures: TextureProvider = {
+    forColor: () => Texture.EMPTY,
+    forRegion: () => regionTexture,
+    forGlyph: () => Texture.EMPTY,
+    destroy: () => {},
+  };
+  const assets: AssetResolver = { resolve: () => ({ sprite: STUB_REGION }) };
+  const scene = createEntityScene({ textures, assets });
+  const frame = frameWithEntities([entity({ id: "a", kind: "object", typeId: "tree" })]);
+
+  scene.sync(frame); // first sync: node created, texture necessarily written once
+  const objectLayer = scene.container.children[0] as Container;
+  const root = objectLayer.children[0] as Container;
+  const sprite = root.children[0] as Sprite;
+  const textureWrites = countWrites(sprite, "texture");
+
+  scene.sync(frame); // same frame again: texture unchanged, write must be skipped
+  assert.equal(textureWrites.count(), 0);
 });

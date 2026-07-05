@@ -1,18 +1,18 @@
-import { Rectangle, Texture, type TextureSource } from "pixi.js";
+import { Rectangle, Text, Texture, type Renderer as PixiRenderer, type TextureSource } from "pixi.js";
 import type { SpriteRegion } from "../assets";
+import { PX } from "../constants";
 
 /**
  * Texture adapter at the Pixi boundary (design.md D2). Lives here, NOT in
  * `render/assets.ts` — `AssetResolver`/`VisualDescriptor` stay renderer
  * agnostic. WU1a implemented `forColor` (the plain terrain color-fallback
- * path); WU2 implements `forRegion` (sprite atlas regions, terrain) for real.
- * `forGlyph` (emoji/text fallback, WU3) stays a typed stub, extended in its
- * own work unit.
+ * path); WU2 implemented `forRegion` (sprite atlas regions, terrain); WU3
+ * implements `forGlyph` (emoji/text fallback, entities — design.md D3 Plan A).
  *
  * Every texture this adapter creates is tracked (in `created` for
- * single-source textures, in `regionCache` + `baseSources` for
- * shared-source region textures) so `destroy()` releases all of them
- * together (design.md D5).
+ * single-source textures — this now includes baked glyph textures, in
+ * `regionCache` + `baseSources` for shared-source region textures) so
+ * `destroy()` releases all of them together (design.md D5).
  */
 export interface TextureProvider {
   forRegion(region: SpriteRegion): Texture;
@@ -57,15 +57,41 @@ function regionKey(region: SpriteRegion): string {
   return `${region.sx},${region.sy},${region.sw},${region.sh}`;
 }
 
+/** Same font stack `render/canvas.ts`'s `drawEmoji` uses — the WU1b spike
+ * compared this exact stack via `PIXI.Text` against Canvas `fillText` and
+ * found identical color-emoji fidelity (design.md D3, Plan A confirmed). */
+const GLYPH_FONT = '"Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", sans-serif';
+
+/** Baked square size (px) for one glyph texture: one full tile, baked once
+ * per unique glyph string (~17 across object/item/pile/player, spec
+ * "Sprite-First Rendering with Emoji/Text Fallback"). Per-entity sizing
+ * (object/item/pile/player each has its own `.scale` in `VisualDescriptor`)
+ * is applied by the consumer (`scene.ts`) via `Sprite.width/height`, not
+ * baked into the texture — this keeps the glyph cache keyed by glyph alone,
+ * not by glyph+scale, matching the "one texture per unique glyph" cache
+ * contract (spec "Texture Adapter Caching").
+ */
+const GLYPH_BAKE_SIZE = PX;
+
 /**
  * Creates the Pixi `TextureProvider`. Caches one `Texture` per unique input
  * (spec "Texture Adapter Caching") so repeated colors/regions/glyphs never
  * re-upload — `forColor` is cache-keyed by hex string, `forRegion` by region
- * coordinates (see `regionKey`); `forGlyph` (glyph string) gets its own
- * cache when WU3 implements it.
+ * coordinates (see `regionKey`), `forGlyph` by the glyph string itself.
+ *
+ * `renderer` is the live Pixi `Renderer` (from `app.renderer`, available once
+ * `Application.init()` resolves) — `forGlyph` needs it to bake a `Text`
+ * display object into a standalone `Texture` via `renderer.generateTexture`
+ * (design.md D3: "bake one Texture per glyph via Pixi Text"). This is the
+ * one adapter method that can't work without a real renderer, same as
+ * `forColor`/`forRegion` already can't work without a real DOM `document`
+ * (`colorCanvas`) — none of the three are exercised under bare `node --test`
+ * (design.md D6); `pixi.test.ts` only exercises `scene.ts` against a stub
+ * `TextureProvider`.
  */
-export function createPixiTextureProvider(): TextureProvider {
+export function createPixiTextureProvider(renderer: PixiRenderer): TextureProvider {
   const colorCache = new Map<string, Texture>();
+  const glyphCache = new Map<string, Texture>();
   const created = new Set<Texture>();
 
   // `forRegion` shares ONE `TextureSource` per underlying tileset image
@@ -106,13 +132,24 @@ export function createPixiTextureProvider(): TextureProvider {
       regionCache.set(key, texture);
       return texture;
     },
-    forGlyph(): Texture {
-      throw new Error("TextureProvider.forGlyph is not implemented yet (lands in WU3 — entity glyph fallback)");
+    forGlyph(glyph: string): Texture {
+      const cached = glyphCache.get(glyph);
+      if (cached) return cached;
+      const text = new Text({
+        text: glyph,
+        style: { fontFamily: GLYPH_FONT, fontSize: GLYPH_BAKE_SIZE },
+      });
+      const texture = renderer.generateTexture(text);
+      text.destroy();
+      glyphCache.set(glyph, texture);
+      created.add(texture);
+      return texture;
     },
     destroy(): void {
       for (const texture of created) texture.destroy(true);
       created.clear();
       colorCache.clear();
+      glyphCache.clear();
       for (const texture of regionCache.values()) texture.destroy(false);
       regionCache.clear();
       for (const source of baseSources.values()) source.destroy();

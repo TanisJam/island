@@ -5,15 +5,15 @@ import type { Renderer } from "../renderer";
 import type { Frame } from "../../view/viewstate";
 import { cameraOffset } from "../camera";
 import { createPixiTextureProvider } from "./textures";
-import { createTileScene } from "./scene";
+import { createTileScene, createEntityScene } from "./scene";
 
 /**
  * Pixi implementation of the unchanged `Renderer` interface (design.md SEAM
  * 4 / D1). Retained-mode: a persistent scene graph mutated per frame instead
- * of the Canvas renderer's per-frame immediate draws. WU1a scope: app
- * lifecycle + plain color-fallback terrain only, enough to prove the scene
- * graph works end-to-end — sprite terrain, entities, player, and FX land in
- * WU2-WU5.
+ * of the Canvas renderer's per-frame immediate draws. WU1a: app lifecycle +
+ * plain color-fallback terrain. WU2: sprite terrain + fog tint. WU3: object/
+ * item/pile entity pool + glyph fallback + pile badge. Player halo/sprite and
+ * FX (selection pulse, busy spinner) land in WU4/WU5.
  *
  * `Application.init()` is async (Pixi v8 requirement), hence the
  * `Promise<Renderer>` return type — callers (`game.ts`) MUST await this
@@ -25,12 +25,18 @@ export async function createPixiRenderer(canvas: HTMLCanvasElement, assets: Asse
   const app = new Application();
   await app.init({ canvas, backgroundAlpha: 1, antialias: false });
 
-  const textures = createPixiTextureProvider();
+  const textures = createPixiTextureProvider(app.renderer);
   const worldContainer = new Container();
   app.stage.addChild(worldContainer);
 
   const tileScene = createTileScene({ textures, assets });
   worldContainer.addChild(tileScene.container);
+
+  // Layer order (design.md D1): tile -> object -> pile -> item -> player ->
+  // fx. `entityScene.container` already enforces object/pile/item internally
+  // (see scene.ts); player + fx land on top in WU4/WU5.
+  const entityScene = createEntityScene({ textures, assets });
+  worldContainer.addChild(entityScene.container);
 
   let destroyed = false;
 
@@ -50,6 +56,7 @@ export async function createPixiRenderer(canvas: HTMLCanvasElement, assets: Asse
       worldContainer.x = offset.ox;
       worldContainer.y = offset.oy;
       tileScene.sync(frame);
+      entityScene.sync(frame);
     },
 
     destroy(): void {
