@@ -1,7 +1,8 @@
-import type { Catalog, ItemInstance, Position, Thought } from "../contract";
+import type { Catalog, ItemInstance, ItemTypeDef, Position, Thought } from "../contract";
 import type { ClientSnapshot } from "../state/snapshot";
 import { findCraftable } from "../actions/available";
 import { createEmojiAssets } from "../render/assets";
+import { isRevealed, type ObservedStore } from "../state/observed";
 import type { CellDescriptor, GridContext } from "./drag";
 
 export type HudHandlers = {
@@ -19,6 +20,11 @@ export type HudHandlers = {
   /** Releases a previously-registered `GridContext` when its window closes
    * (tasks.md T4) — wired to `createDragController(...).unbindGrid`. */
   unbindGrid?: (gridKey: string) => void;
+  /** Dispatches the existing `Observe` command for the item instance id
+   * (design.md Decision 4, crouch-crafting change) — only used by
+   * `renderCrouchFrame`'s per-glyph click affordance. Optional so callers/
+   * tests that don't touch the crouch lens don't need to stub it. */
+  onObserve?: (itemInstanceId: string) => void;
 };
 
 /** 4x4 player inventory grid dimensions (mirrors the backend's
@@ -389,6 +395,181 @@ export function renderSurfaceGrid(
   handlers.bindGrid?.({ kind: "surface", surfaceId, dims, cells: cellMap });
 
   return grid;
+}
+
+/** Loose ground items sitting EXACTLY on `pos` (crouch-crafting rework: a
+ * PER-TILE spatial model, superseding the old player-centric
+ * `chebyshev<=1` flat set per user playtest correction of design.md
+ * Decision 2). Mirrors the same `location.type === "world"` + exact-
+ * coordinate filter `actions/context-menu.ts`'s `floorPickupItems` uses for
+ * "Recoger"/"Examinar de cerca", so the menu option and the frame's contents
+ * always agree on which items are "here". */
+export function groundItemsAt(snapshot: ClientSnapshot, pos: Position): ItemInstance[] {
+  return snapshot.items.filter((it) => it.location.type === "world" && it.location.x === pos.x && it.location.y === pos.y);
+}
+
+/** One same-itemTypeId group of ground items on the framed tile — grouped so
+ * a pile of identical items (e.g. 3 `small_stone`) renders as ONE glyph with
+ * a "×N" badge (mirrors the canvas renderer's pile treatment,
+ * `render/canvas.ts`'s `drawCount`, but in DOM/CSS) instead of N separate
+ * glyphs. */
+type CrouchItemGroup = { itemTypeId: string; items: ItemInstance[] };
+
+function groupByItemType(items: ItemInstance[]): CrouchItemGroup[] {
+  const order: string[] = [];
+  const byType = new Map<string, ItemInstance[]>();
+  for (const it of items) {
+    if (!byType.has(it.itemTypeId)) {
+      byType.set(it.itemTypeId, []);
+      order.push(it.itemTypeId);
+    }
+    byType.get(it.itemTypeId)!.push(it);
+  }
+  return order.map((itemTypeId) => ({ itemTypeId, items: byType.get(itemTypeId)! }));
+}
+
+/** "propiedad: valor, ..." + tags line for a REVEALED item, joined with " · "
+ * — the crouch lens's only property display (design.md Decision 4). */
+function crouchPropertiesLine(def: ItemTypeDef): string {
+  const props = Object.entries(def.properties)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join(", ");
+  return [props, def.tags.join(", ")].filter(Boolean).join(" · ");
+}
+
+/** Rebuilds `infoStrip`'s content to name `item` and, if revealed, list its
+ * properties/tags — the shared "info strip" under the enlarged tile
+ * (crouch-crafting rework). Any same-itemTypeId instance works here:
+ * `properties`/`tags` are catalog (TYPE-level) data, never per-instance. */
+function showCrouchInfo(catalog: Catalog, snapshot: ClientSnapshot, observed: ObservedStore, infoStrip: HTMLElement, item: ItemInstance): void {
+  while (infoStrip.firstChild) infoStrip.removeChild(infoStrip.firstChild);
+  const def = catalog.items.find((i) => i.id === item.itemTypeId);
+
+  const nameEl = document.createElement("div");
+  nameEl.className = "crouch-name";
+  nameEl.textContent = itemName(catalog, item.itemTypeId);
+  infoStrip.appendChild(nameEl);
+
+  if (def && isRevealed(observed, catalog, snapshot, item)) {
+    const propsEl = document.createElement("div");
+    propsEl.className = "crouch-props";
+    propsEl.textContent = crouchPropertiesLine(def);
+    infoStrip.appendChild(propsEl);
+  }
+}
+
+/** One large glyph "swatch" for a same-itemTypeId group of ground items sitting
+ * on the framed tile — reuses `itemGlyph` (the same `AssetResolver.resolve`
+ * lookup `renderInventoryGrid`/`renderSurfaceGrid` use), plus a "×N" badge
+ * when the group has more than one instance. Clicking dispatches
+ * `handlers.onObserve` for one representative instance (properties are
+ * TYPE-level, so any instance id satisfies the reveal gate) and refreshes the
+ * shared info strip in place. */
+function buildCrouchGlyph(catalog: Catalog, group: CrouchItemGroup, onPick: (representative: ItemInstance) => void): HTMLElement {
+  const representative = group.items[0]!;
+  const el = document.createElement("button");
+  el.className = "crouch-frame-item";
+  el.title = itemName(catalog, group.itemTypeId);
+  el.textContent = itemGlyph(group.itemTypeId) || itemName(catalog, group.itemTypeId);
+
+  if (group.items.length > 1) {
+    const badge = document.createElement("span");
+    badge.className = "crouch-frame-count";
+    badge.textContent = `×${group.items.length}`;
+    el.appendChild(badge);
+  }
+
+  el.addEventListener("click", () => onPick(representative));
+  return el;
+}
+
+/**
+ * Renders the crouch lens as a spatial "marco" (crouch-crafting rework, per
+ * user playtest correction of design.md Decision 2's flat-list presentation):
+ * an ENLARGED SINGLE TILE at `pos` — its terrain as the frame's background
+ * (via `AssetResolver.resolve("terrain", ...)`, the SAME resolver
+ * `render/canvas.ts` draws from) with that tile's loose ground items
+ * (`groundItemsAt`) rendered as large glyphs sitting on it, grouped by type.
+ * Clicking a glyph dispatches the existing `Observe` command
+ * (`handlers.onObserve`) for that item and updates a shared info strip below
+ * the frame naming the clicked item and, once revealed
+ * (`state/observed.ts`'s `isRevealed`), its `properties`/`tags`. Read-only —
+ * no `s.inventories` entry, no item relocation, no new backend command.
+ *
+ * `selectedItemTypeId` + `onSelect` persist WHICH item's info is shown ACROSS
+ * re-renders (crouch-crafting fix): this function is called fresh on every
+ * store notification, including the one the `Observe` command's OWN response
+ * triggers — without externally persisted selection, that fresh call would
+ * always start from the placeholder, making a just-revealed property flash
+ * and vanish. The caller (`hud/ui.ts`'s `buildCrouchBody`) owns that
+ * persisted state and passes it back in on the next render; `onSelect` is how
+ * a click reports its selection back up. Both are optional so existing
+ * direct callers/tests (single render, no persistence needed) don't have to
+ * pass them.
+ */
+export function renderCrouchFrame(
+  catalog: Catalog,
+  snapshot: ClientSnapshot,
+  pos: Position,
+  handlers: HudHandlers,
+  observed: ObservedStore,
+  selectedItemTypeId: string | null = null,
+  onSelect?: (itemTypeId: string) => void,
+): HTMLElement {
+  const frame = document.createElement("div");
+  frame.className = "crouch-frame";
+
+  const tile = snapshot.tiles.find((t) => t.x === pos.x && t.y === pos.y);
+  if (tile) {
+    const visual = assets.resolve("terrain", tile.terrain);
+    if (visual.color) frame.style.backgroundColor = visual.color;
+  }
+
+  const terrainLabel = document.createElement("div");
+  terrainLabel.className = "crouch-frame-terrain";
+  terrainLabel.textContent = tile ? (catalog.terrains.find((t) => t.id === tile.terrain)?.name ?? tile.terrain) : "";
+  frame.appendChild(terrainLabel);
+
+  const itemsArea = document.createElement("div");
+  itemsArea.className = "crouch-frame-items";
+  frame.appendChild(itemsArea);
+
+  const infoStrip = document.createElement("div");
+  infoStrip.className = "crouch-frame-info";
+  infoStrip.textContent = "Tocá algo para mirarlo de cerca.";
+  frame.appendChild(infoStrip);
+
+  const items = groundItemsAt(snapshot, pos);
+  if (items.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "act mute";
+    empty.textContent = "No hay nada al alcance de la mano.";
+    itemsArea.appendChild(empty);
+    return frame;
+  }
+
+  const groups = groupByItemType(items);
+  for (const group of groups) {
+    const glyph = buildCrouchGlyph(catalog, group, (representative) => {
+      handlers.onObserve?.(representative.id);
+      onSelect?.(group.itemTypeId);
+      showCrouchInfo(catalog, snapshot, observed, infoStrip, representative);
+    });
+    itemsArea.appendChild(glyph);
+  }
+
+  // Re-populate the info strip for the PERSISTED selection (see docstring
+  // above): if the previously-selected type still has at least one instance
+  // on THIS tile, show it — this is what makes revealed properties survive a
+  // rerender instead of resetting to the placeholder. If that type is gone
+  // (e.g. every instance was picked up), fall back to the placeholder
+  // gracefully — it's already the strip's default content, nothing to do.
+  if (selectedItemTypeId) {
+    const selectedGroup = groups.find((g) => g.itemTypeId === selectedItemTypeId);
+    if (selectedGroup) showCrouchInfo(catalog, snapshot, observed, infoStrip, selectedGroup.items[0]!);
+  }
+
+  return frame;
 }
 
 export function showThought(text: string): void {

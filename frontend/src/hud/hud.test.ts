@@ -5,18 +5,21 @@ import type { ClientSnapshot } from "../state/snapshot";
 import {
   CELL_GAP_PX,
   CELL_SIZE_PX,
+  groundItemsAt,
   hasDiscoveryThought,
   inventoryAddedMessage,
   inventoryCellsForItem,
   inventoryItemIds,
   newlyAddedToInventory,
   occupiedCellsForItem,
+  renderCrouchFrame,
   renderInventoryGrid,
   renderSurfaceGrid,
   surfaceCellMessage,
   type HudHandlers,
 } from "./hud";
 import type { CellDescriptor } from "./drag";
+import { createObservedStore } from "../state/observed";
 
 /**
  * `hud.ts` is otherwise DOM-heavy and only gets smoke coverage by design
@@ -457,5 +460,147 @@ test("renderSurfaceGrid: mesa parity — multi-cell items get exactly one overla
 
     const singleCell = grid.children[0 * 3 + 0]!; // (0,0)
     assert.equal(singleCell.textContent, "🪨", "single-cell item keeps its glyph directly on the cell — no overlay");
+  });
+});
+
+// --- groundItemsAt / renderCrouchFrame (crouch-crafting rework: a PER-TILE
+// spatial "marco", superseding the flat-list crouch lens per user playtest
+// correction of design.md Decision 2) ----------------------------------------
+
+const crouchCatalog: Catalog = {
+  ...surfaceCatalog,
+  terrains: [{ id: "sand", name: "Arena", walkable: true, tags: [] }],
+  items: [
+    ...surfaceCatalog.items,
+    { id: "rama", name: "Rama", description: "", shape: { w: 1, h: 1 }, rotatable: false, properties: { firmeza: 3 }, tags: ["wood", "flexible"] },
+  ],
+  knowledge: [{ id: "k_wood", name: "Sobre la madera", kind: "idea", unlockOnObserveTags: ["wood"] }],
+};
+
+const CROUCH_POS = { x: 5, y: 5 };
+
+function worldItemAt(id: string, itemTypeId: string, x: number, y: number): ItemInstance {
+  return { id, itemTypeId, location: { type: "world", zoneId: "z1", x, y } };
+}
+
+function crouchSnapshot(items: ItemInstance[], knowledge: string[] = []): ClientSnapshot {
+  return {
+    ...snapshotWithItems(items),
+    tiles: [{ x: CROUCH_POS.x, y: CROUCH_POS.y, terrain: "sand", walkable: true, tags: [], visibility: "visible" }],
+    player: { id: "p1", name: "Náufrago", position: CROUCH_POS, energy: 100, maxEnergy: 100, health: 100, maxHealth: 100, knowledge },
+  };
+}
+
+test("groundItemsAt: only world items sitting EXACTLY on pos are included — not an adjacent tile's, not hand/inventory", () => {
+  const here = worldItemAt("it1", "small_stone", 5, 5);
+  const adjacent = worldItemAt("it2", "small_stone", 6, 5); // chebyshev 1, but a DIFFERENT tile
+  const inHand = inventoryItem("it3", "small_stone");
+  const snapshot = crouchSnapshot([here, adjacent, inHand]);
+  assert.deepEqual(groundItemsAt(snapshot, CROUCH_POS).map((i) => i.id), ["it1"]);
+});
+
+test("renderCrouchFrame: empty tile renders an empty-state row inside the items area, no error", () => {
+  withFakeDocument(() => {
+    const snapshot = crouchSnapshot([]);
+    const frame = renderCrouchFrame(crouchCatalog, snapshot, CROUCH_POS, noopHandlers, createObservedStore()) as unknown as FakeCellElement;
+    assert.ok(frame.classes.has("crouch-frame"));
+    const itemsArea = frame.children.find((c) => c.classes.has("crouch-frame-items"))!;
+    assert.equal(itemsArea.children.length, 1);
+    assert.ok(itemsArea.children[0]!.classes.has("mute"));
+  });
+});
+
+test("renderCrouchFrame: sets the frame's background from the tile's terrain, resolved via the same AssetResolver render/canvas.ts draws from", () => {
+  withFakeDocument(() => {
+    const snapshot = crouchSnapshot([]);
+    const frame = renderCrouchFrame(crouchCatalog, snapshot, CROUCH_POS, noopHandlers, createObservedStore()) as unknown as FakeCellElement;
+    assert.equal(frame.style.backgroundColor, "#d9c089", "sand's terrain color from render/assets.ts's createEmojiAssets()");
+    const terrainLabel = frame.children.find((c) => c.classes.has("crouch-frame-terrain"));
+    assert.equal(terrainLabel?.textContent, "Arena");
+  });
+});
+
+test("renderCrouchFrame: lists only the framed tile's OWN items — never an adjacent tile's, hand, inventory, or surface items", () => {
+  withFakeDocument(() => {
+    const here = worldItemAt("it1", "small_stone", 5, 5);
+    const adjacent = worldItemAt("it2", "small_stone", 6, 5);
+    const inHand = inventoryItem("it3", "small_stone");
+    const onSurface = surfaceItem("it4", "small_stone", "wo_table", 0, 0);
+    const snapshot = crouchSnapshot([here, adjacent, inHand, onSurface]);
+    const frame = renderCrouchFrame(crouchCatalog, snapshot, CROUCH_POS, noopHandlers, createObservedStore()) as unknown as FakeCellElement;
+    const itemsArea = frame.children.find((c) => c.classes.has("crouch-frame-items"))!;
+    assert.equal(itemsArea.children.length, 1, "only the exact-tile item renders — everything else on other tiles/scopes is excluded");
+    assert.equal(itemsArea.children[0]!.textContent, "🪨");
+  });
+});
+
+test("renderCrouchFrame: groups same-itemTypeId ground items into one glyph with a '×N' count badge (mirrors the canvas renderer's pile treatment)", () => {
+  withFakeDocument(() => {
+    const a = worldItemAt("it1", "small_stone", 5, 5);
+    const b = worldItemAt("it2", "small_stone", 5, 5);
+    const c = worldItemAt("it3", "small_stone", 5, 5);
+    const snapshot = crouchSnapshot([a, b, c]);
+    const frame = renderCrouchFrame(crouchCatalog, snapshot, CROUCH_POS, noopHandlers, createObservedStore()) as unknown as FakeCellElement;
+    const itemsArea = frame.children.find((c) => c.classes.has("crouch-frame-items"))!;
+    assert.equal(itemsArea.children.length, 1, "identical-type items are grouped into a single glyph, not 3 separate ones");
+    const badge = itemsArea.children[0]!.children.find((c) => c.classes.has("crouch-frame-count"));
+    assert.equal(badge?.textContent, "×3");
+  });
+});
+
+test("renderCrouchFrame: properties/tags stay hidden in the info strip before any item is clicked", () => {
+  withFakeDocument(() => {
+    const item = worldItemAt("it1", "rama", 5, 5);
+    const snapshot = crouchSnapshot([item]);
+    const frame = renderCrouchFrame(crouchCatalog, snapshot, CROUCH_POS, noopHandlers, createObservedStore()) as unknown as FakeCellElement;
+    const infoStrip = frame.children.find((c) => c.classes.has("crouch-frame-info"))!;
+    assert.ok(!infoStrip.children.some((c) => c.classes.has("crouch-props")), "no properties/tags shown before any click");
+  });
+});
+
+test("renderCrouchFrame: clicking an item glyph dispatches handlers.onObserve with the item's INSTANCE id and names it in the info strip", () => {
+  withFakeDocument(() => {
+    const item = worldItemAt("it1", "rama", 5, 5);
+    const snapshot = crouchSnapshot([item]);
+    const observedCalls: string[] = [];
+    const handlers: HudHandlers = { onEquip: () => {}, onDrop: () => {}, onObserve: (id) => observedCalls.push(id) };
+    const frame = renderCrouchFrame(crouchCatalog, snapshot, CROUCH_POS, handlers, createObservedStore()) as unknown as FakeCellElement;
+    const itemsArea = frame.children.find((c) => c.classes.has("crouch-frame-items"))!;
+    itemsArea.children[0]!.click();
+    assert.deepEqual(observedCalls, ["it1"], "dispatches with the item INSTANCE id (it1), not the type id (rama)");
+
+    const infoStrip = frame.children.find((c) => c.classes.has("crouch-frame-info"))!;
+    const name = infoStrip.children.find((c) => c.classes.has("crouch-name"));
+    assert.equal(name?.textContent, "Rama", "the info strip names the clicked/observed item");
+  });
+});
+
+test("renderCrouchFrame: properties/tags are revealed in the info strip once the item's type is added to the observed set (the ui.ts optimistic-add wrapping)", () => {
+  withFakeDocument(() => {
+    const item = worldItemAt("it1", "rama", 5, 5);
+    const snapshot = crouchSnapshot([item]);
+    const observed = createObservedStore();
+    const handlers: HudHandlers = { onEquip: () => {}, onDrop: () => {}, onObserve: () => observed.add("rama") };
+    const frame = renderCrouchFrame(crouchCatalog, snapshot, CROUCH_POS, handlers, observed) as unknown as FakeCellElement;
+    const itemsArea = frame.children.find((c) => c.classes.has("crouch-frame-items"))!;
+    itemsArea.children[0]!.click();
+
+    const infoStrip = frame.children.find((c) => c.classes.has("crouch-frame-info"))!;
+    const props = infoStrip.children.find((c) => c.classes.has("crouch-props"));
+    assert.ok(props, "observed-set membership (updated by the click) reveals properties in the same render pass");
+    assert.ok(props!.textContent.includes("firmeza: 3"));
+    assert.ok(props!.textContent.includes("wood"));
+  });
+});
+
+test("renderCrouchFrame: properties/tags are revealed on click when a matching knowledge is already unlocked, even with an empty observed set", () => {
+  withFakeDocument(() => {
+    const item = worldItemAt("it1", "rama", 5, 5);
+    const snapshot = crouchSnapshot([item], ["k_wood"]); // unlockOnObserveTags: ["wood"] intersects rama's tags
+    const frame = renderCrouchFrame(crouchCatalog, snapshot, CROUCH_POS, noopHandlers, createObservedStore()) as unknown as FakeCellElement;
+    const itemsArea = frame.children.find((c) => c.classes.has("crouch-frame-items"))!;
+    itemsArea.children[0]!.click();
+    const infoStrip = frame.children.find((c) => c.classes.has("crouch-frame-info"))!;
+    assert.ok(infoStrip.children.some((c) => c.classes.has("crouch-props")), "unlocked knowledge alone reveals properties, even with an empty observed set and no onObserve handler");
   });
 });

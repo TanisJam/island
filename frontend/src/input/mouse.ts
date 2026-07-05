@@ -270,6 +270,13 @@ export function createInputController(deps: InputDeps): InputController {
             case "surface":
               if (item.surfaceId) deps.ui.toggleSurface(item.surfaceId);
               break;
+            case "crouch":
+              // Per-tile trigger (crouch-crafting rework): `item.crouchAt`
+              // always carries the target tile position for this uiIntent
+              // (`context-menu.ts`'s `crouchLensItem`) — defensive guard
+              // mirrors the `surface` case's `item.surfaceId` check above.
+              if (item.crouchAt) deps.ui.toggleCrouch(item.crouchAt);
+              break;
             case "inventory":
             default:
               deps.ui.toggleInventory();

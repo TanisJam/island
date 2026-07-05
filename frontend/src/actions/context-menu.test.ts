@@ -101,7 +101,14 @@ test("buildContextMenu: self section always has the two ui items plus any self-t
   assert.ok(ids.includes("reflect"), "self-target catalog action is included (future-proofing, even though today's real catalog has none)");
 });
 
-test("buildContextMenu: self also adds an 'Aquí' section from tile actions, and 'En el suelo' when floor items exist", () => {
+test("buildContextMenu: bare self menu (no ground items on the player's own tile) never offers 'Examinar de cerca' (crouch-crafting rework: per-tile trigger, not a self affordance)", () => {
+  const s = makeSnapshot();
+  const menu = buildContextMenu(catalog, s, selfResolution(), "visible");
+  const allIds = menu.sections.flatMap((sec) => sec.items.map((i) => i.id));
+  assert.ok(!allIds.some((id) => id.startsWith("ui:crouch")), "no crouch option without loose ground items on the tile");
+});
+
+test("buildContextMenu: self also adds an 'Aquí' section from tile actions, and 'En el suelo' (with 'Examinar de cerca') when floor items exist", () => {
   const s = makeSnapshot({ items: [{ id: "it1", itemTypeId: "seed", location: { type: "world", zoneId: "z1", x: 5, y: 5 } } as ItemInstance] });
   const menu = buildContextMenu(catalog, s, selfResolution(), "visible");
   const here = menu.sections.find((sec) => sec.title.startsWith("Aquí"));
@@ -110,7 +117,13 @@ test("buildContextMenu: self also adds an 'Aquí' section from tile actions, and
 
   const ground = menu.sections.find((sec) => sec.title === "En el suelo");
   assert.ok(ground, "floor items produce an 'En el suelo' section");
-  assert.equal(ground!.items[0]?.command?.type, "TakeItem");
+  assert.equal(ground!.items.find((i) => i.command?.type === "TakeItem")?.command?.type, "TakeItem");
+
+  const crouch = ground!.items.find((i) => i.uiIntent === "crouch");
+  assert.ok(crouch, "the player's own tile with ground items offers 'Examinar de cerca' (crouch-crafting rework, per-tile trigger)");
+  assert.equal(crouch!.label, "Examinar de cerca");
+  assert.equal(crouch!.kind, "ui");
+  assert.deepEqual(crouch!.crouchAt, { x: 5, y: 5 });
 });
 
 test("buildContextMenu: 'Decir algo' never appears anywhere in the self menu", () => {
@@ -149,6 +162,35 @@ test("buildContextMenu: adjacent tile with a loose item offers a 'Recoger' (Take
   assert.ok(take, "adjacent loose item offers a Recoger entry so the menu is never empty");
   assert.equal(take!.label, "Recoger");
   assert.deepEqual(take!.command, { type: "TakeItem", target: { kind: "item", id: "it1" } });
+});
+
+test("buildContextMenu: adjacent tile with a loose item also offers 'Examinar de cerca' carrying that tile's position (crouch-crafting rework: per-tile trigger, design.md Decision 2 superseded)", () => {
+  const s = makeSnapshot({
+    tiles: [makeTile(5, 5, "sand", true), makeTile(6, 5, "sand", true)],
+    items: [{ id: "it1", itemTypeId: "seed", location: { type: "world", zoneId: "z1", x: 6, y: 5 } } as ItemInstance],
+  });
+  const resolution = {
+    preview: { kind: "tile" as const, pos: { x: 6, y: 5 }, tags: ["ground"], terrain: "sand" as const },
+    wireRef: { kind: "tile" as const, x: 6, y: 5 },
+    self: false,
+  };
+  const menu = buildContextMenu(catalog, s, resolution, "visible");
+  const crouch = menu.sections[0]?.items.find((i) => i.uiIntent === "crouch");
+  assert.ok(crouch, "adjacent tile with ground items offers Examinar de cerca");
+  assert.equal(crouch!.label, "Examinar de cerca");
+  assert.equal(crouch!.kind, "ui");
+  assert.deepEqual(crouch!.crouchAt, { x: 6, y: 5 });
+});
+
+test("buildContextMenu: adjacent tile WITHOUT loose items never offers 'Examinar de cerca'", () => {
+  const s = makeSnapshot({ tiles: [makeTile(5, 5, "sand", true), makeTile(6, 5, "sand", true)] });
+  const resolution = {
+    preview: { kind: "tile" as const, pos: { x: 6, y: 5 }, tags: ["ground"], terrain: "sand" as const },
+    wireRef: { kind: "tile" as const, x: 6, y: 5 },
+    self: false,
+  };
+  const menu = buildContextMenu(catalog, s, resolution, "visible");
+  assert.ok(!menu.sections[0]?.items.some((i) => i.uiIntent === "crouch"), "no crouch option on an adjacent tile with no ground items");
 });
 
 test("buildContextMenu: far walkable tile gets a move item labeled 'Ir hasta ahí' (walk there)", () => {

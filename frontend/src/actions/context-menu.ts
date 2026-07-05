@@ -33,10 +33,17 @@ export interface ContextMenuItem {
   hint?: string;
   kind: "action" | "move" | "ui" | "mute";
   command?: Command;
-  uiIntent?: "inventory" | "thoughts" | "surface";
+  uiIntent?: "inventory" | "thoughts" | "surface" | "crouch";
   /** Only set when `uiIntent === "surface"` — the world object id `input/mouse.ts`
    * forwards to `Ui.toggleSurface`. */
   surfaceId?: string;
+  /** Only set when `uiIntent === "crouch"` — the TARGET TILE POSITION
+   * `input/mouse.ts` forwards to `Ui.toggleCrouch(pos)` (crouch-crafting
+   * rework: the crouch lens is a PER-TILE affordance — offered on whichever
+   * adjacent-or-own tile has loose ground items — not a self/player-centric
+   * aggregate, superseding design.md Decision 2's flat-list presentation per
+   * user playtest correction). Analogous to `surfaceId` above. */
+  crouchAt?: Position;
 }
 
 export interface ContextMenuSection {
@@ -203,6 +210,25 @@ function floorPickupItems(catalog: Catalog, snapshot: ClientSnapshot, pos: Posit
 }
 
 /**
+ * "Examinar de cerca" synthesized UI item (crouch-crafting rework, per user
+ * playtest correction of design.md Decision 2): offered on ANY tile — the
+ * player's own tile OR an adjacent one — that has at least one loose ground
+ * item, carrying the TARGET TILE POSITION so `Ui.toggleCrouch` knows which
+ * tile's spatial frame to render. A UI-only affordance synthesized the same
+ * way as "Recoger"/"Usar la mesa" — not a catalog action.
+ */
+function crouchLensItem(pos: Position): ContextMenuItem {
+  return {
+    id: `ui:crouch:${pos.x},${pos.y}`,
+    label: "Examinar de cerca",
+    hint: "mirar de cerca lo que hay en el suelo",
+    kind: "ui",
+    uiIntent: "crouch",
+    crouchAt: pos,
+  };
+}
+
+/**
  * "Yo" menu: UI-only entries (view inventory / view thoughts — always
  * present, they don't depend on the catalog) plus whatever
  * `computeAvailableActions` offers for a synthesized `self` target (none in
@@ -243,7 +269,11 @@ function buildSelfMenu(catalog: Catalog, snapshot: ClientSnapshot): ContextMenu 
 
   const floor = floorPickupItems(catalog, snapshot, pos);
   if (floor.length > 0) {
-    sections.push({ title: "En el suelo", items: floor });
+    // Crouch lens trigger for the PLAYER'S OWN tile (crouch-crafting rework):
+    // "Examinar de cerca" rides alongside "Recoger" in "En el suelo" — only
+    // offered when the player's own tile actually has ground items, never as
+    // a bare self-menu affordance.
+    sections.push({ title: "En el suelo", items: [crouchLensItem(pos), ...floor] });
   }
 
   return { title: "YO", sections };
@@ -280,7 +310,12 @@ function buildReachableMenu(
   // synthesize "Recoger" here too (mirrors the self-tile "En el suelo" section).
   // Without this, clicking an adjacent item opens an empty menu.
   if (proximity === "adjacent") {
-    items.push(...floorPickupItems(catalog, snapshot, pos));
+    const floorAdjacent = floorPickupItems(catalog, snapshot, pos);
+    // Crouch lens trigger for an ADJACENT tile (crouch-crafting rework, per
+    // user playtest correction): only offered when THIS tile actually has
+    // loose ground items — never a bare adjacent-tile affordance.
+    if (floorAdjacent.length > 0) items.push(crouchLensItem(pos));
+    items.push(...floorAdjacent);
   }
 
   if (preview.kind === "tile" && tileWalkableAt(snapshot, pos)) {

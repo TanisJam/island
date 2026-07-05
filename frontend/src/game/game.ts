@@ -159,6 +159,9 @@ export function createGame(deps: GameDeps): Game {
       onDrop: (itemInstanceId) => {
         void sendCommand({ type: "DropItem", itemInstanceId, to: dropTargetTile(store.getState()) });
       },
+      onObserve: (itemInstanceId) => {
+        void sendCommand({ type: "Observe", target: { kind: "item", id: itemInstanceId } });
+      },
       bindDrag: dragController.bindCell,
       bindGrid: dragController.bindGrid,
       unbindGrid: dragController.unbindGrid,

@@ -212,6 +212,7 @@ function captureMenuOnSelect(uiOverrides: Partial<Ui> = {}): (item: ContextMenuI
     toggleInventory: () => {},
     toggleThoughts: () => {},
     toggleSurface: () => {},
+    toggleCrouch: () => {},
     openContextMenu: (_menu: ContextMenu, _at: ScreenPoint, onSelect: (item: ContextMenuItem) => void) => {
       capturedOnSelect = onSelect;
     },
@@ -273,4 +274,28 @@ test("uiIntent routing: 'inventory' (and the default case) still calls Ui.toggle
   onSelect({ id: "ui:inventory", label: "Ver mis cosas", kind: "ui", uiIntent: "inventory" });
 
   assert.deepEqual(calls, ["inventory"]);
+});
+
+test("uiIntent routing: 'crouch' calls Ui.toggleCrouch with the item's crouchAt tile position, never toggleInventory (crouch-crafting rework: per-tile trigger)", () => {
+  const calls: Array<{ x: number; y: number }> = [];
+  const onSelect = captureMenuOnSelect({
+    toggleCrouch: (pos) => calls.push(pos),
+    toggleInventory: () => calls.push({ x: -1, y: -1 }),
+  });
+
+  onSelect({ id: "ui:crouch:6,5", label: "Examinar de cerca", kind: "ui", uiIntent: "crouch", crouchAt: { x: 6, y: 5 } });
+
+  assert.deepEqual(calls, [{ x: 6, y: 5 }]);
+});
+
+test("uiIntent routing: 'crouch' with no crouchAt is a defensive no-op (never falls back to toggleInventory)", () => {
+  const calls: string[] = [];
+  const onSelect = captureMenuOnSelect({
+    toggleCrouch: () => calls.push("crouch"),
+    toggleInventory: () => calls.push("inventory"),
+  });
+
+  onSelect({ id: "ui:crouch:stale", label: "Examinar de cerca", kind: "ui", uiIntent: "crouch" });
+
+  assert.deepEqual(calls, [], "no crouchAt means no dispatch at all — defensive guard, not a misroute to toggleInventory");
 });

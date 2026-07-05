@@ -1,4 +1,4 @@
-import type { Catalog, Thought } from "../contract";
+import type { Catalog, Position, Thought } from "../contract";
 import type { Store } from "../state/store";
 import type { ContextMenu, ContextMenuItem } from "../actions/context-menu";
 import { createWindowManager, type ScreenPoint, type WindowManager } from "./window-manager";
@@ -8,6 +8,7 @@ import {
   inventoryAddedMessage,
   inventoryItemIds,
   newlyAddedToInventory,
+  renderCrouchFrame,
   renderHud,
   renderInventoryGrid,
   renderSurfaceGrid,
@@ -18,11 +19,13 @@ import {
   type HudHandlers,
 } from "./hud";
 import type { ClientSnapshot } from "../state/snapshot";
+import { createObservedStore } from "../state/observed";
 
 export type { ScreenPoint };
 
 const INVENTORY_WINDOW_ID = "inventory";
 const THOUGHTS_WINDOW_ID = "thoughts";
+const CROUCH_WINDOW_ID = "crouch";
 const CONTEXT_MENU_ID = "context-menu";
 const surfaceWindowId = (surfaceId: string): string => `surface:${surfaceId}`;
 
@@ -62,6 +65,17 @@ export interface Ui {
    * stale between the click and this call. Stays live while open, same as
    * `toggleInventory`/`toggleThoughts`. */
   toggleSurface(surfaceId: string): void;
+  /** Opens the crouch lens window (crouch-crafting rework: a PER-TILE spatial
+   * "marco" over `pos`, superseding design.md Decision 2's self/flat-list
+   * presentation per user playtest correction) if closed, closes it if
+   * already open — a READ-ONLY, enlarged single-tile frame (terrain
+   * background + that tile's loose ground items), rendered by
+   * `renderCrouchFrame`. Same lifecycle as `toggleInventory`/`toggleSurface`:
+   * stays live while open, so `rerender()` reflects the world as it changes.
+   * `pos` is the TARGET TILE (the player's own tile or an adjacent one) —
+   * carried by the `crouch` uiIntent's `crouchAt` field, analogous to
+   * `toggleSurface`'s `surfaceId`. */
+  toggleCrouch(pos: Position): void;
   /** Renders `menu` as a floating window at `at` (clamped to the viewport)
    * and invokes `onSelect` when a non-mute item is clicked. */
   openContextMenu(menu: ContextMenu, at: ScreenPoint, onSelect: (item: ContextMenuItem) => void): void;
@@ -128,6 +142,53 @@ export function createDomUi(): Ui {
   // thoughts windows. Reset to `null` once `windows.get` reports it's no
   // longer open (e.g. the player closed it via the ✕ button).
   let openSurfaceId: string | null = null;
+  // Tracks the currently-open crouch lens's TARGET TILE position (crouch-
+  // crafting rework: per-tile, not a boolean self-lens flag anymore) so
+  // `rerender()` can re-render the same tile's frame live and detect the
+  // player closing it via the ✕ button, mirroring `openSurfaceId`'s lifecycle.
+  let openCrouchAt: Position | null = null;
+  // Session-only observed-types store (design.md Decision 4) — lives here
+  // (not module-level) so it resets whenever a fresh `createDomUi()` mounts,
+  // same scoping as `windows`.
+  const observedStore = createObservedStore();
+  // Persists WHICH item's info is currently shown in the crouch frame's info
+  // strip (crouch-crafting fix: the info strip must SURVIVE the Observe
+  // command's own rerender). `windows.setBody` discards the previous body's
+  // DOM — including the just-populated info strip — on EVERY store
+  // notification, and the Observe command's async response is exactly one
+  // such notification. Without persisting the selection here, a fresh
+  // `renderCrouchFrame` call rebuilds the info strip back to its placeholder,
+  // so the revealed properties flash and vanish right after the click that
+  // revealed them. Keyed by itemTypeId (not instance id): `properties`/`tags`
+  // are TYPE-level catalog data, and a tile's same-type instances are grouped
+  // into a single glyph anyway (see `groupByItemType`/`buildCrouchGlyph` in
+  // hud.ts) — so the type id is the right granularity and also survives the
+  // clicked INSTANCE being picked up as long as a sibling instance remains.
+  // Reset on every `toggleCrouch` (fresh open OR close) and whenever the
+  // window is found closed during a rerender — never bleeds into a different
+  // tile's frame or a stale prior session.
+  let crouchSelectedItemTypeId: string | null = null;
+
+  /** Wraps `handlers.onObserve` to first optimistically mark the item's TYPE
+   * as observed (design.md Decision 4: "Clicking Observar optimistically adds
+   * the itemTypeId... AND dispatches Observe") before forwarding the real
+   * dispatch — kept here (not in `hud/hud.ts`, which stays presentation-only)
+   * since `observedStore` is owned by this `createDomUi()` instance. Also
+   * forwards the persisted `crouchSelectedItemTypeId` (see above) and a
+   * setter so `renderCrouchFrame` can update it when a glyph is clicked. */
+  function buildCrouchBody(catalog: Catalog, snapshot: ClientSnapshot, pos: Position, handlers: HudHandlers): HTMLElement {
+    const wrapped: HudHandlers = {
+      ...handlers,
+      onObserve: (itemInstanceId: string) => {
+        const item = snapshot.items.find((it) => it.id === itemInstanceId);
+        if (item) observedStore.add(item.itemTypeId);
+        handlers.onObserve?.(itemInstanceId);
+      },
+    };
+    return renderCrouchFrame(catalog, snapshot, pos, wrapped, observedStore, crouchSelectedItemTypeId, (itemTypeId) => {
+      crouchSelectedItemTypeId = itemTypeId;
+    });
+  }
 
   function buildSurfaceBody(catalog: Catalog, snapshot: ClientSnapshot, surfaceId: string, handlers: HudHandlers): HTMLElement | null {
     const dims = resolveSurfaceDims(catalog, snapshot, surfaceId);
@@ -180,6 +241,18 @@ export function createDomUi(): Ui {
             if (body) windows.setBody(id, body);
           } else {
             openSurfaceId = null; // closed by the player (e.g. the ✕ button) since the last render
+          }
+        }
+
+        // Live-refresh the crouch lens WHILE OPEN, same rationale as the
+        // surface window above — the framed tile's ground items must reflect
+        // pickups/new arrivals instantly.
+        if (openCrouchAt) {
+          if (windows.get(CROUCH_WINDOW_ID)) {
+            windows.setBody(CROUCH_WINDOW_ID, buildCrouchBody(catalog, snapshot, openCrouchAt, handlers));
+          } else {
+            openCrouchAt = null; // closed by the player (e.g. the ✕ button) since the last render
+            crouchSelectedItemTypeId = null; // never let a stale selection bleed into the next open
           }
         }
 
@@ -256,6 +329,18 @@ export function createDomUi(): Ui {
         onClose: () => handlers.unbindGrid?.(`surface:${surfaceId}`),
       });
       openSurfaceId = handle ? surfaceId : null;
+    },
+
+    toggleCrouch(pos: Position): void {
+      if (!mounted) return;
+      const { store, catalog, handlers } = mounted;
+      // A fresh open (or a close) never carries over a stale selection from a
+      // previous tile/session — only a LIVE rerender of the SAME open window
+      // is allowed to read `crouchSelectedItemTypeId` back.
+      crouchSelectedItemTypeId = null;
+      const body = buildCrouchBody(catalog, store.getState(), pos, handlers);
+      const handle = windows.toggle({ id: CROUCH_WINDOW_ID, title: "EXAMINAR DE CERCA", body, variant: "window", closable: true, draggable: true });
+      openCrouchAt = handle ? pos : null;
     },
 
     openContextMenu(menu: ContextMenu, at: ScreenPoint, onSelect: (item: ContextMenuItem) => void): void {

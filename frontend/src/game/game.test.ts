@@ -121,6 +121,7 @@ function fakeUi(): Ui {
     toggleInventory: () => {},
     toggleThoughts: () => {},
     toggleSurface: () => {},
+    toggleCrouch: () => {},
     openContextMenu: () => {},
     closeContextMenu: () => {},
   };

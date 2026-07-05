@@ -470,6 +470,80 @@ body {
   box-shadow: inset 0 0 0 2px var(--descubrir);
 }
 
+/* Crouch spatial "marco" (crouch-crafting rework, per user playtest
+ * correction of design.md Decision 2's flat-list presentation): an ENLARGED
+ * SINGLE TILE — terrain-colored background (set inline per-tile from
+ * `AssetResolver.resolve("terrain", ...)`) with that tile's loose ground
+ * items rendered as large glyphs sitting on it, plus a shared info strip
+ * below naming the last-clicked/observed item. Not a `.grid` — loose ground
+ * items carry no grid coordinates of their own. */
+.crouch-frame {
+  border: 2px solid var(--linea);
+  border-radius: 8px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #444; /* fallback — overridden inline with the tile's real terrain color */
+}
+
+.crouch-frame-terrain {
+  font-family: "Silkscreen";
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  opacity: 0.85;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+.crouch-frame-items {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 72px;
+}
+
+.crouch-frame-item {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.25);
+  display: grid;
+  place-items: center;
+  font-size: 36px;
+  cursor: pointer;
+}
+
+.crouch-frame-count {
+  position: absolute;
+  bottom: 2px;
+  right: 4px;
+  font-family: "Silkscreen";
+  font-size: 9px;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.crouch-frame-info {
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.crouch-name {
+  font-weight: bold;
+}
+
+.crouch-props {
+  font-size: 11px;
+  color: var(--recuerdo);
+}
+
 .sect-h {
   font-family: "Silkscreen";
   font-size: 8px;
