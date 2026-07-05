@@ -1,9 +1,9 @@
 import type { Command, CommandEnvelope, CommandResult, Event } from "../contract";
-import { buildItemMenu, dropTargetTile, type ContextMenuItem } from "../actions/context-menu";
+import { buildItemMenu, type ContextMenuItem } from "../actions/context-menu";
 import { dispatchMenuItem, type MenuDispatchDeps } from "../actions/context-menu-dispatch";
 import { fetchCatalog, fetchPlayerState, fetchZone } from "../net/api";
 import type { Transport } from "../net/transport";
-import { buildSnapshot, type ClientSnapshot } from "../state/snapshot";
+import { buildSnapshot } from "../state/snapshot";
 import { createStore } from "../state/store";
 import { createViewState } from "../view/viewstate";
 import { createEmojiAssets, createSpriteAssets, parseAtlas } from "../render/assets";
@@ -34,12 +34,6 @@ export interface GameDeps {
 export interface Game {
   start(): Promise<void>;
   stop(): void;
-}
-
-function handsOccupied(snapshot: ClientSnapshot): { left: boolean; right: boolean } {
-  const occupied = (slot: { x: number; y: number }) =>
-    snapshot.items.some((it) => it.location.type === "player_inventory" && it.location.x === slot.x && it.location.y === slot.y);
-  return { left: occupied(snapshot.handSlots.left), right: occupied(snapshot.handSlots.right) };
 }
 
 /** Loads the tileset image from the given URL. Rejects (never throws
@@ -222,18 +216,6 @@ export function createGame(deps: GameDeps): Game {
     });
 
     const hudHandlers: HudHandlers = {
-      onEquip: (itemInstanceId) => {
-        const occupied = handsOccupied(store.getState());
-        const hand = !occupied.left ? "left" : !occupied.right ? "right" : null;
-        if (!hand) {
-          deps.ui.showThought("Tengo las dos manos ocupadas. Tendría que soltar algo primero.");
-          return;
-        }
-        void sendCommand({ type: "MoveItem", itemInstanceId, to: { type: "hand", hand } });
-      },
-      onDrop: (itemInstanceId) => {
-        void sendCommand({ type: "DropItem", itemInstanceId, to: dropTargetTile(store.getState()) });
-      },
       onObserve: (itemInstanceId) => {
         void sendCommand({ type: "Observe", target: { kind: "item", id: itemInstanceId } });
       },

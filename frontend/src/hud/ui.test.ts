@@ -192,8 +192,6 @@ test("createDomUi + toggleCrouch integration: properties revealed by clicking a 
 
     const observeCalls: string[] = [];
     const handlers: HudHandlers = {
-      onEquip: () => {},
-      onDrop: () => {},
       onObserve: (id) => observeCalls.push(id),
     };
 
@@ -238,7 +236,7 @@ test("createDomUi + toggleCrouch: opening a fresh crouch window never carries ov
     const item = worldItemAt("it1", "rama", CROUCH_POS.x, CROUCH_POS.y);
     const snapshot = makeSnapshot([item]);
     const store = createStore(snapshot);
-    const handlers: HudHandlers = { onEquip: () => {}, onDrop: () => {}, onObserve: () => {} };
+    const handlers: HudHandlers = { onObserve: () => {} };
 
     const ui = createDomUi();
     ui.mount(store, catalog, handlers);
@@ -265,8 +263,6 @@ test("createDomUi + toggleCrouch integration: clicking 'Probar combinación' dis
 
     const tryCalls: Position[] = [];
     const handlers: HudHandlers = {
-      onEquip: () => {},
-      onDrop: () => {},
       onObserve: () => {},
       // Mirrors `game/game.ts`'s real wiring: dispatch `TryCombination`
       // (recorded here instead of sent over a real Transport) and then
@@ -324,8 +320,6 @@ test("createDomUi + toggleSurface integration: la mesa muestra 'Probar combinaci
 
     const tryCalls: string[] = [];
     const handlers: HudHandlers = {
-      onEquip: () => {},
-      onDrop: () => {},
       onTryCombinationSurface: (surfaceId) => tryCalls.push(surfaceId),
     };
 
@@ -354,7 +348,7 @@ test("Ui.openItemMenu: opens a single CONTEXT_MENU window (.win.menu) and regist
   withFakeDom((root, docListenerCalls) => {
     const snapshot = makeSnapshot([]);
     const store = createStore(snapshot);
-    const handlers: HudHandlers = { onEquip: () => {}, onDrop: () => {} };
+    const handlers: HudHandlers = {};
 
     const ui = createDomUi();
     ui.mount(store, catalog, handlers);

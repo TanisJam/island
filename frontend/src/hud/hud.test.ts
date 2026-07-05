@@ -299,7 +299,7 @@ function fullInventorySnapshot(items: ItemInstance[]): ClientSnapshot {
   return { ...snapshotWithItems(items), handSlots: HAND_SLOTS };
 }
 
-const noopHandlers: HudHandlers = { onEquip: () => {}, onDrop: () => {} };
+const noopHandlers: HudHandlers = {};
 
 test("inventoryCellsForItem: an item not in player_inventory occupies nothing", () => {
   const item = surfaceItem("it1", "small_stone", "wo_table", 0, 0);
@@ -387,8 +387,6 @@ test("renderInventoryGrid: an occupied cell's onTap opens the item menu at the c
     const opened: Array<{ item: ItemInstance; at: ScreenPoint; source: "tap" | "click" }> = [];
     const byItemId = new Map<string, { cell: FakeCellElement; descriptor: CellDescriptor }>();
     const handlers: HudHandlers = {
-      onEquip: () => {},
-      onDrop: () => {},
       openItemMenu: (item, at, source) => opened.push({ item, at, source }),
       bindDrag: (cell, descriptor) => {
         if (descriptor.occupant) byItemId.set(descriptor.occupant.id, { cell: cell as unknown as FakeCellElement, descriptor });
@@ -401,7 +399,7 @@ test("renderInventoryGrid: an occupied cell's onTap opens the item menu at the c
     bag.descriptor.onTap?.();
     hand.descriptor.onTap?.();
 
-    assert.equal(opened.length, 2, "onEquip/onDrop are no longer called — openItemMenu is called once per tap instead");
+    assert.equal(opened.length, 2, "openItemMenu is called once per tap for both a bag and a hand-slot occupant");
     assert.deepEqual(opened[0], { item: bagItem, at: { x: bag.cell.rect.left, y: bag.cell.rect.bottom }, source: "tap" });
     assert.deepEqual(opened[1], { item: handItem, at: { x: hand.cell.rect.left, y: hand.cell.rect.bottom }, source: "tap" });
   });
@@ -640,7 +638,7 @@ test("renderCrouchFrame: clicking an item glyph dispatches handlers.onObserve wi
     const item = worldItemAt("it1", "rama", 5, 5);
     const snapshot = crouchSnapshot([item]);
     const observedCalls: string[] = [];
-    const handlers: HudHandlers = { onEquip: () => {}, onDrop: () => {}, onObserve: (id) => observedCalls.push(id) };
+    const handlers: HudHandlers = { onObserve: (id) => observedCalls.push(id) };
     const frame = renderCrouchFrame(crouchCatalog, snapshot, CROUCH_POS, handlers, createObservedStore()) as unknown as FakeCellElement;
     const itemsArea = frame.children.find((c) => c.classes.has("crouch-frame-items"))!;
     itemsArea.children[0]!.click();
@@ -657,7 +655,7 @@ test("renderCrouchFrame: properties/tags are revealed in the info strip once the
     const item = worldItemAt("it1", "rama", 5, 5);
     const snapshot = crouchSnapshot([item]);
     const observed = createObservedStore();
-    const handlers: HudHandlers = { onEquip: () => {}, onDrop: () => {}, onObserve: () => observed.add("rama") };
+    const handlers: HudHandlers = { onObserve: () => observed.add("rama") };
     const frame = renderCrouchFrame(crouchCatalog, snapshot, CROUCH_POS, handlers, observed) as unknown as FakeCellElement;
     const itemsArea = frame.children.find((c) => c.classes.has("crouch-frame-items"))!;
     itemsArea.children[0]!.click();

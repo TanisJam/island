@@ -7,14 +7,6 @@ import type { CellDescriptor, GridContext } from "./drag";
 import type { ScreenPoint } from "./window-manager";
 
 export type HudHandlers = {
-  /** DEPRECATED (item-context-menu WU3): superseded by `openItemMenu` below.
-   * Kept declared + wired through `game.ts` for THIS work-unit only — dead
-   * but harmless, since `renderInventoryGrid`'s `onTap` no longer calls it.
-   * Removal is deferred to WU5 cleanup (tasks.md Phase 6.1). */
-  onEquip: (itemInstanceId: string) => void;
-  /** DEPRECATED (item-context-menu WU3): see `onEquip` above — same deferred
-   * removal in WU5. */
-  onDrop: (itemInstanceId: string) => void;
   /** Opens the per-item context menu (item-context-menu change, design.md
    * Component 3/5) for `item`, anchored at `at` (the tapped/clicked cell's
    * `getBoundingClientRect()`). `source` picks which `Ui` opener to use:
@@ -308,7 +300,7 @@ export function renderInventoryGrid(catalog: Catalog, snapshot: ClientSnapshot, 
         // hand) opens the per-item menu instead of directly equipping/
         // dropping — `rect` is read HERE, at tap time, not at render time, so
         // it reflects the cell's actual on-screen position (design.md
-        // Component 3). `onEquip`/`onDrop` are no longer wired from here.
+        // Component 3).
         onTap = () => {
           const rect = cell.getBoundingClientRect();
           handlers.openItemMenu?.(occupant, { x: rect.left, y: rect.bottom }, "tap");
