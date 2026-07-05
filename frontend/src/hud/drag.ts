@@ -244,6 +244,15 @@ export type DragControllerDeps = {
    * HUD have camera access? No"). */
   resolveMapTile: (clientX: number, clientY: number) => Position;
   showThought: (text: string) => void;
+  /** Invoked exactly once, at the drag-start transition (the same instant
+   * `pointermove` first crosses `DRAG_THRESHOLD_PX`), BEFORE the ghost/
+   * highlight logic runs. Closes any open item/context menu — item-context-
+   * menu's Rotar/Guardar/Soltar entries are built from a FROZEN
+   * `{x,y,rotation}` snapshot of the item at menu-open time, so if the same
+   * item is then dragged, a stale menu left open could later relocate the
+   * item to its old coordinates. Optional so callers/tests that never open
+   * menus don't need to wire it. */
+  closeMenu?: () => void;
 };
 
 /** Everything `footprintValidity`/`updateHighlight` needs to know about a
@@ -502,6 +511,9 @@ export function createDragController(deps: DragControllerDeps): DragController {
       if (!dragging) {
         if (!crossedThreshold(start, { x: ev.clientX, y: ev.clientY })) return;
         dragging = true;
+        // Drag-start transition, fires exactly once per gesture (guarded by
+        // the `!dragging` check above) — see `DragControllerDeps.closeMenu`.
+        deps.closeMenu?.();
         cellEl.setPointerCapture?.(ev.pointerId);
         createGhost(source.descriptor.occupant!, ev.clientX, ev.clientY);
       }

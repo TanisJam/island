@@ -624,6 +624,75 @@ test("trailing-click suppressor: disarms via the timeout fallback if no compat c
   );
 });
 
+// --- Close-menu-on-drag-start (item-context-menu Phase 4) ------------------
+// A stale item menu (Rotar/Guardar/Soltar built from a FROZEN {x,y,rotation})
+// left open while the same item is dragged could later relocate the item to
+// its old coordinates. `closeMenu` must fire exactly once, at the instant the
+// threshold is first crossed, and NEVER for a below-threshold tap (that path
+// OPENS a menu via onTap — closing it there would defeat the feature).
+
+test("closeMenu: fires once when a drag crosses the threshold, before the ghost is created", () => {
+  withFakeDom(
+    () => null,
+    () => {
+      const item = invItemForDom("it1", 0, 0);
+      let closeMenuCalls = 0;
+      const { deps } = makeDeps({
+        getSnapshot: () => snapshotWith([item]),
+        closeMenu: () => {
+          closeMenuCalls += 1;
+        },
+      });
+      const controller = createDragController(deps);
+      const cell = new FakeElement();
+      controller.bindCell(cell as unknown as HTMLElement, { kind: "inventory", x: 0, y: 0, occupant: item });
+
+      fire(cell, "pointerdown", { clientX: 0, clientY: 0, pointerId: 1 });
+      assert.equal(closeMenuCalls, 0, "not called yet — still below threshold");
+
+      fire(cell, "pointermove", { clientX: 20, clientY: 20, pointerId: 1 }); // crosses the 6px threshold
+      assert.equal(closeMenuCalls, 1, "closeMenu fires exactly once at the drag-start transition");
+
+      fire(cell, "pointermove", { clientX: 25, clientY: 25, pointerId: 1 }); // continued drag movement
+      assert.equal(closeMenuCalls, 1, "closeMenu does not fire again on subsequent pointermove while already dragging");
+    },
+  );
+});
+
+test("closeMenu: a below-threshold tap does NOT call closeMenu — it calls onTap instead", () => {
+  withFakeDom(
+    () => null,
+    () => {
+      const item = invItemForDom("it1", 0, 0);
+      let closeMenuCalls = 0;
+      let tapped = false;
+      const { deps } = makeDeps({
+        getSnapshot: () => snapshotWith([item]),
+        closeMenu: () => {
+          closeMenuCalls += 1;
+        },
+      });
+      const controller = createDragController(deps);
+      const cell = new FakeElement();
+      controller.bindCell(cell as unknown as HTMLElement, {
+        kind: "inventory",
+        x: 0,
+        y: 0,
+        occupant: item,
+        onTap: () => {
+          tapped = true;
+        },
+      });
+
+      fire(cell, "pointerdown", { clientX: 0, clientY: 0, pointerId: 1 });
+      fire(cell, "pointerup", { clientX: 1, clientY: 1, pointerId: 1 }); // 1px move — below the 6px threshold
+
+      assert.equal(tapped, true, "below-threshold pointerup resolves as a tap");
+      assert.equal(closeMenuCalls, 0, "a tap OPENS a menu — closeMenu must not fire here");
+    },
+  );
+});
+
 // --- Full-footprint highlight + bindGrid/unbindGrid lifecycle (tasks.md T8c,
 // design.md Decision 3/4) ----------------------------------------------------
 

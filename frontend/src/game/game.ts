@@ -215,6 +215,10 @@ export function createGame(deps: GameDeps): Game {
       canvas: deps.canvas,
       resolveMapTile: (clientX, clientY) => canvasToTile(clientX, clientY, deps.canvas, viewState.frame()),
       showThought: deps.ui.showThought,
+      // item-context-menu Phase 4: close any open item/context menu the
+      // instant a drag starts, before it can relocate the item its
+      // Rotar/Guardar/Soltar entries were frozen against.
+      closeMenu: deps.ui.closeContextMenu,
     });
 
     const hudHandlers: HudHandlers = {
