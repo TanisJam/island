@@ -141,3 +141,34 @@ test("MoveItem -> hand: acepta el no-op de re-equipar el mismo item que ya está
   const result = processCommand(ctx(s), env);
   assert.equal(result.accepted, true, JSON.stringify(result));
 });
+
+// --- TryCombination: B0 plumbing stub (classification/crafting lands in B1) ---
+
+test("TryCombination (crouch, target=tile): stub rechaza sin lanzar y sin mutar estado", () => {
+  const s = seedState(index, template);
+  const before = JSON.stringify({ items: s.items, combinationAttempts: s.combinationAttempts });
+  const env: CommandEnvelope = {
+    playerId: s.player.id,
+    clientCommandId: "t1",
+    command: { type: "TryCombination", method: "crouch", target: { kind: "tile", x: s.player.position.x, y: s.player.position.y } },
+  };
+  const result = processCommand(ctx(s), env);
+  assert.equal(result.accepted, false);
+  assert.deepEqual(result.events, []);
+  assert.equal(JSON.stringify({ items: s.items, combinationAttempts: s.combinationAttempts }), before, "the B0 stub must not mutate state");
+});
+
+test("TryCombination (surface, target=world_object): stub rechaza sin lanzar y sin mutar estado", () => {
+  const s = seedState(index, template);
+  withTableNear(s);
+  const before = JSON.stringify({ items: s.items, combinationAttempts: s.combinationAttempts });
+  const env: CommandEnvelope = {
+    playerId: s.player.id,
+    clientCommandId: "t2",
+    command: { type: "TryCombination", method: "surface", target: { kind: "world_object", id: TABLE_ID } },
+  };
+  const result = processCommand(ctx(s), env);
+  assert.equal(result.accepted, false);
+  assert.deepEqual(result.events, []);
+  assert.equal(JSON.stringify({ items: s.items, combinationAttempts: s.combinationAttempts }), before, "the B0 stub must not mutate state");
+});

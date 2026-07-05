@@ -1,6 +1,6 @@
 // AUTOGENERADO desde schemas/commands.json — no editar a mano.
 
-export type Command = MovePlayer | MoveItem | DropItem | TakeItem | ExecuteAction | Rest | Observe;
+export type Command = MovePlayer | MoveItem | DropItem | TakeItem | ExecuteAction | Rest | Observe | TryCombination;
 
 export interface CommandEnvelope {
   playerId: string;
@@ -111,6 +111,31 @@ export interface Rest {
 }
 export interface Observe {
   type: "Observe";
+  target:
+    | {
+        kind: "world_object";
+        id: string;
+      }
+    | {
+        kind: "tile";
+        x: number;
+        y: number;
+      }
+    | {
+        kind: "item";
+        id: string;
+      }
+    | {
+        kind: "pile";
+        id: string;
+      }
+    | {
+        kind: "self";
+      };
+}
+export interface TryCombination {
+  type: "TryCombination";
+  method: "crouch" | "surface";
   target:
     | {
         kind: "world_object";

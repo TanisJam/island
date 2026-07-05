@@ -66,6 +66,16 @@
         "target": { "$ref": "common.json#/definitions/TargetRef" }
       }
     },
+    "TryCombination": {
+      "type": "object",
+      "required": ["type", "method", "target"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "TryCombination" },
+        "method": { "enum": ["crouch", "surface"] },
+        "target": { "$ref": "common.json#/definitions/TargetRef" }
+      }
+    },
     "Command": {
       "oneOf": [
         { "$ref": "#/definitions/MovePlayer" },
@@ -74,7 +84,8 @@
         { "$ref": "#/definitions/TakeItem" },
         { "$ref": "#/definitions/ExecuteAction" },
         { "$ref": "#/definitions/Rest" },
-        { "$ref": "#/definitions/Observe" }
+        { "$ref": "#/definitions/Observe" },
+        { "$ref": "#/definitions/TryCombination" }
       ]
     },
     "CommandEnvelope": {

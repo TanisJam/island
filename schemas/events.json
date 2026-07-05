@@ -145,6 +145,13 @@
         "thought": { "$ref": "common.json#/definitions/Thought" }
       }
     },
+    "CombinationAttempted": {
+      "type": "object", "required": ["type", "signature"], "additionalProperties": false,
+      "properties": {
+        "type": { "const": "CombinationAttempted" },
+        "signature": { "type": "string" }
+      }
+    },
     "Event": {
       "oneOf": [
         { "$ref": "#/definitions/PlayerMoved" },
@@ -165,7 +172,8 @@
         { "$ref": "#/definitions/ItemBroke" },
         { "$ref": "#/definitions/KnowledgeUnlocked" },
         { "$ref": "#/definitions/ThoughtAdded" },
-        { "$ref": "#/definitions/ActionFailed" }
+        { "$ref": "#/definitions/ActionFailed" },
+        { "$ref": "#/definitions/CombinationAttempted" }
       ]
     },
     "RejectionCode": {

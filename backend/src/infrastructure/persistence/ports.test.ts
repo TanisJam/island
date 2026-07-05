@@ -25,3 +25,12 @@ test("deserialize: un snapshot legacy sin 'inventories' se completa con {}", () 
   const restored = deserialize(JSON.stringify(legacy));
   assert.deepEqual(restored.inventories, {});
 });
+
+test("deserialize: un snapshot legacy sin 'combinationAttempts' se completa con {}", () => {
+  const s = seedState(index, template);
+  const json = JSON.stringify({ ...s, discovered: [...s.discovered] });
+  const legacy = JSON.parse(json);
+  delete legacy.combinationAttempts;
+  const restored = deserialize(JSON.stringify(legacy));
+  assert.deepEqual(restored.combinationAttempts, {});
+});

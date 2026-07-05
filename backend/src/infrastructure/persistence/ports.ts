@@ -15,5 +15,10 @@ export function serialize(s: GameState): string {
 
 export function deserialize(json: string): GameState {
   const o = JSON.parse(json);
-  return { ...o, discovered: new Set<string>(o.discovered ?? []), inventories: o.inventories ?? {} };
+  return {
+    ...o,
+    discovered: new Set<string>(o.discovered ?? []),
+    inventories: o.inventories ?? {},
+    combinationAttempts: o.combinationAttempts ?? {},
+  };
 }

@@ -19,7 +19,8 @@ export type Event =
   | ItemBroke
   | KnowledgeUnlocked
   | ThoughtAdded
-  | ActionFailed;
+  | ActionFailed
+  | CombinationAttempted;
 export type RejectionCode =
   | "out_of_range"
   | "not_walkable"
@@ -238,6 +239,10 @@ export interface ActionFailed {
   type: "ActionFailed";
   actionId: string;
   thought?: Thought;
+}
+export interface CombinationAttempted {
+  type: "CombinationAttempted";
+  signature: string;
 }
 export interface Rejection {
   code: RejectionCode;

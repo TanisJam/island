@@ -35,6 +35,27 @@ test("ItemMoved a surface: setea location.type='surface' con los campos correcto
   assert.deepEqual(moved.location, { type: "surface", surfaceId: "wo_table_2", x: 0, y: 0, rotation: 0 });
 });
 
+test("seedState: inicializa combinationAttempts vacío", () => {
+  const s = seedState(index, template);
+  assert.deepEqual(s.combinationAttempts, {});
+});
+
+test("CombinationAttempted: incrementa el contador por firma", () => {
+  const s = seedState(index, template);
+  applyEvent(s, index, { type: "CombinationAttempted", signature: "poor_wood|small_stone" });
+  assert.equal(s.combinationAttempts["poor_wood|small_stone"], 1);
+  applyEvent(s, index, { type: "CombinationAttempted", signature: "poor_wood|small_stone" });
+  assert.equal(s.combinationAttempts["poor_wood|small_stone"], 2);
+});
+
+test("CombinationAttempted: firmas distintas se cuentan por separado", () => {
+  const s = seedState(index, template);
+  applyEvent(s, index, { type: "CombinationAttempted", signature: "poor_wood|small_stone" });
+  applyEvent(s, index, { type: "CombinationAttempted", signature: "fiber|poor_wood" });
+  assert.equal(s.combinationAttempts["poor_wood|small_stone"], 1);
+  assert.equal(s.combinationAttempts["fiber|poor_wood"], 1);
+});
+
 test("rebuildInventories: es idempotente y no duplica ni pierde registros", () => {
   const s = seedState(index, template);
   const table: WorldObject = { id: "wo_table_3", objectTypeId: "rustic_table", position: { x: 5, y: 5 }, state: {}, tags: [], visibility: "visible" };

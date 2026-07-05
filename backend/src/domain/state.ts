@@ -49,6 +49,10 @@ export type GameState = {
   discovered: Set<string>; // tiles explorados, clave "x,y"
   /** Grillas de superficie por id de world object (sólo los que declaran `surfaceGrid`). */
   inventories: Record<string, SurfaceInventory>;
+  /** Conteo de intentos de `TryCombination` por firma (itemTypeIds únicos, ordenados,
+   *  unidos con "|"). Autoritativo: alimenta la escalación de pistas del clasificador
+   *  de combinaciones (Slice B1). */
+  combinationAttempts: Record<string, number>;
 };
 
 /** Reconstruye `s.inventories` a partir de `s.objects` y el catálogo: cada world

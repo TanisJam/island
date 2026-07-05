@@ -127,6 +127,11 @@ export function processCommand(ctx: EngineCtx, env: CommandEnvelope): CommandRes
       return ok(events);
     }
 
+    case "TryCombination": {
+      // B1 will implement classification/crafting here.
+      return no({ code: "not_applicable" });
+    }
+
     default:
       return no({ code: "not_applicable" });
   }

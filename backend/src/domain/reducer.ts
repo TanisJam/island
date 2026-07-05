@@ -104,6 +104,10 @@ export function applyEvent(s: GameState, index: CatalogIndex, e: Event): void {
       if (e.thought) s.player.thoughtLog.push(e.thought);
       return;
     }
+    case "CombinationAttempted": {
+      s.combinationAttempts[e.signature] = (s.combinationAttempts[e.signature] ?? 0) + 1;
+      return;
+    }
   }
 }
 

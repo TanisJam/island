@@ -72,6 +72,7 @@ export function seedState(index: CatalogIndex, template: ZoneTemplate, playerId 
     },
     discovered: new Set<string>(),
     inventories: {},
+    combinationAttempts: {},
   };
 
   markVisibleAround(state, state.player.position);
