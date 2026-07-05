@@ -280,12 +280,13 @@
     "id": "improvise_crude_tool",
     "label": "Improvisar herramienta",
     "priority": 55,
+    "combinable": true,
     "appliesTo": { "kind": "tile", "anyTags": ["ground"] },
     "requirements": [{ "type": "distance", "max": 0 }],
     "inputs": [
-      { "name": "head",   "scope": ["hands", "adjacent_ground", "surface"], "match": { "anyTags": ["tool_head_candidate"] }, "count": 1, "consume": true },
-      { "name": "handle", "scope": ["hands", "adjacent_ground", "surface"], "match": { "anyTags": ["handle_candidate"] },    "count": 1, "consume": true },
-      { "name": "binder", "scope": ["hands", "adjacent_ground", "surface"], "match": { "minProps": { "binding": 1 } },        "count": 1, "consume": true }
+      { "name": "head",   "scope": ["hands", "adjacent_ground", "surface"], "match": { "anyTags": ["tool_head_candidate"] }, "count": 1, "consume": true, "functionalHint": "algo con filo o punta", "functionalHintSharp": "una piedra con un borde cortante" },
+      { "name": "handle", "scope": ["hands", "adjacent_ground", "surface"], "match": { "anyTags": ["handle_candidate"] },    "count": 1, "consume": true, "functionalHint": "algo largo para agarrar", "functionalHintSharp": "una rama larga y firme" },
+      { "name": "binder", "scope": ["hands", "adjacent_ground", "surface"], "match": { "minProps": { "binding": 1 } },        "count": 1, "consume": true, "functionalHint": "algo para atar", "functionalHintSharp": "algo flexible y fibroso para atar" }
     ],
     "effects": [
       { "type": "consume_input", "input": "head" },
@@ -354,12 +355,13 @@
     "id": "craft_simple_axe",
     "label": "Fabricar hacha simple",
     "priority": 60,
+    "combinable": true,
     "appliesTo": { "kind": "world_object", "anyTags": ["surface"] },
     "requirements": [{ "type": "distance", "max": 1 }],
     "inputs": [
-      { "name": "head",   "scope": ["hands", "surface", "adjacent_ground"], "match": { "anyTags": ["tool_head_candidate", "crude"] }, "count": 1, "consume": true },
-      { "name": "handle", "scope": ["hands", "surface", "adjacent_ground"], "match": { "anyTags": ["structure", "wood"] },                       "count": 1, "consume": true },
-      { "name": "binder", "scope": ["hands", "surface", "adjacent_ground"], "match": { "minProps": { "binding": 1 } },                           "count": 1, "consume": true }
+      { "name": "head",   "scope": ["hands", "surface", "adjacent_ground"], "match": { "anyTags": ["tool_head_candidate", "crude"] }, "count": 1, "consume": true, "functionalHint": "algo con filo o punta", "functionalHintSharp": "una piedra con un borde cortante" },
+      { "name": "handle", "scope": ["hands", "surface", "adjacent_ground"], "match": { "anyTags": ["structure", "wood"] },                       "count": 1, "consume": true, "functionalHint": "algo largo para agarrar", "functionalHintSharp": "una rama larga y firme" },
+      { "name": "binder", "scope": ["hands", "surface", "adjacent_ground"], "match": { "minProps": { "binding": 1 } },                           "count": 1, "consume": true, "functionalHint": "algo para atar", "functionalHintSharp": "algo flexible y fibroso para atar" }
     ],
     "effects": [
       { "type": "consume_input", "input": "head" },

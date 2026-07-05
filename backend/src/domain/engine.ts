@@ -6,6 +6,14 @@ import { chebyshev, tileAt } from "./state";
 import { applyEvent } from "./reducer";
 import { findFreeInventorySlot, handItems } from "./inventory";
 import { newId } from "./ids";
+import {
+  classifyCombination,
+  combinationSignature,
+  describeCombinationFeedback,
+  ESCALATION_THRESHOLD,
+  gatherCombinationScope,
+  resolveRecipeInputs,
+} from "./combination";
 
 type ThoughtKind = "observation" | "idea" | "discovery" | "warning" | "failure" | "memory" | "system";
 
@@ -19,7 +27,7 @@ export type TargetRef =
 export type EngineCtx = { state: GameState; index: CatalogIndex; rng: () => number; now: () => number };
 export type EngineResult = { events: Event[] } | { rejection: Rejection };
 
-type RTarget =
+export type RTarget =
   | { kind: "world_object"; pos: Position; tags: string[]; obj: WorldObject }
   | { kind: "tile"; pos: Position; tags: string[]; terrain: TerrainId; tile: RuntimeTile }
   | { kind: "item"; pos: Position; tags: string[]; item: ItemInstance }
@@ -173,6 +181,61 @@ export function executeAction(ctx: EngineCtx, actionId: string, ref: TargetRef):
   return { events };
 }
 
+/** "Probar combinación" (Decision 3, engram #2854 + per-tile amendment #2857): a
+ *  META action over ALL `combinable`-flagged recipes, decoupled from `executeAction`'s
+ *  `appliesTo`/`requirements` gating (this is what lets a crouch craft on ANY tile,
+ *  not just at the mesa). On a FAILED (non-`ready`) attempt, emits `CombinationAttempted`
+ *  (feeding the escalation counter — a successful craft does NOT bump it, since the
+ *  counter tracks failed attempts per spec); on `ready` it crafts by reusing `applyEffect`
+ *  directly. `executeAction` itself is left untouched — this is a sibling path. */
+export function tryCombination(ctx: EngineCtx, ref: TargetRef, method: "crouch" | "surface"): EngineResult {
+  const { state: s, index } = ctx;
+
+  // Cross-validate method<->target.kind BEFORE resolving/gathering anything: a
+  // "crouch" attempt must target the examined tile, a "surface" attempt must target
+  // the mesa world object. Without this, "surface" + a tile target would fall through
+  // gatherCandidates' proximity fallback and silently defeat the per-tile invariant
+  // (#2857) with no mesa and no reach check at all.
+  if (method === "crouch" && ref.kind !== "tile") return rej("invalid_target");
+  if (method === "surface" && ref.kind !== "world_object") return rej("invalid_target");
+
+  const t = resolveTarget(s, index, ref);
+  if (!t) return rej("invalid_target");
+
+  // Proximity guard — every other spatial command (TakeItem, DropItem, MoveItem->surface)
+  // enforces reach; TryCombination must too, or a client could combine from anywhere
+  // on the map by naming an arbitrary tile/world_object id.
+  if (chebyshev(s.player.position, t.pos) > 1) {
+    const msg = method === "crouch" ? "Tengo que acercarme más." : "Tengo que acercarme a la mesa.";
+    return rej("out_of_range", mkThought(ctx, msg, "warning"));
+  }
+
+  const pieces = gatherCombinationScope(s, index, t, method);
+  const signature = combinationSignature(pieces);
+  // Read the counter BEFORE this attempt's own (possible) CombinationAttempted
+  // increments it, so tier selection reflects prior (not counting this) attempts.
+  const priorAttempts = s.combinationAttempts[signature] ?? 0;
+  const classification = classifyCombination(s, index, ref, method);
+
+  const events: Event[] = [];
+  const emit = (e: Event): void => {
+    events.push(e);
+    applyEvent(s, index, e);
+  };
+
+  if (classification.grade === "ready" && classification.recipe) {
+    const { resolved } = resolveRecipeInputs(index, pieces, classification.recipe);
+    for (const e of classification.recipe.effects) applyEffect(ctx, e, t, resolved, emit);
+    if (classification.recipe.thoughts?.success) emit({ type: "ThoughtAdded", thought: mkThought(ctx, classification.recipe.thoughts.success, "discovery") });
+    return { events };
+  }
+
+  emit({ type: "CombinationAttempted", signature });
+  const tier = priorAttempts >= ESCALATION_THRESHOLD ? "sharp" : "vague";
+  emit({ type: "ThoughtAdded", thought: mkThought(ctx, describeCombinationFeedback(classification, tier), "observation") });
+  return { events };
+}
+
 function applyEffect(ctx: EngineCtx, e: Effect, t: RTarget, resolved: Record<string, ItemInstance[]>, emit: (e: Event) => void): void {
   const { state: s, index } = ctx;
   switch (e.type) {
@@ -264,4 +327,4 @@ function applyEffect(ctx: EngineCtx, e: Effect, t: RTarget, resolved: Record<str
 }
 
 // helpers exportados para otros handlers
-export { resolveTarget, energyFactor };
+export { resolveTarget, energyFactor, itemMatches, gatherCandidates };

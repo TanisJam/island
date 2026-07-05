@@ -173,6 +173,7 @@ export interface ContextActionDef {
    */
   effects: [Effect, ...Effect[]];
   successChance?: number;
+  combinable?: boolean;
   thoughts?: {
     preview?: string;
     success?: string;
@@ -191,6 +192,8 @@ export interface InputSpec {
   };
   count: number;
   consume: boolean;
+  functionalHint?: string;
+  functionalHintSharp?: string;
 }
 export interface ResearchDef {
   id: string;

@@ -1,7 +1,7 @@
 import type { Command, CommandEnvelope } from "../contract/commands";
 import type { CommandResult, Event, ItemInstance, Rejection, Thought } from "../contract/events";
 import type { EngineCtx, TargetRef } from "../domain/engine";
-import { executeAction, resolveTarget } from "../domain/engine";
+import { executeAction, resolveTarget, tryCombination } from "../domain/engine";
 import { applyEvent } from "../domain/reducer";
 import { findPath } from "../domain/pathfinding";
 import { canPlaceInInventory, canPlaceOnSurface, findFreeInventorySlot, handEquipFits, HAND_LEFT, HAND_RIGHT } from "../domain/inventory";
@@ -128,8 +128,8 @@ export function processCommand(ctx: EngineCtx, env: CommandEnvelope): CommandRes
     }
 
     case "TryCombination": {
-      // B1 will implement classification/crafting here.
-      return no({ code: "not_applicable" });
+      const res = tryCombination(ctx, cmd.target as TargetRef, cmd.method);
+      return "rejection" in res ? no(res.rejection) : ok(res.events);
     }
 
     default:
