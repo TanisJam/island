@@ -5,7 +5,7 @@ import type { Renderer } from "../renderer";
 import type { Frame } from "../../view/viewstate";
 import { cameraOffset } from "../camera";
 import { createPixiTextureProvider } from "./textures";
-import { createTileScene, createEntityScene, createPlayerScene } from "./scene";
+import { createTileScene, createEntityScene, createPlayerScene, createFxScene } from "./scene";
 
 /**
  * Pixi implementation of the unchanged `Renderer` interface (design.md SEAM
@@ -13,7 +13,9 @@ import { createTileScene, createEntityScene, createPlayerScene } from "./scene";
  * of the Canvas renderer's per-frame immediate draws. WU1a: app lifecycle +
  * plain color-fallback terrain. WU2: sprite terrain + fog tint. WU3: object/
  * item/pile entity pool + glyph fallback + pile badge. WU4: player halo +
- * sprite (never fog-culled). FX (selection pulse, busy spinner) land in WU5.
+ * sprite (never fog-culled). WU5: selection pulse + busy spinner fx layer,
+ * landing last in the layer order (design.md D1: tile -> object -> pile ->
+ * item -> player -> fx) — this is the last feature WU before Canvas parity.
  *
  * `Application.init()` is async (Pixi v8 requirement), hence the
  * `Promise<Renderer>` return type — callers (`game.ts`) MUST await this
@@ -34,12 +36,15 @@ export async function createPixiRenderer(canvas: HTMLCanvasElement, assets: Asse
 
   // Layer order (design.md D1): tile -> object -> pile -> item -> player ->
   // fx. `entityScene.container` already enforces object/pile/item internally
-  // (see scene.ts); player lands on top here, fx lands on top of that in WU5.
+  // (see scene.ts); player lands on top here, fx lands on top of that.
   const entityScene = createEntityScene({ textures, assets });
   worldContainer.addChild(entityScene.container);
 
   const playerScene = createPlayerScene({ textures, assets });
   worldContainer.addChild(playerScene.container);
+
+  const fxScene = createFxScene({ textures });
+  worldContainer.addChild(fxScene.container);
 
   let destroyed = false;
 
@@ -49,11 +54,7 @@ export async function createPixiRenderer(canvas: HTMLCanvasElement, assets: Asse
       app.renderer.resize(width, height);
     },
 
-    render(frame: Frame, _selection: Position | null, _busy = false): void {
-      // `_selection`/`_busy` are unused until WU5 adds the selection pulse
-      // and busy spinner FX layer — kept as named parameters (matching
-      // `Renderer.render`'s signature) rather than dropped, so this stays a
-      // drop-in seam implementation.
+    render(frame: Frame, selection: Position | null, busy = false): void {
       if (destroyed) return;
       const offset = cameraOffset(frame, { width: app.renderer.width, height: app.renderer.height });
       worldContainer.x = offset.ox;
@@ -61,6 +62,7 @@ export async function createPixiRenderer(canvas: HTMLCanvasElement, assets: Asse
       tileScene.sync(frame);
       entityScene.sync(frame);
       playerScene.sync(frame);
+      fxScene.sync(frame, selection, busy);
     },
 
     destroy(): void {

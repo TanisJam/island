@@ -1,4 +1,5 @@
 import { Container, Graphics, Sprite, Text } from "pixi.js";
+import type { Position } from "../../contract";
 import type { AssetResolver, VisualDescriptor } from "../assets";
 import type { Frame, RenderEntity, Visibility } from "../../view/viewstate";
 import { PX, SCALE } from "../constants";
@@ -409,6 +410,121 @@ export function createTileScene(deps: SceneDeps): TileScene {
         if (sprite.texture !== texture) sprite.texture = texture;
         const tint = FOG_TINT[tile.visibility];
         if (sprite.tint !== tint) sprite.tint = tint;
+      }
+    },
+  };
+}
+
+// --- FX (WU5: selection pulse + busy spinner) ---
+
+/** Brasa token (spec "Light-Semantics Visual Identity" — the selection ring
+ * uses the brasa token), same hex `render/canvas.ts`'s `drawSelection`/
+ * `drawBusyIndicator` use (`#f0a24e` == `0xf0a24e`). */
+const BRASA = 0xf0a24e;
+
+/** Selection-ring pulse math (design.md D1's fx row), the SAME formula as
+ * `render/canvas.ts`'s `drawSelection`: rides `frame.clockMs`, the same
+ * global anim clock threaded through `Renderer.render(frame, ...)` — no
+ * second, divergent clock introduced here. Reduced motion freezes it to a
+ * static, fully-opaque ring (matches canvas.ts's reduced-motion branch). */
+function selectionAlpha(clockMs: number, reducedMotion: boolean): number {
+  return reducedMotion ? 1 : 0.7 + 0.3 * Math.sin(clockMs / 260);
+}
+
+/** Busy-spinner rotation math (design.md D1's fx row), the SAME formula as
+ * `render/canvas.ts`'s `drawBusyIndicator`: sweeps via `frame.clockMs`.
+ * Reduced motion freezes the sprite to a fixed (non-rotating) orientation,
+ * matching canvas.ts's reduced-motion branch. */
+function spinnerRotation(clockMs: number, reducedMotion: boolean): number {
+  return reducedMotion ? 0 : (clockMs / 140) % (Math.PI * 2);
+}
+
+/** Guarded the same way `render/canvas.ts`'s own `prefersReducedMotion` is
+ * (safe to import under Node — `node:test` has no `matchMedia`), but exposed
+ * as an INJECTABLE dependency (see `FxSceneDeps.reducedMotion`, defaulted to
+ * this function), mirroring `input/action-pacing.ts`'s `reducedMotion` DI
+ * shape — this lets `pixi.test.ts` force the reduced-motion branch
+ * deterministically instead of depending on a real `matchMedia` that isn't
+ * available under bare `node --test`. */
+function defaultReducedMotion(): boolean {
+  return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+export interface FxSceneDeps {
+  textures: TextureProvider;
+  reducedMotion?: () => boolean;
+}
+
+export interface FxScene {
+  container: Container;
+  /**
+   * Reconciles the fx layer against the current frame plus the `selection`/
+   * `busy` state `Renderer.render` receives alongside the frame (design.md
+   * D1's fx row / spec "Reduced-Motion Compliance for FX", "Visual Parity
+   * Checklist" — selection pulse, busy spinner). Two persistent nodes, never
+   * rebuilt: a selection-ring `Graphics` (visible+pulsing over the selected
+   * tile when `selection` is set, hidden when `null`) and a busy-spinner
+   * `Sprite` (visible+rotating over the player's head when `busy` is true
+   * AND a player entity exists in the frame, hidden otherwise). Both freeze
+   * to their static/non-animated variant under reduced motion.
+   */
+  sync(frame: Frame, selection: Position | null, busy: boolean): void;
+}
+
+/**
+ * Pure fx reconciler (design.md D1/D6), same "persistent node, mutated per
+ * frame" shape as the tile/entity/player reconcilers above — only the
+ * `TextureProvider.forRing()` bake needs a real Pixi renderer (same
+ * constraint `forGlyph` already has), so only this module's reconciliation
+ * is exercised by `pixi.test.ts` (spec "Test Coverage Without GPU
+ * Dependency").
+ */
+export function createFxScene(deps: FxSceneDeps): FxScene {
+  const reducedMotion = deps.reducedMotion ?? defaultReducedMotion;
+  const container = new Container();
+
+  // Selection ring: static geometry (a stroked square the size of one tile,
+  // mirroring canvas.ts's `strokeRect(pos.x*PX+1.5, pos.y*PX+1.5, PX-3,
+  // PX-3)`), drawn ONCE at a tile-local origin and moved as a whole via
+  // `.x`/`.y` to the selected tile each frame — never rebuilt.
+  const selectionRing = new Graphics().rect(1.5, 1.5, PX - 3, PX - 3).stroke({ width: 3, color: BRASA });
+  selectionRing.visible = false;
+  container.addChild(selectionRing);
+
+  // Busy spinner: the pre-baked ring texture (design.md D1 — the ONE
+  // per-frame-geometry-adjacent case, a cheap `.rotation` transform instead
+  // of redrawing geometry every frame), positioned over the player's head.
+  const busySprite = new Sprite(deps.textures.forRing());
+  busySprite.anchor.set(0.5);
+  busySprite.visible = false;
+  container.addChild(busySprite);
+
+  return {
+    container,
+    sync(frame: Frame, selection: Position | null, busy: boolean): void {
+      const reduced = reducedMotion();
+
+      if (selection) {
+        selectionRing.visible = true;
+        selectionRing.x = selection.x * PX;
+        selectionRing.y = selection.y * PX;
+        selectionRing.alpha = selectionAlpha(frame.clockMs, reduced);
+      } else {
+        selectionRing.visible = false;
+      }
+
+      // Anchored to the player's INTERPOLATED renderPos (same field the
+      // player pool positions itself from), just above the tile's top edge
+      // (over the head) — mirrors canvas.ts's `drawBusyIndicator` call site,
+      // which reads no snapshot and is gated entirely by `busy`.
+      const player = busy ? frame.entities.find((entity) => entity.kind === "player") : undefined;
+      if (player) {
+        busySprite.visible = true;
+        busySprite.x = player.renderPos.x * PX + PX / 2;
+        busySprite.y = player.renderPos.y * PX - PX * 0.08;
+        busySprite.rotation = spinnerRotation(frame.clockMs, reduced);
+      } else {
+        busySprite.visible = false;
       }
     },
   };

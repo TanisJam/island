@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Container, Graphics, Sprite, Text, Texture } from "pixi.js";
-import { createEntityScene, createPlayerScene, createTileScene } from "./scene";
+import { createEntityScene, createFxScene, createPlayerScene, createTileScene } from "./scene";
 import type { TextureProvider } from "./textures";
 import type { AssetResolver, SpriteRegion } from "../assets";
 import type { Frame, RenderEntity, Visibility } from "../../view/viewstate";
@@ -19,6 +19,7 @@ function stubTextures(): TextureProvider {
     forColor: () => Texture.EMPTY,
     forRegion: () => Texture.EMPTY,
     forGlyph: () => Texture.EMPTY,
+    forRing: () => Texture.EMPTY,
     destroy: () => {},
   };
 }
@@ -151,6 +152,7 @@ test("createTileScene assigns a texture resolved via the injected TextureProvide
     },
     forRegion: () => Texture.EMPTY,
     forGlyph: () => Texture.EMPTY,
+    forRing: () => Texture.EMPTY,
     destroy: () => {},
   };
   const scene = createTileScene({ textures, assets: stubAssets("#abcdef") });
@@ -174,6 +176,7 @@ test("createTileScene draws a sprite region (forRegion) when the resolved visual
       return regionTexture;
     },
     forGlyph: () => Texture.EMPTY,
+    forRing: () => Texture.EMPTY,
     destroy: () => {},
   };
   const assets: AssetResolver = { resolve: () => ({ sprite: STUB_REGION }) };
@@ -194,6 +197,7 @@ test("createTileScene falls back to forColor when the resolved visual has no .sp
       return Texture.EMPTY;
     },
     forGlyph: () => Texture.EMPTY,
+    forRing: () => Texture.EMPTY,
     destroy: () => {},
   };
   const scene = createTileScene({ textures, assets: stubAssets("#654321") });
@@ -293,6 +297,7 @@ test("createEntityScene draws a sprite region (forRegion) when the resolved visu
       glyphCalls.push(glyph);
       return Texture.EMPTY;
     },
+    forRing: () => Texture.EMPTY,
     destroy: () => {},
   };
   const assets: AssetResolver = { resolve: () => ({ sprite: STUB_REGION }) };
@@ -316,6 +321,7 @@ test("createEntityScene falls back to forGlyph when the resolved visual has no .
       glyphCalls.push(glyph);
       return Texture.EMPTY;
     },
+    forRing: () => Texture.EMPTY,
     destroy: () => {},
   };
   const assets: AssetResolver = { resolve: () => ({ glyph: "🌳", scale: 0.72 }) };
@@ -340,6 +346,7 @@ test("createEntityScene sizes a sprite-region entity via the region's OWN sw/sh 
     forColor: () => Texture.EMPTY,
     forRegion: () => regionTexture,
     forGlyph: () => Texture.EMPTY,
+    forRing: () => Texture.EMPTY,
     destroy: () => {},
   };
   // `scale` deliberately present alongside `.sprite` — a sprite-backed visual
@@ -391,6 +398,7 @@ test("createEntityScene skips redundant .texture writes when the frame is unchan
     forColor: () => Texture.EMPTY,
     forRegion: () => regionTexture,
     forGlyph: () => Texture.EMPTY,
+    forRing: () => Texture.EMPTY,
     destroy: () => {},
   };
   const assets: AssetResolver = { resolve: () => ({ sprite: STUB_REGION }) };
@@ -472,6 +480,7 @@ test("createPlayerScene draws a sprite region (forRegion) when the resolved visu
     forColor: () => Texture.EMPTY,
     forRegion: () => regionTexture,
     forGlyph: () => Texture.EMPTY,
+    forRing: () => Texture.EMPTY,
     destroy: () => {},
   };
   const assets: AssetResolver = { resolve: () => ({ sprite: STUB_REGION }) };
@@ -495,6 +504,7 @@ test("createPlayerScene falls back to forGlyph when the resolved visual has no .
       glyphCalls.push(glyph);
       return Texture.EMPTY;
     },
+    forRing: () => Texture.EMPTY,
     destroy: () => {},
   };
   const assets: AssetResolver = { resolve: () => ({ glyph: "🧍", scale: 0.82 }) };
@@ -507,4 +517,83 @@ test("createPlayerScene falls back to forGlyph when the resolved visual has no .
   assert.equal(sprite.width, PX * 0.82);
   assert.equal(sprite.height, PX * 0.82);
   assert.deepEqual([sprite.anchor.x, sprite.anchor.y], [0.5, 0.5]);
+});
+
+// --- createFxScene (WU5: selection pulse + busy spinner) ---
+
+/** `createFxScene` only needs `frame.entities`/`frame.clockMs` (no tiles),
+ * plus the `selection`/`busy` args `Renderer.render` receives alongside the
+ * frame — mirrors `frameWithEntities` but lets `clockMs` vary per test. */
+function frameForFx(clockMs: number, entities: RenderEntity[] = []): Frame {
+  return { zone: { width: 1, height: 1 }, tiles: [], entities, clockMs };
+}
+
+test("createFxScene shows the selection ring when a selection is set, hidden when null", () => {
+  const scene = createFxScene({ textures: stubTextures() });
+
+  scene.sync(frameForFx(0), { x: 2, y: 3 }, false);
+  const ring = scene.container.children[0] as Graphics;
+  assert.equal(ring.visible, true, "ring shown while a selection is set");
+  assert.equal(ring.x, 2 * PX);
+  assert.equal(ring.y, 3 * PX);
+
+  scene.sync(frameForFx(0), null, false);
+  assert.equal(ring.visible, false, "ring hidden once selection is cleared");
+});
+
+test("createFxScene pulses the selection ring alpha via the formula 0.7 + 0.3*sin(clockMs/260)", () => {
+  const scene = createFxScene({ textures: stubTextures() });
+  const ring = scene.container.children[0] as Graphics;
+
+  for (const clockMs of [0, 130, 260, 1000]) {
+    scene.sync(frameForFx(clockMs), { x: 0, y: 0 }, false);
+    const expected = 0.7 + 0.3 * Math.sin(clockMs / 260);
+    assert.ok(Math.abs(ring.alpha - expected) < 1e-9, `alpha at clockMs=${clockMs}`);
+  }
+});
+
+test("createFxScene freezes the selection ring to a static, fully-opaque alpha under reduced motion", () => {
+  const scene = createFxScene({ textures: stubTextures(), reducedMotion: () => true });
+  const ring = scene.container.children[0] as Graphics;
+
+  scene.sync(frameForFx(130), { x: 0, y: 0 }, false);
+  assert.equal(ring.alpha, 1, "reduced motion freezes the pulse to a static, fully-opaque ring");
+});
+
+test("createFxScene shows the busy spinner over the player's head only while busy is true and a player exists", () => {
+  const scene = createFxScene({ textures: stubTextures() });
+  const spinner = scene.container.children[1] as Sprite;
+  const player = entity({ id: "p", kind: "player", typeId: "player", renderPos: { x: 4, y: 5 } });
+
+  scene.sync(frameForFx(0, [player]), null, true);
+  assert.equal(spinner.visible, true, "spinner shown while busy and a player is present");
+  assert.equal(spinner.x, 4 * PX + PX / 2);
+  assert.equal(spinner.y, 5 * PX - PX * 0.08);
+
+  scene.sync(frameForFx(0, [player]), null, false);
+  assert.equal(spinner.visible, false, "spinner hidden once busy goes false");
+
+  scene.sync(frameForFx(0, []), null, true);
+  assert.equal(spinner.visible, false, "spinner hidden when busy but no player entity exists in the frame");
+});
+
+test("createFxScene rotates the busy spinner per frame under normal motion via the formula (clockMs/140) % (2*PI)", () => {
+  const scene = createFxScene({ textures: stubTextures() });
+  const spinner = scene.container.children[1] as Sprite;
+  const player = entity({ id: "p", kind: "player", typeId: "player" });
+
+  for (const clockMs of [0, 70, 140, 1000]) {
+    scene.sync(frameForFx(clockMs, [player]), null, true);
+    const expected = (clockMs / 140) % (Math.PI * 2);
+    assert.ok(Math.abs(spinner.rotation - expected) < 1e-9, `rotation at clockMs=${clockMs}`);
+  }
+});
+
+test("createFxScene freezes the busy spinner to a fixed (non-rotating) orientation under reduced motion", () => {
+  const scene = createFxScene({ textures: stubTextures(), reducedMotion: () => true });
+  const spinner = scene.container.children[1] as Sprite;
+  const player = entity({ id: "p", kind: "player", typeId: "player" });
+
+  scene.sync(frameForFx(700, [player]), null, true);
+  assert.equal(spinner.rotation, 0, "reduced motion freezes the spinner's rotation");
 });

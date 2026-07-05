@@ -1,4 +1,4 @@
-import { Rectangle, Text, Texture, type Renderer as PixiRenderer, type TextureSource } from "pixi.js";
+import { Graphics, Rectangle, Text, Texture, type Renderer as PixiRenderer, type TextureSource } from "pixi.js";
 import type { SpriteRegion } from "../assets";
 import { PX } from "../constants";
 
@@ -18,6 +18,10 @@ export interface TextureProvider {
   forRegion(region: SpriteRegion): Texture;
   forColor(hex: string): Texture;
   forGlyph(glyph: string): Texture;
+  /** WU5: the busy-spinner's pre-baked ring (design.md D1 — "pre-baked ring
+   * Texture Sprite, `.rotation` advanced per frame"). One fixed shape, no
+   * cache key needed — always the same texture. */
+  forRing(): Texture;
   destroy(): void;
 }
 
@@ -73,6 +77,21 @@ const GLYPH_FONT = '"Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", s
  */
 const GLYPH_BAKE_SIZE = PX;
 
+/** Busy-spinner ring geometry (WU5, design.md D1's fx row), baked ONCE — the
+ * scene layer (`scene.ts`'s `createFxScene`) supplies animation purely via a
+ * cheap per-frame `.rotation` transform on the `Sprite`, never rebuilding
+ * this texture. Same radius/color/lineWidth/cap as `render/canvas.ts`'s
+ * `drawBusyIndicator`: a dark backing disc (legibility over any terrain/
+ * glyph, same trick as `drawCount`'s stroke-then-fill) plus a 3/4 brasa arc.
+ * The arc is baked starting at angle 0 — the scene layer's `.rotation`
+ * reproduces `drawBusyIndicator`'s sweeping start angle by rotating the
+ * whole sprite instead of redrawing the arc per frame. */
+const SPINNER_BRASA = 0xf0a24e; // "#f0a24e", same brasa token as render/canvas.ts
+const SPINNER_RADIUS = PX * 0.16;
+const SPINNER_BACKING_RADIUS = SPINNER_RADIUS + 3;
+const SPINNER_BAKE_SIZE = Math.ceil(SPINNER_BACKING_RADIUS * 2 + 4);
+const SPINNER_CENTER = SPINNER_BAKE_SIZE / 2;
+
 /**
  * Creates the Pixi `TextureProvider`. Caches one `Texture` per unique input
  * (spec "Texture Adapter Caching") so repeated colors/regions/glyphs never
@@ -102,6 +121,7 @@ export function createPixiTextureProvider(renderer: PixiRenderer): TextureProvid
   // source is destroyed exactly once in `destroy()`.
   const regionCache = new Map<string, Texture>();
   const baseSources = new Map<CanvasImageSource, TextureSource>();
+  let ringTexture: Texture | undefined;
 
   function baseSourceFor(image: CanvasImageSource): TextureSource {
     const cached = baseSources.get(image);
@@ -145,11 +165,25 @@ export function createPixiTextureProvider(renderer: PixiRenderer): TextureProvid
       created.add(texture);
       return texture;
     },
+    forRing(): Texture {
+      if (ringTexture) return ringTexture;
+      const graphic = new Graphics()
+        .circle(SPINNER_CENTER, SPINNER_CENTER, SPINNER_BACKING_RADIUS)
+        .fill({ color: 0x000000, alpha: 0.55 })
+        .arc(SPINNER_CENTER, SPINNER_CENTER, SPINNER_RADIUS, 0, Math.PI * 1.5)
+        .stroke({ width: 3, color: SPINNER_BRASA, cap: "round" });
+      const texture = renderer.generateTexture(graphic);
+      graphic.destroy();
+      ringTexture = texture;
+      created.add(texture);
+      return texture;
+    },
     destroy(): void {
       for (const texture of created) texture.destroy(true);
       created.clear();
       colorCache.clear();
       glyphCache.clear();
+      ringTexture = undefined;
       for (const texture of regionCache.values()) texture.destroy(false);
       regionCache.clear();
       for (const source of baseSources.values()) source.destroy();
