@@ -435,6 +435,10 @@ interface LightNode {
 export interface LightSceneDeps {
   textures: TextureProvider;
   assets: AssetResolver;
+  /** Injected the same way `createFxScene`'s is (design.md D6): steady when
+   * true, breathing (`sin(frame.clockMs)`) when false/omitted. Defaults to
+   * the same guarded `matchMedia` check. */
+  reducedMotion?: () => boolean;
 }
 
 export interface LightScene {
@@ -446,14 +450,23 @@ export interface LightScene {
    * ONLY while its emitter resolves a `visual.light` AND its
    * `visibility === "visible"` (fog gate — design.md D5: no glow leaks onto
    * explored/unseen tiles). Destroyed once the entity no longer appears in
-   * `frame.entities` at all, same pool shape as `createEntityScene`. WU3
-   * scope: steady pools only — reduced-motion breathing lands in WU5.
+   * `frame.entities` at all, same pool shape as `createEntityScene`.
+   * Intensity/scale are steady under reduced motion, subtly breathing
+   * (`sin(frame.clockMs)`) otherwise (spec "Reduced-Motion Steady Light").
    */
   sync(frame: Frame): void;
 }
 
+/** Breathing alpha/scale factor (design.md D6, spec "Reduced-Motion Steady
+ * Light"): steady (1) under reduced motion, a subtle `sin(clockMs)` wobble
+ * otherwise — rides the SAME `frame.clockMs` every other fx reconciler in
+ * this module uses, no second animation clock introduced. */
+function breathingFactor(clockMs: number, reduced: boolean): number {
+  return reduced ? 1 : 1 + 0.06 * Math.sin(clockMs / 900);
+}
+
 /**
- * Pure light-pool reconciler (design.md D1/D2/D5), same persistent
+ * Pure light-pool reconciler (design.md D1/D2/D5/D6), same persistent
  * `Map<id, LightNode>` pool/seen/destroy shape as `createEntityScene`. Built
  * directly off `frame.entities` (NOT pre-culled — design.md D1), resolving
  * `visual.light` itself per entity via the injected `AssetResolver` rather
@@ -462,6 +475,7 @@ export interface LightScene {
  * "Renderer-Agnostic Light Descriptor Seam").
  */
 export function createLightScene(deps: LightSceneDeps): LightScene {
+  const reducedMotion = deps.reducedMotion ?? defaultReducedMotion;
   const container = new Container();
   container.blendMode = "add";
 
@@ -485,6 +499,7 @@ export function createLightScene(deps: LightSceneDeps): LightScene {
     container,
     sync(frame: Frame): void {
       const seen = new Set<string>();
+      const breathe = breathingFactor(frame.clockMs, reducedMotion());
 
       for (const entity of frame.entities) {
         // Fog gate (design.md D5): a pool renders ONLY while its emitter is
@@ -511,11 +526,11 @@ export function createLightScene(deps: LightSceneDeps): LightScene {
         // `LightSpec`'s doc comment) — no need to know the bake's own native
         // size here, Pixi derives the scale factor from the target size.
         const { radius, color, intensity } = visual.light;
-        const diameter = radius * PX * 2;
+        const diameter = radius * PX * 2 * breathe;
         node.sprite.x = entity.renderPos.x * PX + PX / 2;
         node.sprite.y = entity.renderPos.y * PX + PX / 2;
         node.sprite.tint = color;
-        node.sprite.alpha = intensity;
+        node.sprite.alpha = intensity * breathe;
         node.sprite.width = diameter;
         node.sprite.height = diameter;
       }
