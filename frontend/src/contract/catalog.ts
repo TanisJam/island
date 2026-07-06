@@ -153,6 +153,11 @@ export interface WorldObjectTypeDef {
   observationByState?: {
     [k: string]: string;
   };
+  glow?: {
+    radius: number;
+    color: string;
+    intensity: number;
+  };
 }
 export interface KnowledgeDef {
   id: string;

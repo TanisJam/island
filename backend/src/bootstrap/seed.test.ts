@@ -75,12 +75,18 @@ test("seedState(template): matches the pre-migration procedural seed (tiles/obje
   }
 
   // --- Objects: objectTypeId/position/state, ignoring the randomly generated id. ---
+  // Length check is `>=`, not `===`: the frozen `oldObjectPlacements` fixture above
+  // must stay byte-identical to the pre-migration baseline (per this file's header
+  // comment), but the zone TEMPLATE itself is legitimate content that can grow past
+  // that baseline (spec "lighting" — `bioluminescent_mushroom` seeded in
+  // zones/zone-z1.json `objects`, asserted separately below). Every pre-migration
+  // placement must still be present; new placements on top of it are expected.
   const actualObjects = s.objects.map((o) => ({ objectTypeId: o.objectTypeId, x: o.position.x, y: o.position.y, state: o.state }));
   const expectedObjects = oldObjectPlacements.map((p) => {
     const def = index.objectById.get(p.objectTypeId);
     return { objectTypeId: p.objectTypeId, x: p.x, y: p.y, state: { ...(def?.defaultState ?? {}) } };
   });
-  assert.equal(actualObjects.length, expectedObjects.length);
+  assert.ok(actualObjects.length >= expectedObjects.length, "expected at least the pre-migration object count");
   for (const expected of expectedObjects) {
     const actual = actualObjects.find((o) => o.objectTypeId === expected.objectTypeId && o.x === expected.x && o.y === expected.y);
     assert.ok(actual, `missing object ${expected.objectTypeId}@(${expected.x},${expected.y})`);
@@ -97,6 +103,11 @@ test("seedState(template): matches the pre-migration procedural seed (tiles/obje
   const table = s.objects.find((o) => o.objectTypeId === "rustic_table");
   assert.ok(table, "expected a rustic_table world object");
   assert.deepEqual(table!.position, { x: 8, y: 8 });
+
+  // --- SDD "lighting": bioluminescent_mushroom seeded near spawn, visible on boot. ---
+  const mushroom = s.objects.find((o) => o.objectTypeId === "bioluminescent_mushroom");
+  assert.ok(mushroom, "expected a bioluminescent_mushroom world object");
+  assert.deepEqual(mushroom!.position, { x: 9, y: 9 });
 });
 
 // --- Fail-fast guards ---

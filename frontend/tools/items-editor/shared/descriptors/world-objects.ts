@@ -65,5 +65,13 @@ export const WORLD_OBJECTS_DESCRIPTOR: CollectionDescriptor = {
       fullWidth: true,
       helperText: "Optional — per-state observation text overrides.",
     },
+    {
+      key: "glow",
+      label: "Glow",
+      kind: "rawJson",
+      required: false,
+      fullWidth: true,
+      helperText: 'Optional — raw JSON object, e.g. {"radius":2,"color":"#7fe0c9","intensity":0.55}. Leave empty to omit.',
+    },
   ],
 };

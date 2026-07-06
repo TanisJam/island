@@ -240,6 +240,11 @@
       "objectTypeId": "rustic_table",
       "x": 8,
       "y": 8
+    },
+    {
+      "objectTypeId": "bioluminescent_mushroom",
+      "x": 9,
+      "y": 9
     }
   ]
 }

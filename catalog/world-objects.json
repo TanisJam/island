@@ -75,6 +75,23 @@
     }
   },
   {
+    "id": "bioluminescent_mushroom",
+    "name": "Hongo bioluminiscente",
+    "description": "Un hongo que emite un resplandor azul-verdoso tenue en la penumbra.",
+    "tags": [
+      "mushroom",
+      "plant",
+      "glow_source"
+    ],
+    "blocksMovement": false,
+    "observation": "Brilla suavemente, como si tuviera luz propia.",
+    "glow": {
+      "radius": 2,
+      "color": "#7fe0c9",
+      "intensity": 0.55
+    }
+  },
+  {
     "id": "rustic_table",
     "name": "Mesa rústica",
     "description": "Una superficie estable para combinar y ensamblar piezas.",

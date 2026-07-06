@@ -138,6 +138,7 @@ const OBJECT_EMOJI: Record<string, string> = {
   small_rock: "🪨",
   wreckage: "🚢",
   rustic_table: "🛠️",
+  bioluminescent_mushroom: "🍄",
 };
 const ITEM_EMOJI: Record<string, string> = {
   small_stone: "🪨",

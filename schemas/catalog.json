@@ -60,6 +60,16 @@
         "observationByState": {
           "type": "object",
           "additionalProperties": { "type": "string" }
+        },
+        "glow": {
+          "type": "object",
+          "required": ["radius", "color", "intensity"],
+          "additionalProperties": false,
+          "properties": {
+            "radius": { "type": "number" },
+            "color": { "type": "string" },
+            "intensity": { "type": "number" }
+          }
         }
       }
     },
