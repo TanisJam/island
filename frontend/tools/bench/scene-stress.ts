@@ -42,6 +42,7 @@ function stubTextures(): TextureProvider {
     forRegion: () => Texture.EMPTY,
     forGlyph: () => Texture.EMPTY,
     forRing: () => Texture.EMPTY,
+    forGlow: () => Texture.EMPTY,
     destroy: () => {},
   };
 }

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Container, Graphics, Sprite, Text, Texture } from "pixi.js";
-import { createEntityScene, createFxScene, createPlayerScene, createTileScene } from "./scene";
+import { createEntityScene, createFxScene, createLightScene, createPlayerScene, createTileScene } from "./scene";
 import type { TextureProvider } from "./textures";
 import type { AssetResolver, SpriteRegion } from "../assets";
 import type { Frame, RenderEntity, Visibility } from "../../view/viewstate";
@@ -20,6 +20,7 @@ function stubTextures(): TextureProvider {
     forRegion: () => Texture.EMPTY,
     forGlyph: () => Texture.EMPTY,
     forRing: () => Texture.EMPTY,
+    forGlow: () => Texture.EMPTY,
     destroy: () => {},
   };
 }
@@ -153,6 +154,7 @@ test("createTileScene assigns a texture resolved via the injected TextureProvide
     forRegion: () => Texture.EMPTY,
     forGlyph: () => Texture.EMPTY,
     forRing: () => Texture.EMPTY,
+    forGlow: () => Texture.EMPTY,
     destroy: () => {},
   };
   const scene = createTileScene({ textures, assets: stubAssets("#abcdef") });
@@ -177,6 +179,7 @@ test("createTileScene draws a sprite region (forRegion) when the resolved visual
     },
     forGlyph: () => Texture.EMPTY,
     forRing: () => Texture.EMPTY,
+    forGlow: () => Texture.EMPTY,
     destroy: () => {},
   };
   const assets: AssetResolver = { resolve: () => ({ sprite: STUB_REGION }) };
@@ -198,6 +201,7 @@ test("createTileScene falls back to forColor when the resolved visual has no .sp
     },
     forGlyph: () => Texture.EMPTY,
     forRing: () => Texture.EMPTY,
+    forGlow: () => Texture.EMPTY,
     destroy: () => {},
   };
   const scene = createTileScene({ textures, assets: stubAssets("#654321") });
@@ -301,6 +305,7 @@ test("createEntityScene draws a sprite region (forRegion) when the resolved visu
       return Texture.EMPTY;
     },
     forRing: () => Texture.EMPTY,
+    forGlow: () => Texture.EMPTY,
     destroy: () => {},
   };
   const assets: AssetResolver = { resolve: () => ({ sprite: STUB_REGION }) };
@@ -325,6 +330,7 @@ test("createEntityScene falls back to forGlyph when the resolved visual has no .
       return Texture.EMPTY;
     },
     forRing: () => Texture.EMPTY,
+    forGlow: () => Texture.EMPTY,
     destroy: () => {},
   };
   const assets: AssetResolver = { resolve: () => ({ glyph: "🌳", scale: 0.72 }) };
@@ -350,6 +356,7 @@ test("createEntityScene sizes a sprite-region entity via the region's OWN sw/sh 
     forRegion: () => regionTexture,
     forGlyph: () => Texture.EMPTY,
     forRing: () => Texture.EMPTY,
+    forGlow: () => Texture.EMPTY,
     destroy: () => {},
   };
   // `scale` deliberately present alongside `.sprite` — a sprite-backed visual
@@ -402,6 +409,7 @@ test("createEntityScene skips redundant .texture writes when the frame is unchan
     forRegion: () => regionTexture,
     forGlyph: () => Texture.EMPTY,
     forRing: () => Texture.EMPTY,
+    forGlow: () => Texture.EMPTY,
     destroy: () => {},
   };
   const assets: AssetResolver = { resolve: () => ({ sprite: STUB_REGION }) };
@@ -484,6 +492,7 @@ test("createPlayerScene draws a sprite region (forRegion) when the resolved visu
     forRegion: () => regionTexture,
     forGlyph: () => Texture.EMPTY,
     forRing: () => Texture.EMPTY,
+    forGlow: () => Texture.EMPTY,
     destroy: () => {},
   };
   const assets: AssetResolver = { resolve: () => ({ sprite: STUB_REGION }) };
@@ -508,6 +517,7 @@ test("createPlayerScene falls back to forGlyph when the resolved visual has no .
       return Texture.EMPTY;
     },
     forRing: () => Texture.EMPTY,
+    forGlow: () => Texture.EMPTY,
     destroy: () => {},
   };
   const assets: AssetResolver = { resolve: () => ({ glyph: "🧍", scale: 0.82 }) };
@@ -599,4 +609,29 @@ test("createFxScene freezes the busy spinner to a fixed (non-rotating) orientati
 
   scene.sync(frameForFx(700, [player]), null, true);
   assert.equal(spinner.rotation, 0, "reduced motion freezes the spinner's rotation");
+});
+
+// --- createLightScene smoke coverage (lighting WU3) — full presence/absence
+// and reduced-motion assertions live in light.test.ts (WU5); this is just a
+// cheap sanity check that the reconciler builds an additive container and
+// reacts to `visual.light` at all. ---
+
+test("createLightScene: container uses additive blend mode", () => {
+  const scene = createLightScene({ textures: stubTextures(), assets: stubAssets() });
+  assert.equal(scene.container.blendMode, "add");
+});
+
+test("createLightScene: an entity whose resolved visual has no .light produces no node", () => {
+  const scene = createLightScene({ textures: stubTextures(), assets: stubAssets() });
+  const lampless = entity({ id: "o1", kind: "object", typeId: "tree", visibility: "visible" });
+  scene.sync(frameWithEntities([lampless]));
+  assert.equal(scene.container.children.length, 0);
+});
+
+test("createLightScene: a visible entity whose resolved visual has .light gets a light node", () => {
+  const glowAssets: AssetResolver = { resolve: () => ({ light: { radius: 2, color: "#7fe0c9", intensity: 0.55 } }) };
+  const scene = createLightScene({ textures: stubTextures(), assets: glowAssets });
+  const emitter = entity({ id: "m1", kind: "object", typeId: "bioluminescent_mushroom", visibility: "visible" });
+  scene.sync(frameWithEntities([emitter]));
+  assert.equal(scene.container.children.length, 1);
 });

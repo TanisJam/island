@@ -423,6 +423,110 @@ export function createTileScene(deps: SceneDeps): TileScene {
   };
 }
 
+// --- Light (lighting WU3/WU5: additive pool reconciler) ---
+
+/** One node per lit emitter: a single `Sprite` tinted/scaled from the shared
+ * `forGlow()` bake (design.md D2 — one baked texture, per-emitter tint +
+ * alpha + scale reproduces any warm/cool pool). */
+interface LightNode {
+  sprite: Sprite;
+}
+
+export interface LightSceneDeps {
+  textures: TextureProvider;
+  assets: AssetResolver;
+}
+
+export interface LightScene {
+  container: Container;
+  /**
+   * Reconciles the light-pool layer against `frame.entities` (design.md D1's
+   * light row / spec "Campfire Light Emission", "Bioluminescent Mushroom
+   * Light Emission", "Additive Composition With Fog"). A pool node exists
+   * ONLY while its emitter resolves a `visual.light` AND its
+   * `visibility === "visible"` (fog gate — design.md D5: no glow leaks onto
+   * explored/unseen tiles). Destroyed once the entity no longer appears in
+   * `frame.entities` at all, same pool shape as `createEntityScene`. WU3
+   * scope: steady pools only — reduced-motion breathing lands in WU5.
+   */
+  sync(frame: Frame): void;
+}
+
+/**
+ * Pure light-pool reconciler (design.md D1/D2/D5), same persistent
+ * `Map<id, LightNode>` pool/seen/destroy shape as `createEntityScene`. Built
+ * directly off `frame.entities` (NOT pre-culled — design.md D1), resolving
+ * `visual.light` itself per entity via the injected `AssetResolver` rather
+ * than reading any renderer-side campfire/mushroom-specific logic (the
+ * renderer never branches on entity type or typeId — spec
+ * "Renderer-Agnostic Light Descriptor Seam").
+ */
+export function createLightScene(deps: LightSceneDeps): LightScene {
+  const container = new Container();
+  container.blendMode = "add";
+
+  const nodes = new Map<string, LightNode>();
+
+  function createNode(): LightNode {
+    const sprite = new Sprite(deps.textures.forGlow());
+    sprite.anchor.set(0.5);
+    container.addChild(sprite);
+    return { sprite };
+  }
+
+  function removeNode(id: string): void {
+    const node = nodes.get(id);
+    if (!node) return;
+    node.sprite.destroy();
+    nodes.delete(id);
+  }
+
+  return {
+    container,
+    sync(frame: Frame): void {
+      const seen = new Set<string>();
+
+      for (const entity of frame.entities) {
+        // Fog gate (design.md D5): a pool renders ONLY while its emitter is
+        // visible — explored/unseen never shows a glow, matching
+        // `createEntityScene`'s own unseen-hides-the-node rule but stricter
+        // (light additionally requires `visible`, not merely "not unseen").
+        if (entity.visibility !== "visible") {
+          if (nodes.has(entity.id)) removeNode(entity.id);
+          continue;
+        }
+
+        const visual = deps.assets.resolve(entity.kind, entity.typeId, entity.state ?? {});
+        if (!visual.light) {
+          if (nodes.has(entity.id)) removeNode(entity.id);
+          continue;
+        }
+
+        seen.add(entity.id);
+        const node = nodes.get(entity.id) ?? createNode();
+        nodes.set(entity.id, node);
+
+        // `sprite.width`/`.height` scale the shared bake to the exact pixel
+        // diameter for THIS emitter (`radius` is in tile units — see
+        // `LightSpec`'s doc comment) — no need to know the bake's own native
+        // size here, Pixi derives the scale factor from the target size.
+        const { radius, color, intensity } = visual.light;
+        const diameter = radius * PX * 2;
+        node.sprite.x = entity.renderPos.x * PX + PX / 2;
+        node.sprite.y = entity.renderPos.y * PX + PX / 2;
+        node.sprite.tint = color;
+        node.sprite.alpha = intensity;
+        node.sprite.width = diameter;
+        node.sprite.height = diameter;
+      }
+
+      for (const id of nodes.keys()) {
+        if (!seen.has(id)) removeNode(id);
+      }
+    },
+  };
+}
+
 // --- FX (WU5: selection pulse + busy spinner) ---
 
 /** Brasa token (spec "Light-Semantics Visual Identity" — the selection ring

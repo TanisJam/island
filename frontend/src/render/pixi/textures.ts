@@ -1,4 +1,4 @@
-import { Graphics, Rectangle, Text, Texture, type Renderer as PixiRenderer, type TextureSource } from "pixi.js";
+import { FillGradient, Graphics, Rectangle, Text, Texture, type Renderer as PixiRenderer, type TextureSource } from "pixi.js";
 import type { SpriteRegion } from "../assets";
 import { PX } from "../constants";
 
@@ -22,6 +22,10 @@ export interface TextureProvider {
    * Texture Sprite, `.rotation` advanced per frame"). One fixed shape, no
    * cache key needed — always the same texture. */
   forRing(): Texture;
+  /** Lighting WU3: the ONE baked white radial-alpha texture every light pool
+   * tints/scales itself from (design.md D2). No cache key needed — always
+   * the same texture, reused by every emitter via `tint`/`alpha`/`scale`. */
+  forGlow(): Texture;
   destroy(): void;
 }
 
@@ -92,6 +96,15 @@ const SPINNER_BACKING_RADIUS = SPINNER_RADIUS + 3;
 const SPINNER_BAKE_SIZE = Math.ceil(SPINNER_BACKING_RADIUS * 2 + 4);
 const SPINNER_CENTER = SPINNER_BAKE_SIZE / 2;
 
+/** Lighting WU3 (design.md D2): ONE baked white radial-alpha texture, large
+ * enough that per-emitter downscaling (never upscaling past this) stays
+ * crisp. Every emitter reproduces its own radius/color/intensity purely via
+ * `Sprite.scale`/`.tint`/`.alpha` at the consumer (`scene.ts`'s
+ * `createLightScene`) — this bake never changes per emitter. */
+const GLOW_BAKE_RADIUS = 128;
+const GLOW_BAKE_SIZE = GLOW_BAKE_RADIUS * 2;
+const GLOW_CENTER = GLOW_BAKE_RADIUS;
+
 /**
  * Creates the Pixi `TextureProvider`. Caches one `Texture` per unique input
  * (spec "Texture Adapter Caching") so repeated colors/regions/glyphs never
@@ -122,6 +135,7 @@ export function createPixiTextureProvider(renderer: PixiRenderer): TextureProvid
   const regionCache = new Map<string, Texture>();
   const baseSources = new Map<CanvasImageSource, TextureSource>();
   let ringTexture: Texture | undefined;
+  let glowTexture: Texture | undefined;
 
   function baseSourceFor(image: CanvasImageSource): TextureSource {
     const cached = baseSources.get(image);
@@ -178,12 +192,38 @@ export function createPixiTextureProvider(renderer: PixiRenderer): TextureProvid
       created.add(texture);
       return texture;
     },
+    forGlow(): Texture {
+      if (glowTexture) return glowTexture;
+      const gradient = new FillGradient({
+        type: "radial",
+        center: { x: 0.5, y: 0.5 },
+        innerRadius: 0,
+        outerCenter: { x: 0.5, y: 0.5 },
+        outerRadius: 0.5,
+        colorStops: [
+          { offset: 0, color: "rgba(255,255,255,1)" },
+          { offset: 1, color: "rgba(255,255,255,0)" },
+        ],
+        textureSpace: "local",
+      });
+      const graphic = new Graphics().circle(GLOW_CENTER, GLOW_CENTER, GLOW_BAKE_RADIUS).fill(gradient);
+      const texture = renderer.generateTexture({ target: graphic, frame: new Rectangle(0, 0, GLOW_BAKE_SIZE, GLOW_BAKE_SIZE) });
+      graphic.destroy();
+      // Glow is a SOFT gradient, not pixel art — override the renderer-wide
+      // `nearest` default (renderer.ts:36) on just this one texture so
+      // per-emitter scaling doesn't band/pixelate.
+      texture.source.scaleMode = "linear";
+      glowTexture = texture;
+      created.add(texture);
+      return texture;
+    },
     destroy(): void {
       for (const texture of created) texture.destroy(true);
       created.clear();
       colorCache.clear();
       glyphCache.clear();
       ringTexture = undefined;
+      glowTexture = undefined;
       for (const texture of regionCache.values()) texture.destroy(false);
       regionCache.clear();
       for (const source of baseSources.values()) source.destroy();

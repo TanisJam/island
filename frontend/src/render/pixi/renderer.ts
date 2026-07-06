@@ -5,7 +5,7 @@ import type { Renderer } from "../renderer";
 import type { Frame } from "../../view/viewstate";
 import { cameraOffset } from "../camera";
 import { createPixiTextureProvider } from "./textures";
-import { createTileScene, createEntityScene, createPlayerScene, createFxScene } from "./scene";
+import { createTileScene, createLightScene, createEntityScene, createPlayerScene, createFxScene } from "./scene";
 
 /**
  * Pixi implementation of the unchanged `Renderer` interface (design.md SEAM
@@ -42,9 +42,16 @@ export async function createPixiRenderer(canvas: HTMLCanvasElement, assets: Asse
   const tileScene = createTileScene({ textures, assets });
   worldContainer.addChild(tileScene.container);
 
-  // Layer order (design.md D1): tile -> object -> pile -> item -> player ->
-  // fx. `entityScene.container` already enforces object/pile/item internally
-  // (see scene.ts); player lands on top here, fx lands on top of that.
+  // Lighting (design.md D1): additive light pools sit OVER terrain but
+  // UNDER entity/player sprites so they never wash out the art on top of
+  // them — inserted here, between tile and entity/pile/item.
+  const lightScene = createLightScene({ textures, assets });
+  worldContainer.addChild(lightScene.container);
+
+  // Layer order (design.md D1): tile -> light -> object -> pile -> item ->
+  // player -> fx. `entityScene.container` already enforces object/pile/item
+  // internally (see scene.ts); player lands on top here, fx lands on top of
+  // that.
   const entityScene = createEntityScene({ textures, assets });
   worldContainer.addChild(entityScene.container);
 
@@ -71,6 +78,7 @@ export async function createPixiRenderer(canvas: HTMLCanvasElement, assets: Asse
       worldContainer.x = Math.round(offset.ox);
       worldContainer.y = Math.round(offset.oy);
       tileScene.sync(frame);
+      lightScene.sync(frame);
       entityScene.sync(frame);
       playerScene.sync(frame);
       fxScene.sync(frame, selection, busy);
