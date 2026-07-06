@@ -1,4 +1,4 @@
-import { Application, Container } from "pixi.js";
+import { Application, Container, TextureSource } from "pixi.js";
 import type { Position } from "../../contract";
 import type { AssetResolver } from "../assets";
 import type { Renderer } from "../renderer";
@@ -26,6 +26,14 @@ import { createTileScene, createEntityScene, createPlayerScene, createFxScene } 
 export async function createPixiRenderer(canvas: HTMLCanvasElement, assets: AssetResolver): Promise<Renderer> {
   const app = new Application();
   await app.init({ canvas, backgroundAlpha: 1, antialias: false });
+
+  // Pixel-art crispness: Pixi v8 defaults every texture to `linear`
+  // filtering, which BLURS the pixel-art sprites AND bleeds neighbouring
+  // atlas texels across each region's frame edge (the visible seams between
+  // tiles). The whole game is pixel art, so switch the global default to
+  // `nearest` BEFORE any texture/source is created — the equivalent of the
+  // retired Canvas renderer's `imageSmoothingEnabled = false`.
+  TextureSource.defaultOptions.scaleMode = "nearest";
 
   const textures = createPixiTextureProvider(app.renderer);
   const worldContainer = new Container();
@@ -57,8 +65,11 @@ export async function createPixiRenderer(canvas: HTMLCanvasElement, assets: Asse
     render(frame: Frame, selection: Position | null, busy = false): void {
       if (destroyed) return;
       const offset = cameraOffset(frame, { width: app.renderer.width, height: app.renderer.height });
-      worldContainer.x = offset.ox;
-      worldContainer.y = offset.oy;
+      // Pixel-snap the world container to integer device pixels so the tile
+      // grid never straddles a sub-pixel boundary mid-tween — which would
+      // reintroduce 1px seams even with nearest filtering.
+      worldContainer.x = Math.round(offset.ox);
+      worldContainer.y = Math.round(offset.oy);
       tileScene.sync(frame);
       entityScene.sync(frame);
       playerScene.sync(frame);
