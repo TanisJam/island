@@ -14,9 +14,23 @@ export interface SpriteRegion {
 }
 
 /**
+ * An emitter's light pool, in renderer-agnostic units: `radius` is in TILE
+ * units (the Pixi layer scales it by its own `PX` constant — this module
+ * never imports Pixi or a pixel constant), `color` is a CSS hex string,
+ * `intensity` is a 0..1 alpha-ish factor consumed additively.
+ */
+export interface LightSpec {
+  radius: number;
+  color: string;
+  intensity: number;
+}
+
+/**
  * Everything the renderer needs to draw one visual, regardless of art
  * technology: `glyph`/`color` (emoji + flat fill) or `sprite` (tileset
- * region) — mutually exclusive per draw call (design.md SEAM 6).
+ * region) — mutually exclusive per draw call (design.md SEAM 6). `light` is
+ * independent of either — an OPTIONAL additive light pool an object-kind
+ * visual carries alongside its glyph/sprite (design.md D3).
  */
 export interface VisualDescriptor {
   glyph?: string;
@@ -24,6 +38,7 @@ export interface VisualDescriptor {
   sprite?: SpriteRegion;
   frames?: number;
   scale?: number;
+  light?: LightSpec;
 }
 
 export interface AssetResolver {
@@ -168,20 +183,47 @@ function objectGlyph(objectTypeId: string, state: Record<string, unknown>): stri
   return OBJECT_EMOJI[objectTypeId] ?? UNKNOWN_EMOJI;
 }
 
+/** The campfire's light is RUNTIME-driven (its `state.lit` fork) and BINARY
+ * in v1 — fuel never modulates radius/intensity (spec "Campfire Light
+ * Emission"). Warm/orange, the same "brasa" family as the selection ring and
+ * player halo tokens already used elsewhere in the renderer. */
+const WARM_CAMPFIRE_LIGHT: LightSpec = { radius: 3.5, color: "#f0a24e", intensity: 0.65 };
+
+/**
+ * Both light emitters in this spec are world-objects, so they share this ONE
+ * helper on the `case "object"` path (design.md D3): the campfire's light is
+ * CONDITIONAL on runtime `state.lit`, everything else's is STATIC, sourced
+ * from the catalog-driven `glowLookup` (keyed by world-object typeId) built
+ * once at boot from `catalog.worldObjects.filter(o => o.glow)`. Returns
+ * `undefined` for any object with neither — the overwhelming majority.
+ */
+function objectLight(
+  typeId: string,
+  state: Record<string, unknown>,
+  glowLookup: Map<string, LightSpec>,
+): LightSpec | undefined {
+  if (typeId === "campfire") return state?.["lit"] ? WARM_CAMPFIRE_LIGHT : undefined;
+  return glowLookup.get(typeId);
+}
+
 /**
  * Moves the OBJECT_EMOJI/ITEM_EMOJI/TERRAIN_COLORS maps and the campfire
  * lit/unlit branch out of `render/canvas.ts` verbatim (design.md "Asset
  * Resolver Behind a Function"). The `Renderer` calls `resolve` instead of
- * indexing a local table.
+ * indexing a local table. `glowLookup` (default empty) is the catalog-driven
+ * map from world-object typeId to its static `glow` (design.md D3) —
+ * threaded in from `game.ts` boot, never read directly by the renderer.
  */
-export function createEmojiAssets(): AssetResolver {
+export function createEmojiAssets(glowLookup: Map<string, LightSpec> = new Map()): AssetResolver {
   return {
     resolve(kind: VisualKind, typeId: string, state: Record<string, unknown> = {}): VisualDescriptor {
       switch (kind) {
         case "terrain":
           return { color: TERRAIN_COLORS[typeId] ?? FALLBACK_TERRAIN_COLOR };
-        case "object":
-          return { glyph: objectGlyph(typeId, state), scale: OBJECT_SCALE };
+        case "object": {
+          const light = objectLight(typeId, state, glowLookup);
+          return { glyph: objectGlyph(typeId, state), scale: OBJECT_SCALE, ...(light ? { light } : {}) };
+        }
         case "item":
           return { glyph: ITEM_EMOJI[typeId] ?? UNKNOWN_EMOJI, scale: ITEM_SCALE };
         case "pile":
@@ -198,16 +240,28 @@ export function createEmojiAssets(): AssetResolver {
  * region; anything unmapped (including all `pile`s, which never have an
  * atlas entry) delegates verbatim to the wrapped emoji resolver — no
  * duplicated glyph/color logic (spec "createSpriteAssets implements
- * AssetResolver unchanged").
+ * AssetResolver unchanged"). `case "object"` merges in the SAME
+ * `objectLight()` result the emoji path computes, regardless of whether the
+ * visual itself is drawn via sprite or glyph fallback — light is orthogonal
+ * to art technology.
  */
-export function createSpriteAssets(atlas: Atlas, image: CanvasImageSource): AssetResolver {
-  const fallback = createEmojiAssets();
+export function createSpriteAssets(
+  atlas: Atlas,
+  image: CanvasImageSource,
+  glowLookup: Map<string, LightSpec> = new Map(),
+): AssetResolver {
+  const fallback = createEmojiAssets(glowLookup);
   return {
     resolve(kind: VisualKind, typeId: string, state: Record<string, unknown> = {}): VisualDescriptor {
       if (kind === "pile") return fallback.resolve(kind, typeId, state);
       const region = lookupRegion(atlas, kind, typeId);
       if (!region) return fallback.resolve(kind, typeId, state);
-      return { sprite: { image, sx: region.x, sy: region.y, sw: region.w, sh: region.h } };
+      const sprite = { image, sx: region.x, sy: region.y, sw: region.w, sh: region.h };
+      if (kind === "object") {
+        const light = objectLight(typeId, state, glowLookup);
+        return { sprite, ...(light ? { light } : {}) };
+      }
+      return { sprite };
     },
   };
 }

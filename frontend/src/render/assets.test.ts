@@ -139,3 +139,51 @@ test("createSpriteAssets: campfire state (lit/unlit) still resolves via the wrap
   const assets = createSpriteAssets(fixtureAtlas(), FAKE_IMAGE);
   assert.equal(assets.resolve("object", "campfire", { lit: true }).glyph, "🔥");
 });
+
+// --- Light seam (design.md D3 / spec "Campfire Light Emission",
+// "Bioluminescent Mushroom Light Emission", "Renderer-Agnostic Light
+// Descriptor Seam") ---
+
+test("object: lit campfire resolves a warm light, unlit campfire has no light", () => {
+  const assets = createEmojiAssets();
+  const lit = assets.resolve("object", "campfire", { lit: true });
+  assert.ok(lit.light);
+  assert.equal(lit.light?.color, "#f0a24e");
+
+  const unlit = assets.resolve("object", "campfire", { lit: false });
+  assert.equal(unlit.light, undefined);
+  assert.equal(assets.resolve("object", "campfire").light, undefined);
+});
+
+test("object: a glowLookup-mapped typeId (mushroom) resolves its static light regardless of state", () => {
+  const glowLookup = new Map([["bioluminescent_mushroom", { radius: 2, color: "#7fe0c9", intensity: 0.55 }]]);
+  const assets = createEmojiAssets(glowLookup);
+  const visual = assets.resolve("object", "bioluminescent_mushroom");
+  assert.deepEqual(visual.light, { radius: 2, color: "#7fe0c9", intensity: 0.55 });
+});
+
+test("object: a typeId absent from glowLookup and not campfire has no light", () => {
+  const glowLookup = new Map([["bioluminescent_mushroom", { radius: 2, color: "#7fe0c9", intensity: 0.55 }]]);
+  const assets = createEmojiAssets(glowLookup);
+  assert.equal(assets.resolve("object", "tree").light, undefined);
+});
+
+test("createSpriteAssets: object case merges the same light regardless of sprite vs glyph fallback", () => {
+  const glowLookup = new Map([["bioluminescent_mushroom", { radius: 2, color: "#7fe0c9", intensity: 0.55 }]]);
+  const assets = createSpriteAssets(fixtureAtlas(), FAKE_IMAGE, glowLookup);
+
+  // "tree" is mapped in the fixture atlas (sprite path) and carries no glow.
+  assert.equal(assets.resolve("object", "tree").light, undefined);
+
+  // "bioluminescent_mushroom" is unmapped (falls back to emoji path) but IS
+  // in glowLookup — light must still resolve.
+  assert.deepEqual(assets.resolve("object", "bioluminescent_mushroom").light, {
+    radius: 2,
+    color: "#7fe0c9",
+    intensity: 0.55,
+  });
+
+  // Campfire lit, unmapped in the fixture atlas — light resolves via the
+  // wrapped emoji fallback's campfire branch.
+  assert.ok(assets.resolve("object", "campfire", { lit: true }).light);
+});

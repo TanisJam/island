@@ -7,7 +7,7 @@ import { buildSnapshot } from "../state/snapshot";
 import { createStore } from "../state/store";
 import { createViewState } from "../view/viewstate";
 import { createEmojiAssets, createSpriteAssets, parseAtlas } from "../render/assets";
-import type { AssetResolver } from "../render/assets";
+import type { AssetResolver, LightSpec } from "../render/assets";
 import { createPixiRenderer } from "../render/pixi/renderer";
 import type { Renderer } from "../render/renderer";
 import { canvasToTile, createInputController } from "../input/mouse";
@@ -70,13 +70,16 @@ function loadTilesetImage(src: string): Promise<CanvasImageSource> {
  * `fallback` — never rejects, never throws (spec "Missing atlas or image
  * degrades to emoji, does not crash boot"; design.md "Boot failure").
  */
-export async function loadSpriteAssets(fallback: AssetResolver): Promise<AssetResolver> {
+export async function loadSpriteAssets(
+  fallback: AssetResolver,
+  glowLookup: Map<string, LightSpec> = new Map(),
+): Promise<AssetResolver> {
   try {
     const res = await fetch("/atlas.json");
     if (!res.ok) return fallback;
     const atlas = parseAtlas(await res.json());
     const image = await loadTilesetImage(`/${atlas.image}`);
-    return createSpriteAssets(atlas, image);
+    return createSpriteAssets(atlas, image, glowLookup);
   } catch {
     return fallback;
   }
@@ -95,11 +98,20 @@ export function createGame(deps: GameDeps): Game {
   async function start(): Promise<void> {
     stopped = false;
 
-    const [catalog, zone, player, assets] = await Promise.all([
-      fetchCatalog(),
+    // Catalog is fetched first (not in the `Promise.all` below) because the
+    // light seam needs it: `glowLookup` — the catalog-driven map from
+    // world-object typeId to its static `glow` (design.md D3) — must exist
+    // BEFORE `loadSpriteAssets` builds either resolver, so both the
+    // emoji-fallback and sprite paths carry it from the start.
+    const catalog = await fetchCatalog();
+    const glowLookup = new Map<string, LightSpec>(
+      catalog.worldObjects.filter((o): o is typeof o & { glow: LightSpec } => Boolean(o.glow)).map((o) => [o.id, o.glow]),
+    );
+
+    const [zone, player, assets] = await Promise.all([
       fetchZone(ZONE_ID),
       fetchPlayerState(PLAYER_ID),
-      loadSpriteAssets(createEmojiAssets()),
+      loadSpriteAssets(createEmojiAssets(glowLookup), glowLookup),
     ]);
     const snapshot = buildSnapshot(zone, player);
 
