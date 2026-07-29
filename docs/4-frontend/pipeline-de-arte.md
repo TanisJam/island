@@ -125,6 +125,36 @@ movimiento decorativo constante.
 - **Variantes por estado**: sufijo (`campfire__lit`, `campfire__unlit`).
 - **Formato**: PNG con transparencia; un JSON de atlas (mapa `sprite → {x,y,w,h,frames}`).
 
+### 7.1 Resolución de variantes por estado (implementado)
+
+`stateVariantId(typeId, state)` en `frontend/src/render/assets.ts` construye la clave
+sufijada a partir del estado **booleano** `lit` del catálogo — no de una lista de `typeId`
+hardcodeada, así que cualquier objeto encendible futuro (antorcha, farol) hereda variantes
+sin tocar código. `createSpriteAssets` busca la región variante primero y **cae** a la
+región plana del `typeId`. Esa caída es la que mantiene la retrocompatibilidad: un atlas
+que no define la variante renderiza exactamente como antes.
+
+Nota de herramienta: el panel de texturas del items-editor lista los `typeId` del catálogo,
+así que una clave con sufijo **no aparece como entrada seleccionable**. Se agrega a mano en
+`frontend/public/atlas.json` (el servidor sí acepta la clave: `plan-atlas-save.ts` solo
+rechaza las de contaminación de prototipo).
+
+### 7.2 Adiciones propias al tileset
+
+`spring_outdoorsTileSheet..png` es arte de terceros y **no trae nada de fuego** (se revisó
+la hoja completa, 25×79 tiles). Las adiciones propias van en filas **agregadas al final**
+de la hoja, nunca pisando arte existente, para que las coordenadas de todas las regiones ya
+mapeadas queden intactas.
+
+| Región | Coords | Origen |
+|--------|--------|--------|
+| `object.campfire__lit` | `(0, 1264, 16, 16)` | Propia. Aro de piedras de `campfire` `(272,144)` sin tocar + llama dibujada encima. |
+
+La llama usa la brasa `#f0a24e` como tono medio a propósito: comparte el hue exacto del pool
+de luz que ese mismo objeto emite (`WARM_CAMPFIRE_LIGHT`), así arte y luz se leen como una
+sola cosa. Es la excepción deliberada a la reserva de la brasa descrita en §3 — no es arte de
+mundo neutro, es el emisor mismo.
+
 ---
 
 ## 8. Estrategia de producción

@@ -127,6 +127,30 @@ export function lookupRegion(atlas: Atlas, kind: AtlasKind, typeId: string): Atl
   return atlas[kind]?.[typeId] ?? null;
 }
 
+/**
+ * State-variant atlas key, per the art pipeline's naming convention
+ * (`docs/4-frontend/pipeline-de-arte.md` §7 — "Variantes por estado: sufijo
+ * (`campfire__lit`, `campfire__unlit`)").
+ *
+ * Keyed on the catalog's own boolean `lit` state rather than on a hardcoded
+ * `typeId` list, so any future lightable object (torch, lantern) picks up its
+ * variant art for free. Returns `null` when the entity has no `lit` state,
+ * which is the overwhelming majority.
+ *
+ * NOTE this only names the key. The atlas is free not to define it — the
+ * caller falls back to the plain `typeId` region, which is exactly the state
+ * of the world today: `frontend/public/atlas.json` has a single `campfire`
+ * region and the source tilesheet ships no lit-campfire frame at all, so a
+ * burning campfire currently draws the same stone ring as a cold one. Adding
+ * a `campfire__lit` region (by hand or via the atlas editor) is the ONLY step
+ * needed to fix that — no code change.
+ */
+export function stateVariantId(typeId: string, state: Record<string, unknown>): string | null {
+  const lit = state["lit"];
+  if (typeof lit !== "boolean") return null;
+  return `${typeId}__${lit ? "lit" : "unlit"}`;
+}
+
 // MVP sin sprites: los emojis funcionan como stand-in de arte. Moved verbatim
 // from render/canvas.ts (design.md File Changes — "emoji/color maps removed").
 //
@@ -254,7 +278,12 @@ export function createSpriteAssets(
   return {
     resolve(kind: VisualKind, typeId: string, state: Record<string, unknown> = {}): VisualDescriptor {
       if (kind === "pile") return fallback.resolve(kind, typeId, state);
-      const region = lookupRegion(atlas, kind, typeId);
+      // State-variant region first (`campfire__lit`), plain `typeId` second.
+      // The fallback chain is what keeps this backwards compatible: an atlas
+      // that defines no variant keeps rendering exactly as it did before.
+      const variantId = stateVariantId(typeId, state);
+      const region =
+        (variantId ? lookupRegion(atlas, kind, variantId) : null) ?? lookupRegion(atlas, kind, typeId);
       if (!region) return fallback.resolve(kind, typeId, state);
       const sprite = { image, sx: region.x, sy: region.y, sw: region.w, sh: region.h };
       if (kind === "object") {

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createEmojiAssets, createSpriteAssets, lookupRegion, parseAtlas, type Atlas } from "./assets";
+import { createEmojiAssets, createSpriteAssets, lookupRegion, parseAtlas, stateVariantId, type Atlas } from "./assets";
 
 test("object: campfire lit=true resolves to the fire glyph", () => {
   const assets = createEmojiAssets();
@@ -138,6 +138,57 @@ test("createSpriteAssets: pile always delegates to the emoji resolver — atlas 
 test("createSpriteAssets: campfire state (lit/unlit) still resolves via the wrapped emoji resolver when unmapped", () => {
   const assets = createSpriteAssets(fixtureAtlas(), FAKE_IMAGE);
   assert.equal(assets.resolve("object", "campfire", { lit: true }).glyph, "🔥");
+});
+
+// --- State-variant atlas keys (pipeline-de-arte.md §7 suffix convention) ---
+
+const CAMPFIRE_PLAIN = { x: 272, y: 144, w: 16, h: 16 };
+const CAMPFIRE_LIT = { x: 272, y: 160, w: 16, h: 16 };
+
+function variantAtlas(withLitRegion: boolean): Atlas {
+  const atlas = fixtureAtlas();
+  atlas.object = {
+    ...atlas.object,
+    campfire: CAMPFIRE_PLAIN,
+    ...(withLitRegion ? { campfire__lit: CAMPFIRE_LIT } : {}),
+  };
+  return atlas;
+}
+
+test("stateVariantId: suffixes on the boolean `lit` state, null for everything else", () => {
+  assert.equal(stateVariantId("campfire", { lit: true }), "campfire__lit");
+  assert.equal(stateVariantId("campfire", { lit: false }), "campfire__unlit");
+  assert.equal(stateVariantId("campfire", {}), null);
+  // Not keyed on typeId: any future lightable object gets variants for free.
+  assert.equal(stateVariantId("lantern", { lit: true }), "lantern__lit");
+  // A non-boolean `lit` is not a state variant — no accidental "undefined" keys.
+  assert.equal(stateVariantId("campfire", { lit: "yes" }), null);
+});
+
+test("createSpriteAssets: a lit campfire prefers the `campfire__lit` region when the atlas defines it", () => {
+  const assets = createSpriteAssets(variantAtlas(true), FAKE_IMAGE);
+  const visual = assets.resolve("object", "campfire", { lit: true });
+  assert.deepEqual(visual.sprite, { image: FAKE_IMAGE, sx: CAMPFIRE_LIT.x, sy: CAMPFIRE_LIT.y, sw: 16, sh: 16 });
+});
+
+test("createSpriteAssets: an unlit campfire falls back to the plain region when only `__lit` is defined", () => {
+  const assets = createSpriteAssets(variantAtlas(true), FAKE_IMAGE);
+  const visual = assets.resolve("object", "campfire", { lit: false });
+  assert.deepEqual(visual.sprite, { image: FAKE_IMAGE, sx: CAMPFIRE_PLAIN.x, sy: CAMPFIRE_PLAIN.y, sw: 16, sh: 16 });
+});
+
+test("createSpriteAssets: with NO variant region defined, lit and unlit resolve identically — today's atlas, unchanged behaviour", () => {
+  const assets = createSpriteAssets(variantAtlas(false), FAKE_IMAGE);
+  const lit = assets.resolve("object", "campfire", { lit: true });
+  const unlit = assets.resolve("object", "campfire", { lit: false });
+  assert.deepEqual(lit.sprite, unlit.sprite);
+  assert.deepEqual(lit.sprite, { image: FAKE_IMAGE, sx: CAMPFIRE_PLAIN.x, sy: CAMPFIRE_PLAIN.y, sw: 16, sh: 16 });
+});
+
+test("createSpriteAssets: the state-variant region does not disturb the light seam — a lit campfire still emits", () => {
+  const assets = createSpriteAssets(variantAtlas(true), FAKE_IMAGE);
+  assert.ok(assets.resolve("object", "campfire", { lit: true }).light, "lit campfire must still emit light");
+  assert.equal(assets.resolve("object", "campfire", { lit: false }).light, undefined);
 });
 
 // --- Light seam (design.md D3 / spec "Campfire Light Emission",
