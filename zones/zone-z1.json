@@ -245,6 +245,11 @@
       "objectTypeId": "bioluminescent_mushroom",
       "x": 9,
       "y": 9
+    },
+    {
+      "objectTypeId": "campfire",
+      "x": 7,
+      "y": 9
     }
   ]
 }

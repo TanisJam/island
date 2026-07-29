@@ -108,6 +108,16 @@ test("seedState(template): matches the pre-migration procedural seed (tiles/obje
   const mushroom = s.objects.find((o) => o.objectTypeId === "bioluminescent_mushroom");
   assert.ok(mushroom, "expected a bioluminescent_mushroom world object");
   assert.deepEqual(mushroom!.position, { x: 9, y: 9 });
+
+  // --- SDD "lighting" follow-up: campfire seeded adjacent to spawn, UNLIT. ---
+  // It ships unlit on purpose: `light_campfire` is the game's first progression
+  // beat, so seeding it lit would skip that. The placement exists so the
+  // campfire's runtime warm light (`state.lit` fork in the renderer's
+  // objectLight seam) has a live subject to exercise in zone z1.
+  const campfire = s.objects.find((o) => o.objectTypeId === "campfire");
+  assert.ok(campfire, "expected a campfire world object");
+  assert.deepEqual(campfire!.position, { x: 7, y: 9 });
+  assert.deepEqual(campfire!.state, { lit: false, fuel: 0 }, "campfire must seed unlit");
 });
 
 // --- Fail-fast guards ---
